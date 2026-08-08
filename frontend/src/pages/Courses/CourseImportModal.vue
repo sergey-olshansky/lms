@@ -1,5 +1,5 @@
 <template>
-	<Dialog v-model:open="show" title="Import Course from ZIP">
+	<Dialog v-model:open="show" :title="__('Import Course from ZIP')">
 		<template #default>
 			<div class="text-p-base">
 				<div

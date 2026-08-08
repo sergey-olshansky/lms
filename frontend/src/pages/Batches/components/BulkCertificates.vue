@@ -1,11 +1,11 @@
 <template>
 	<Dialog
 		v-model:open="show"
-		title="Generate Certificates"
+		:title="__('Generate Certificates')"
 		size="lg"
 		:actions="[
 			{
-				label: 'Create',
+				label: __('Create'),
 				variant: 'solid',
 				onClick: ({ close }) => {
 					generateCertificates(close)

@@ -1,5 +1,5 @@
 <template>
-	<Dialog v-model:open="show" title="Enroll a Student" size="xl">
+	<Dialog v-model:open="show" :title="__('Enroll a Student')" size="xl">
 		<template #default>
 			<div class="space-y-4">
 				<FormControl

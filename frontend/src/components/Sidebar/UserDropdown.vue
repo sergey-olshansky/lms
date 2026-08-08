@@ -37,7 +37,7 @@
 							>
 								{{ branding.data?.app_name }}
 							</span>
-							<span v-else> Learning </span>
+							<span v-else> {{ __('Learning') }} </span>
 						</div>
 						<div
 							v-if="userResource.data"

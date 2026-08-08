@@ -121,7 +121,7 @@
 						subtitle: __('Progress of students in courses and assessments'),
 						xAxis: {
 							key: 'task',
-							title: 'Tasks',
+							title: __('Tasks'),
 							type: 'category',
 						},
 						yAxis: {

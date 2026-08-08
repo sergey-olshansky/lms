@@ -1,11 +1,11 @@
 <template>
 	<Dialog
 		v-model:open="show"
-		title="Make an Announcement"
+		:title="__('Make an Announcement')"
 		size="xl"
 		:actions="[
 			{
-				label: 'Submit',
+				label: __('Submit'),
 				variant: 'solid',
 				onClick: ({ close }) => makeAnnouncement(close),
 			},

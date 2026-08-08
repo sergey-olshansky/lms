@@ -237,7 +237,7 @@ const leaveTo = async (route, persist) => {
 
 usePageMeta(() => {
 	return {
-		title: 'Persona',
+		title: __('Persona'),
 		icon: brand.favicon,
 	}
 })
