@@ -1,6 +1,8 @@
 // Nav taxonomy for the phone layout: which destinations stay on the fixed
 // bottom bar, and how the rest are grouped inside the More sheet.
 
+import { isSidebarItemHidden } from '@/customization/sidebar'
+
 export interface NavLink {
 	label: string
 	icon: string
@@ -177,12 +179,17 @@ export function pickPrimaryTabs(
 		// survives, because it leaves the SPA for Frappe's own /login and is the
 		// one thing such a visitor can still do.
 		if (isGuestAccessRevoked(visibility))
-			return GUEST_TABS.filter((tab) => !tab.to)
-		return GUEST_TABS.filter((tab) => isLinkEnabled(tab.label, visibility))
+		return GUEST_TABS.filter((tab) => !tab.to && !isSidebarItemHidden(tab.label))
+		return GUEST_TABS.filter(
+			(tab) =>
+				!isSidebarItemHidden(tab.label) &&
+				isLinkEnabled(tab.label, visibility)
+		)
 	}
 
 	const picked: NavLink[] = []
 	for (const label of PRIMARY_LABELS) {
+		if (isSidebarItemHidden(label)) continue
 		const link = sidebarLinks.find((item) => item.label === label)
 		if (link) picked.push(link)
 	}
@@ -207,6 +214,7 @@ export function buildMenuSections(
 	const items: NavLink[] = []
 
 	for (const link of [...sidebarLinks, ...otherLinks]) {
+		if (isSidebarItemHidden(link.label)) continue
 		if (primary.has(link.label) || seen.has(link.label)) continue
 		seen.add(link.label)
 		items.push(link)

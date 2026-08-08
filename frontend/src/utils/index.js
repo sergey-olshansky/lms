@@ -25,6 +25,7 @@ import Embed from '@editorjs/embed'
 import SimpleImage from '@editorjs/simple-image'
 import Table from '@editorjs/table'
 import DOMPurify from 'dompurify'
+import { isSidebarItemHidden } from '@/customization/sidebar'
 
 const readOnlyMode = window.read_only_mode
 
@@ -478,6 +479,7 @@ export function getSidebarLinks(forMobile = false) {
 
 	links.forEach((link) => {
 		link.items = link.items.filter((item) => {
+			if (isSidebarItemHidden(item.label)) return false
 			return item.condition ? item.condition() : true
 		})
 	})

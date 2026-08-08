@@ -151,6 +151,7 @@ import * as icons from 'lucide-vue-next'
 import { toggleNotifications } from '@/stores/notifications'
 import BottomSheet from '@/components/BottomSheet.vue'
 import SettingsModal from '@/components/Settings/Settings.vue'
+import { isSidebarItemHidden } from '@/customization/sidebar'
 import {
 	buildMenuSections,
 	hasMoreTab,
@@ -222,6 +223,7 @@ const addOtherLinks = () => {
 }
 
 const addLink = (label, icon, to = '') => {
+	if (isSidebarItemHidden(label)) return
 	if (otherLinks.value.some((link) => link.label === label)) return
 	otherLinks.value.push({
 		label: label,

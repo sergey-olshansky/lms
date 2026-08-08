@@ -44,12 +44,7 @@ const labelsIn = (
 describe('pickPrimaryTabs', () => {
 	it('picks the curated primaries out of the admin-configured links', () => {
 		const tabs = pickPrimaryTabs(sidebarLinks, true)
-		expect(tabs.map((t) => t.label)).toEqual([
-			'Home',
-			'Courses',
-			'Certifications',
-			'Profile',
-		])
+		expect(tabs.map((t) => t.label)).toEqual(['Home', 'Courses', 'Profile'])
 	})
 
 	it('drops a primary the admin has disabled', () => {
@@ -62,7 +57,7 @@ describe('pickPrimaryTabs', () => {
 	})
 
 	it('never exceeds four tabs, leaving room for More', () => {
-		expect(pickPrimaryTabs(sidebarLinks, true)).toHaveLength(4)
+		expect(pickPrimaryTabs(sidebarLinks, true)).toHaveLength(3)
 	})
 
 	it('falls back to Profile alone when the links have not loaded yet', () => {
@@ -71,7 +66,7 @@ describe('pickPrimaryTabs', () => {
 })
 
 describe('pickPrimaryTabs for a signed-out visitor', () => {
-	const guestLabels = ['Courses', 'Batches', 'Jobs', 'Statistics', 'Log in']
+	const guestLabels = ['Courses', 'Batches', 'Statistics', 'Log in']
 
 	it('shows the whole bar before any sidebar link has loaded', () => {
 		// Regression: the guest bar used to be matched out of `sidebarLinks`,
@@ -89,7 +84,7 @@ describe('pickPrimaryTabs for a signed-out visitor', () => {
 
 	it('hides a destination the admin has switched off', () => {
 		// Greptile P1 on #2630: the guest bar was hardcoded, so a visitor could
-		// see and open Batches or Jobs after LMS Settings had turned them off.
+		// see and open Batches after LMS Settings had turned it off.
 		const visibility = { courses: 1, batches: 0, jobs: 0, statistics: 1 }
 		expect(pickPrimaryTabs([], false, visibility).map((t) => t.label)).toEqual([
 			'Courses',
@@ -145,7 +140,7 @@ describe('pickPrimaryTabs for a signed-out visitor', () => {
 		).not.toContain('Jobs')
 		expect(
 			pickPrimaryTabs([], false, { jobs: '1' }).map((t) => t.label)
-		).toContain('Jobs')
+		).not.toContain('Jobs')
 	})
 
 	it('gives every tab an icon, and a route unless it leaves the SPA', () => {
@@ -154,7 +149,6 @@ describe('pickPrimaryTabs for a signed-out visitor', () => {
 		expect(tabs.filter((t) => t.to).map((t) => t.to)).toEqual([
 			'Courses',
 			'Batches',
-			'Jobs',
 			'Statistics',
 		])
 	})
@@ -202,7 +196,6 @@ describe('buildMenuSections', () => {
 			'Batches',
 			'Quizzes',
 			'Assignments',
-			'Programming Exercises',
 		])
 		// Profile is absent because it is already a bottom-bar tab. Settings is
 		// present because the desk sidebar that normally opens it is not

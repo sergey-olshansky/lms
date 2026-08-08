@@ -190,7 +190,10 @@
 							@click="redirectToAppointmentScreen()"
 						/>
 					</Tooltip>
-					<Tooltip v-if="showOnboarding" :text="__('Help')">
+					<Tooltip
+						v-if="SHOW_SIDEBAR_HELP && showOnboarding"
+						:text="__('Help')"
+					>
 						<span
 							class="lucide-circle-help size-4 text-ink-gray-7 cursor-pointer"
 							@click="
@@ -201,7 +204,10 @@
 							"
 						/>
 					</Tooltip>
-					<Tooltip :text="__('Powered by Frappe Learning')">
+					<Tooltip
+						v-if="SHOW_FRAPPE_ATTRIBUTION"
+						:text="__('Powered by Frappe Learning')"
+					>
 						<span
 							class="lucide-zap size-4 text-ink-gray-7 cursor-pointer"
 							@click="redirectToWebsite()"
@@ -298,6 +304,10 @@ import UserDropdown from '@/components/Sidebar/UserDropdown.vue'
 import CollapseSidebar from '@/components/Icons/CollapseSidebar.vue'
 import SidebarLink from '@/components/Sidebar/SidebarLink.vue'
 import CommandPalette from '@/components/CommandPalette/CommandPalette.vue'
+import {
+	SHOW_FRAPPE_ATTRIBUTION,
+	SHOW_SIDEBAR_HELP,
+} from '@/customization/sidebar'
 
 const { user } = sessionStore()
 const { userResource } = usersStore()
