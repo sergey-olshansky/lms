@@ -1,4 +1,4 @@
-#!bin/bash
+#!/bin/bash
 
 if [ -d "/home/frappe/frappe-bench/apps/frappe" ]; then
     echo "Bench already exists, skipping init"
@@ -25,7 +25,7 @@ sed -i '/redis/d' ./Procfile
 sed -i '/watch/d' ./Procfile
 
 bench get-app payments
-bench get-app lms
+bench get-app file:///workspace/lms
 
 bench new-site lms.localhost \
 --force \
@@ -39,4 +39,5 @@ bench --site lms.localhost set-config developer_mode 1
 bench --site lms.localhost clear-cache
 bench use lms.localhost
 
+sed -i 's/bench serve --port 8000/bench serve --port 8000 --host 0.0.0.0/' Procfile
 bench start
