@@ -16,7 +16,6 @@ dependencies = [
     "cairocffi==1.5.1",
     "fuzzywuzzy~=0.18.0",
     "pdfplumber~=0.11.0",
-    "Pillow~=10.0",
 ]
 
 [build-system]
