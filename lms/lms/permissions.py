@@ -21,6 +21,8 @@ from lms.lms.utils import (
 
 # File fields that hold instructor-only lesson media (never served to students).
 INSTRUCTOR_FIELDS = {"instructor_content", "instructor_notes"}
+CHEMEDGE_SOURCE_PDF_FIELD = "chemedge_source_pdf"
+CHEMEDGE_TASK_IMAGE_FIELD = "chemedge_task_image"
 
 
 def resolve_lesson_access(lesson: str, *, user: str | None = None) -> tuple[bool, bool]:
@@ -150,6 +152,18 @@ def file_has_permission(doc, ptype="read", user=None):
 	orphaned instructor file.
 	"""
 	user = user or frappe.session.user
+	if doc.attached_to_doctype == "LMS Quiz" and doc.attached_to_field == CHEMEDGE_SOURCE_PDF_FIELD:
+		quiz_owner = frappe.db.get_value("LMS Quiz", doc.attached_to_name, "owner")
+		return bool(
+			quiz_owner
+			and (
+				quiz_owner == user
+				or frappe.db.exists("Has Role", {"parent": user, "role": "System Manager"})
+				or has_moderator_role(user)
+			)
+		)
+	if doc.attached_to_doctype == "LMS Quiz" and doc.attached_to_field == CHEMEDGE_TASK_IMAGE_FIELD:
+		return user != "Guest"
 
 	if doc.attached_to_doctype != "Course Lesson":
 		return True

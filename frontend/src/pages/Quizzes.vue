@@ -15,6 +15,12 @@
 		@load-more="quizzes.next()"
 	>
 		<template #actions>
+			<Button v-if="!readOnlyMode" variant="outline" @click="showChemedgeImport = true">
+				<template #prefix>
+					<span class="lucide-file-up size-4" />
+				</template>
+				Import Chemedge PDF Trainer
+			</Button>
 			<Button v-if="!readOnlyMode" variant="solid" @click="createQuiz">
 				<template #prefix>
 					<span class="lucide-plus size-4" />
@@ -58,6 +64,7 @@
 			</Button>
 		</template>
 	</ListPage>
+	<ImportChemedgePdfTrainerModal v-model="showChemedgeImport" />
 </template>
 <script setup>
 import {
@@ -70,6 +77,7 @@ import {
 	usePageMeta,
 } from 'frappe-ui'
 import ListPage from '@/components/Layouts/ListPage.vue'
+import ImportChemedgePdfTrainerModal from '@/components/Modals/ImportChemedgePdfTrainerModal.vue'
 import { useRouter } from 'vue-router'
 import { computed, inject, onMounted, ref, watch } from 'vue'
 
@@ -84,6 +92,7 @@ const router = useRouter()
 const search = ref('')
 const readOnlyMode = window.read_only_mode
 const quizFilters = ref({})
+const showChemedgeImport = ref(false)
 
 onMounted(() => {
 	if (

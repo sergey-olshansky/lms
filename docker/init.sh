@@ -39,5 +39,5 @@ bench --site lms.localhost set-config developer_mode 1
 bench --site lms.localhost clear-cache
 bench use lms.localhost
 
-sed -i 's/bench serve --port 8000/bench serve --port 8000 --host 0.0.0.0/' Procfile
+sed -i 's#bench serve.*--port 8000.*#bench serve --port 8000 --host 0.0.0.0#' Procfile
 bench start
