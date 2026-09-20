@@ -446,12 +446,14 @@ def find_tasks(pdf: Any) -> list[dict[str, Any]]:
     return tasks
 
 
-def find_answer_page_start(pdf: Any, last_task_page_index: int) -> int:
-    for page_index in range(last_task_page_index + 1, len(pdf.pages)):
-        page = pdf.pages[page_index]
+def find_answer_page_starts(pdf: Any) -> list[int]:
+    """Locate every page headed ``Ответы`` in a compiled trainer PDF."""
+    answer_pages: list[int] = []
+    for page_index, page in enumerate(pdf.pages):
         text = page.extract_text(x_tolerance=2, y_tolerance=3) or ""
         if re.search(r"(?im)^\s*Ответы\s*$", text):
-            return page_index
+            answer_pages.append(page_index)
+            continue
 
         # In some Word-generated PDFs the answer heading overlaps the blue
         # repeating page header.  The general text extractor then merges the
@@ -468,13 +470,22 @@ def find_answer_page_start(pdf: Any, last_task_page_index: int) -> int:
             join_chars(cluster) == "Ответы"
             for cluster in cluster_by_top(bold_chars, tolerance=1.5)
         ):
+            answer_pages.append(page_index)
+    return answer_pages
+
+
+def find_answer_page_start(pdf: Any, last_task_page_index: int) -> int:
+    for page_index in find_answer_page_starts(pdf):
+        if page_index > last_task_page_index:
             return page_index
     raise FormatError("No answer section headed 'Ответы' was found after the tasks")
 
 
-def find_answers(pdf: Any, first_page_index: int) -> dict[int, dict[str, Any]]:
+def find_answers(
+    pdf: Any, first_page_index: int, last_page_index: int | None = None
+) -> dict[int, dict[str, Any]]:
     answers: dict[int, dict[str, Any]] = {}
-    for page_index in range(first_page_index, len(pdf.pages)):
+    for page_index in range(first_page_index, last_page_index or len(pdf.pages)):
         page = pdf.pages[page_index]
         words = page.extract_words(
             x_tolerance=2,
@@ -702,6 +713,86 @@ def validate_format(
         {number for number in numbers if numbers.count(number) > 1}
     )
     last_task_page_index = max(task["page_index"] for task in tasks)
+    answer_page_starts = find_answer_page_starts(pdf)
+
+    # A downloaded collection can concatenate several complete trainers. Each
+    # part restarts the visible task numbering and has its own answer page.
+    # Resolve answers within the page range of each part rather than treating
+    # identical task numbers in later parts as duplicate tasks.
+    if any(page_index < last_task_page_index for page_index in answer_page_starts):
+        answers: dict[str, dict[str, Any]] = {}
+        previous_answer_page = -1
+        for answer_index, answer_page_start in enumerate(answer_page_starts):
+            section_tasks = [
+                task
+                for task in tasks
+                if previous_answer_page < task["page_index"] < answer_page_start
+            ]
+            previous_answer_page = answer_page_start
+            if not section_tasks:
+                continue
+
+            next_task_page = next(
+                (
+                    task["page_index"]
+                    for task in tasks
+                    if task["page_index"] > answer_page_start
+                ),
+                len(pdf.pages),
+            )
+            numbered_answers = find_answers(pdf, answer_page_start, next_task_page)
+            section_numbers = {task["number"] for task in section_tasks}
+            missing = sorted(section_numbers - set(numbered_answers))
+            extra = sorted(set(numbered_answers) - section_numbers)
+            if missing:
+                raise FormatError(
+                    "Task/answer mismatch in compiled section; "
+                    f"missing answers={missing}"
+                )
+            if extra:
+                validation_warnings.append(
+                    f"Ignored answers without a matching task: {extra}"
+                )
+
+            task_ids_by_number = {
+                task["number"]: task["id"] for task in section_tasks
+            }
+            mismatched_ids = [
+                number
+                for number, answer in sorted(numbered_answers.items())
+                if answer.get("task_id")
+                and str(answer["task_id"]).lower()
+                != str(task_ids_by_number[number]).lower()
+            ]
+            if mismatched_ids:
+                raise FormatError(
+                    "Task IDs in the answer table do not match the task pages: "
+                    f"{mismatched_ids}"
+                )
+            answers.update(
+                {
+                    task["key"]: numbered_answers[task["number"]]
+                    for task in section_tasks
+                }
+            )
+
+        unanswered_tasks = [task for task in tasks if task["key"] not in answers]
+        if unanswered_tasks:
+            raise FormatError(
+                "No answer section was found for compiled task pages: "
+                f"{sorted({task['page_number'] for task in unanswered_tasks})}"
+            )
+        answer_page_start = answer_page_starts[0]
+        validation_warnings.append("Answers were read from separate compiled trainer sections")
+        return (
+            header,
+            header_lines,
+            tasks,
+            answers,
+            answer_page_start,
+            validation_warnings,
+        )
+
     try:
         answer_page_start = find_answer_page_start(pdf, last_task_page_index)
     except FormatError as exc:
