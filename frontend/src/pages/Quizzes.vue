@@ -79,7 +79,7 @@ import {
 import ListPage from '@/components/Layouts/ListPage.vue'
 import ImportChemedgePdfTrainerModal from '@/components/Modals/ImportChemedgePdfTrainerModal.vue'
 import { useRouter } from 'vue-router'
-import { computed, inject, onMounted, ref, watch } from 'vue'
+import { computed, getCurrentInstance, inject, onMounted, ref, watch } from 'vue'
 
 import { sessionStore } from '@/stores/session'
 import { useTelemetry } from 'frappe-ui/frappe'
@@ -93,6 +93,7 @@ const search = ref('')
 const readOnlyMode = window.read_only_mode
 const quizFilters = ref({})
 const showChemedgeImport = ref(false)
+const { $dialog } = getCurrentInstance().appContext.config.globalProperties
 
 onMounted(() => {
 	if (
@@ -199,11 +200,44 @@ const createQuiz = () => {
 }
 
 const deleteQuiz = (selections, unselectAll) => {
-	Array.from(selections).forEach(async (quizName) => {
-		await quizzes.delete.submit(quizName)
+	const quizNames = Array.from(selections)
+	if (!quizNames.length) return
+
+	$dialog({
+		title: __('Delete selected quizzes?'),
+		message: __('Deleting quizzes permanently removes them and their submissions. This action cannot be undone.'),
+		actions: [
+			{
+				label: __('Delete'),
+				theme: 'red',
+				variant: 'solid',
+				async onClick({ close }) {
+					const failed = []
+					for (const quizName of quizNames) {
+						try {
+							await quizzes.delete.submit(quizName)
+						} catch (error) {
+							failed.push(error)
+						}
+					}
+
+					unselectAll()
+					await Promise.all([quizzes.reload(), totalQuizzes.reload()])
+					if (!failed.length) {
+						toast.success(__('Quizzes deleted successfully'))
+					} else {
+						const error = failed[0]
+						toast.error(
+							error?.messages?.[0] ||
+							error?.message ||
+							__('Could not delete one or more quizzes')
+						)
+					}
+					close()
+				},
+			},
+		],
 	})
-	unselectAll()
-	toast.success(__('Quizzes deleted successfully'))
 }
 
 const quizColumns = computed(() => {
