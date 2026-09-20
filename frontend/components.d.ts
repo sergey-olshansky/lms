@@ -84,6 +84,7 @@ declare module 'vue' {
     HeaderButton: typeof import('./src/components/HeaderButton.vue')['default']
     IconPicker: typeof import('./src/components/Controls/IconPicker.vue')['default']
     ImageUploader: typeof import('./src/components/Controls/ImageUploader.vue')['default']
+    ImportChemedgePdfTrainerModal: typeof import('./src/components/Modals/ImportChemedgePdfTrainerModal.vue')['default']
     IndicatorIcon: typeof import('./src/components/Icons/IndicatorIcon.vue')['default']
     InlineLessonMenu: typeof import('./src/components/Notes/InlineLessonMenu.vue')['default']
     InstallPrompt: typeof import('./src/components/InstallPrompt.vue')['default']

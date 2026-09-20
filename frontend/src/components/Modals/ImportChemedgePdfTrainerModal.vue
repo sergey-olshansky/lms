@@ -9,7 +9,7 @@
 			<div class="space-y-1">
 				<p>Import complete.</p>
 				<p class="text-ink-gray-6">
-					{{ completedCount }} imported, {{ skippedCount }} already existed.
+					{{ completedCount }} imported.
 				</p>
 			</div>
 			<div class="max-h-64 space-y-2 overflow-y-auto">
@@ -108,8 +108,8 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 type UploadedFile = { name: string; file_name: string }
-type ImportResult = { quiz: string; title: string; question_count: number; skipped?: boolean }
-type ImportStatus = 'uploaded' | 'processing' | 'success' | 'skipped' | 'error'
+type ImportResult = { quiz: string; title: string; question_count: number }
+type ImportStatus = 'uploaded' | 'processing' | 'success' | 'error'
 type ImportFile = UploadedFile & {
 	id: number
 	status: ImportStatus
@@ -155,11 +155,10 @@ const successActions = computed(() => [
 	},
 ])
 
-const hasCompletedImports = computed(() => files.value.some((file) => file.status === 'success' || file.status === 'skipped' || file.status === 'error'))
+const hasCompletedImports = computed(() => files.value.some((file) => file.status === 'success' || file.status === 'error'))
 const showSummary = computed(() => hasCompletedImports.value && !isProcessing.value)
 const completedCount = computed(() => files.value.filter((file) => file.status === 'success').length)
-const skippedCount = computed(() => files.value.filter((file) => file.status === 'skipped').length)
-const processedCount = computed(() => files.value.filter((file) => file.status === 'success' || file.status === 'skipped' || file.status === 'error').length)
+const processedCount = computed(() => files.value.filter((file) => file.status === 'success' || file.status === 'error').length)
 
 function openFileSelector() {
 	fileInput.value?.click()
@@ -263,7 +262,7 @@ async function importPdfs() {
 				pdf_file: file.name,
 				source_folder: file.source_folder,
 			})
-			file.status = file.result.skipped ? 'skipped' : 'success'
+			file.status = 'success'
 		} catch (error) {
 			file.status = 'error'
 			file.error = getErrorMessage(error, 'PDF import failed')
@@ -282,7 +281,7 @@ function openQuiz(result: ImportResult) {
 }
 
 function statusLabel(status: ImportStatus) {
-	return { uploaded: 'Ready', processing: 'Processing…', success: 'Done', skipped: 'Skipped (already imported)', error: 'Error' }[status]
+	return { uploaded: 'Ready', processing: 'Processing…', success: 'Done', error: 'Error' }[status]
 }
 
 function statusIconClass(status: ImportStatus) {
@@ -290,7 +289,6 @@ function statusIconClass(status: ImportStatus) {
 		uploaded: 'lucide-circle-check text-ink-gray-5',
 		processing: 'lucide-loader-circle animate-spin text-ink-blue-5',
 		success: 'lucide-circle-check text-ink-green-5',
-		skipped: 'lucide-circle-minus text-ink-gray-5',
 		error: 'lucide-circle-x text-ink-red-5',
 	}[status]
 }

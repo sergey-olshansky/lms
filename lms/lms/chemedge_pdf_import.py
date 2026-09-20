@@ -135,26 +135,6 @@ def _attach_source_pdf(source_file, quiz_name: str):
 	)
 
 
-def _existing_import(source_file, source_folder: str | None):
-	"""Find a prior import of the same filename from the same selected folder."""
-	folder = _source_folder_label(source_folder)
-	for quiz_name in frappe.get_all(
-		"File",
-		filters={
-			"attached_to_doctype": "LMS Quiz",
-			"attached_to_field": SOURCE_PDF_FIELD,
-			"file_name": source_file.file_name,
-		},
-		pluck="attached_to_name",
-	):
-		quiz = frappe.db.get_value("LMS Quiz", quiz_name, ["name", "title", "total_marks"], as_dict=True)
-		if not quiz:
-			continue
-		if not folder or str(quiz.title).startswith(f"{folder} · "):
-			return quiz
-	return None
-
-
 def _delete_files(file_names: list[str]):
 	for name in file_names:
 		if frappe.db.exists("File", name):
@@ -179,14 +159,6 @@ def import_pdf_trainer(pdf_file: str, source_folder: str | None = None):
 	"""
 	_require_import_permission()
 	source_file = _uploaded_pdf(pdf_file)
-	existing_quiz = _existing_import(source_file, source_folder)
-	if existing_quiz:
-		return {
-			"quiz": existing_quiz.name,
-			"title": existing_quiz.title,
-			"question_count": existing_quiz.total_marks,
-			"skipped": True,
-		}
 	created_file_names: list[str] = []
 	created_question_names: list[str] = []
 	quiz_name = None
