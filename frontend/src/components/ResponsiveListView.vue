@@ -116,11 +116,11 @@
 		</template>
 		<!-- Only claimed when the page draws its own cells; left alone, frappe-ui
 		     falls back to ListRowItem, which truncates and tooltips for free.
-		     Claimed, the page's cell gets the same truncation, so a page never
-		     has to remember it. -->
+		     A column can opt into wrapping when its content is more useful in full
+		     than a fixed row height, such as a quiz title. -->
 		<template v-if="$slots.cell" #cell="{ column, row, item, align }">
 			<ListRowItem :column="column" :row="row" :item="item" :align="align">
-				<div class="min-w-0 truncate">
+				<div class="min-w-0" :class="column.wrap ? 'whitespace-normal break-words' : 'truncate'">
 					<slot name="cell" :column="column" :row="row" :value="item" />
 				</div>
 			</ListRowItem>

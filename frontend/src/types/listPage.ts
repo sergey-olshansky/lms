@@ -19,6 +19,8 @@ export interface ListColumn {
 	align?: string
 	/** A `lucide-*` class, shown beside the desk column header. */
 	icon?: string
+	/** Allow this cell to grow vertically instead of truncating long text. */
+	wrap?: boolean
 	kind?: 'data' | 'actions'
 }
 

@@ -437,7 +437,12 @@ def find_tasks(pdf: Any) -> list[dict[str, Any]]:
                 }
             )
 
-    tasks.sort(key=lambda item: item["number"])
+    tasks.sort(key=lambda item: (item["page_index"], item["bbox"][1]))
+    for sequence, task in enumerate(tasks, start=1):
+        # A source document can repeat both a printed number (legacy section)
+        # and a FIPI ID.  The extractor still needs a stable, unique key for
+        # answer association and image filenames.
+        task["key"] = f"task-{sequence:04d}"
     return tasks
 
 
@@ -586,6 +591,66 @@ def find_answers(pdf: Any, first_page_index: int) -> dict[int, dict[str, Any]]:
     return answers
 
 
+def find_inline_answers(pdf: Any, tasks: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Read answers printed directly below each task instead of on a final page."""
+    answers: dict[str, dict[str, Any]] = {}
+    for task in tasks:
+        page = pdf.pages[task["page_index"]]
+        words = page.crop(task["bbox"]).extract_words(
+            x_tolerance=2,
+            y_tolerance=3,
+            keep_blank_chars=False,
+            use_text_flow=False,
+        )
+        lines = cluster_by_top(words, tolerance=2.0)
+        answer_line_index = next(
+            (
+                index
+                for index, line in enumerate(lines)
+                if any(str(word["text"]).strip().startswith("Ответ:") for word in line)
+            ),
+            None,
+        )
+        if answer_line_index is None:
+            raise FormatError(f"No inline answer was found for task {task['id']}")
+
+        answer_line = sorted(lines[answer_line_index], key=lambda word: float(word["x0"]))
+        answer_words = [
+            word
+            for word in answer_line
+            if not str(word["text"]).strip().startswith("Ответ:")
+            and not set(str(word["text"]).strip()) <= {"_"}
+        ]
+        if not answer_words:
+            for line in lines[answer_line_index + 1 :]:
+                answer_words = [
+                    word
+                    for word in sorted(line, key=lambda word: float(word["x0"]))
+                    if not set(str(word["text"]).strip()) <= {"_"}
+                ]
+                if answer_words:
+                    break
+        if not answer_words:
+            raise FormatError(f"Inline answer is empty for task {task['id']}")
+
+        segment = [*answer_line, *answer_words]
+        answers[task["key"]] = {
+            "text": " ".join(str(word["text"]).strip() for word in answer_words).strip(),
+            "page_index": task["page_index"],
+            "page_number": task["page_number"],
+            "page_width": task["page_width"],
+            "page_height": task["page_height"],
+            "bbox": pad_bbox(
+                union_bbox(segment),
+                float(page.width),
+                float(page.height),
+                horizontal=5.0,
+                vertical=4.0,
+            ),
+        }
+    return answers
+
+
 def validate_format(
     pdf: Any,
 ) -> tuple[
@@ -608,12 +673,18 @@ def validate_format(
         raise FormatError("No task headings matching 'NUMBER. SIX_CHAR_ID' were found")
 
     numbers = [task["number"] for task in tasks]
-    expected_numbers = list(range(1, len(tasks) + 1))
-    if numbers != expected_numbers:
-        raise FormatError(
-            f"Task numbering must be continuous from 1; found {numbers[:10]}..."
-        )
     validation_warnings: list[str] = []
+    # Some official trainer PDFs intentionally omit a task number. Task and
+    # answer sets are compared below, which is the actual integrity check;
+    # accepting a gap keeps such a complete PDF importable without accepting
+    # duplicate or answer-less tasks.
+    for previous, current in zip(numbers, numbers[1:]):
+        if current > previous + 1:
+            skipped = list(range(previous + 1, current))
+            validation_warnings.append(
+                f"Task numbering skips {', '.join(map(str, skipped))}"
+            )
+
     id_occurrences: dict[str, list[int]] = {}
     id_spellings: dict[str, str] = {}
     for task in tasks:
@@ -627,32 +698,58 @@ def validate_format(
                 f"numbers {', '.join(map(str, task_numbers))}"
             )
 
+    duplicate_numbers = sorted(
+        {number for number in numbers if numbers.count(number) > 1}
+    )
     last_task_page_index = max(task["page_index"] for task in tasks)
-    answer_page_start = find_answer_page_start(pdf, last_task_page_index)
-    answers = find_answers(pdf, answer_page_start)
+    try:
+        answer_page_start = find_answer_page_start(pdf, last_task_page_index)
+    except FormatError as exc:
+        if "No answer section headed" not in str(exc):
+            raise
+        try:
+            answers = find_inline_answers(pdf, tasks)
+        except FormatError as inline_exc:
+            # A blank ``Ответ:`` field alone is not an inline-answer format.
+            # Preserve the original, actionable explanation for PDFs that
+            # simply do not include answers at all.
+            if "Inline answer is empty" in str(inline_exc):
+                raise exc from inline_exc
+            raise
+        answer_page_start = 0
+        validation_warnings.append("Answers were read from below each task")
+    else:
+        if duplicate_numbers:
+            raise FormatError(
+                "Duplicate task numbers require answers printed below each task: "
+                f"{duplicate_numbers}"
+            )
+        numbered_answers = find_answers(pdf, answer_page_start)
+        task_numbers = set(numbers)
+        answer_numbers = set(numbered_answers)
+        missing = sorted(task_numbers - answer_numbers)
+        extra = sorted(answer_numbers - task_numbers)
+        if missing:
+            raise FormatError(f"Task/answer mismatch; missing answers={missing}")
+        if extra:
+            validation_warnings.append(
+                f"Ignored answers without a matching task: {extra}"
+            )
 
-    task_numbers = set(numbers)
-    answer_numbers = set(answers)
-    missing = sorted(task_numbers - answer_numbers)
-    extra = sorted(answer_numbers - task_numbers)
-    if missing or extra:
-        raise FormatError(
-            f"Task/answer mismatch; missing answers={missing}, extra answers={extra}"
-        )
-
-    task_ids_by_number = {task["number"]: task["id"] for task in tasks}
-    mismatched_ids = [
-        number
-        for number, answer in sorted(answers.items())
-        if answer.get("task_id")
-        and str(answer["task_id"]).lower()
-        != str(task_ids_by_number[number]).lower()
-    ]
-    if mismatched_ids:
-        raise FormatError(
-            "Task IDs in the answer table do not match the task pages: "
-            f"{mismatched_ids}"
-        )
+        task_ids_by_number = {task["number"]: task["id"] for task in tasks}
+        mismatched_ids = [
+            number
+            for number, answer in sorted(numbered_answers.items())
+            if answer.get("task_id")
+            and str(answer["task_id"]).lower()
+            != str(task_ids_by_number[number]).lower()
+        ]
+        if mismatched_ids:
+            raise FormatError(
+                "Task IDs in the answer table do not match the task pages: "
+                f"{mismatched_ids}"
+            )
+        answers = {task["key"]: numbered_answers[task["number"]] for task in tasks}
 
     return (
         header,
@@ -733,7 +830,7 @@ def build_bundle(
     header: str,
     header_lines: list[str],
     tasks: list[dict[str, Any]],
-    answers: dict[int, dict[str, Any]],
+    answers: dict[str, dict[str, Any]],
     answer_page_start: int,
     validation_warnings: list[str],
     page_count: int,
@@ -772,7 +869,7 @@ def build_bundle(
                 return page_cache[page_number]
 
             output_tasks: list[dict[str, Any]] = []
-            for task in tasks:
+            for sequence, task in enumerate(tasks, start=1):
                 number = task["number"]
                 page_image = get_page(task["page_number"])
                 task_crop = crop_image(
@@ -781,10 +878,10 @@ def build_bundle(
                     task["page_width"],
                     task["page_height"],
                 )
-                task_image_path = images_dir / f"task-{number:04d}.png"
+                task_image_path = images_dir / f"task-{sequence:04d}.png"
                 task_image_meta = save_png(task_crop, task_image_path)
 
-                answer = answers[number]
+                answer = answers[task["key"]]
                 answer_page_image = get_page(answer["page_number"])
                 answer_crop = crop_image(
                     answer_page_image,
@@ -792,7 +889,7 @@ def build_bundle(
                     answer["page_width"],
                     answer["page_height"],
                 )
-                answer_image_path = images_dir / f"answer-{number:04d}.png"
+                answer_image_path = images_dir / f"answer-{sequence:04d}.png"
                 answer_image_meta = save_png(answer_crop, answer_image_path)
 
                 output_tasks.append(

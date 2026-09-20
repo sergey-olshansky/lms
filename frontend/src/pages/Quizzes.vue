@@ -247,6 +247,7 @@ const quizColumns = computed(() => {
 			key: 'title',
 			width: 2,
 			icon: 'lucide-file-text',
+			wrap: true,
 		},
 		{
 			label: __('Total Marks'),
