@@ -98,7 +98,8 @@ onMounted(() => {
 	if (
 		!user.data?.is_moderator &&
 		!user.data?.is_instructor &&
-		!user.data?.is_evaluator
+		!user.data?.is_evaluator &&
+		!user.data?.is_system_manager
 	) {
 		router.push({ name: 'Courses' })
 	}

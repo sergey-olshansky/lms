@@ -318,7 +318,11 @@ const questions = computed(() => {
 })
 
 onMounted(() => {
-	if (!user.data?.is_moderator && !user.data?.is_instructor) {
+	if (
+		!user.data?.is_moderator &&
+		!user.data?.is_instructor &&
+		!user.data?.is_system_manager
+	) {
 		router.push({ name: 'Courses' })
 	}
 	quizDetails.reload()

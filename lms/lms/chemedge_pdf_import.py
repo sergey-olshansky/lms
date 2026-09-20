@@ -73,11 +73,40 @@ def _question_html(task: dict, image_url: str) -> str:
 	)
 
 
-def _create_quiz(meta: dict):
+def _quiz_title(meta: dict, source_folder: str | None) -> str:
+	"""Prefix the PDF's quiz title with its selected directory path."""
+	header = str(meta["header"]).strip()
+	if not isinstance(source_folder, str):
+		return header
+
+	# The browser sends a relative folder path. Keep only ordinary path parts so
+	# it cannot introduce traversal-looking labels into a quiz title.
+	folder_parts = [
+		part.strip()
+		for part in source_folder.split("/")
+		if part.strip() not in {"", ".", ".."}
+	]
+	folder = " / ".join(folder_parts)
+	return f"{folder} · {header}" if folder else header
+
+
+def _unique_quiz_title(title: str) -> str:
+	"""Return a readable, non-conflicting Data-field title (140 chars max)."""
+	base_title = (title or _("Imported Quiz")).strip()[:140]
+	candidate = base_title
+	sequence = 2
+	while frappe.db.exists("LMS Quiz", {"title": candidate}):
+		suffix = f" ({sequence})"
+		candidate = f"{base_title[: 140 - len(suffix)]}{suffix}"
+		sequence += 1
+	return candidate
+
+
+def _create_quiz(meta: dict, source_folder: str | None = None):
 	quiz = frappe.get_doc(
 		{
 			"doctype": "LMS Quiz",
-			"title": meta["header"],
+			"title": _unique_quiz_title(_quiz_title(meta, source_folder)),
 			"passing_percentage": 85,
 			"max_attempts": 2,
 			"show_answers": 0,
@@ -117,7 +146,7 @@ def _delete_questions(question_names: list[str]):
 
 
 @frappe.whitelist()
-def import_pdf_trainer(pdf_file: str):
+def import_pdf_trainer(pdf_file: str, source_folder: str | None = None):
 	"""Create one native LMS Quiz from one strict-format Chemedge PDF.
 
 	The upload is attached to the created quiz only after every question and image
@@ -152,7 +181,7 @@ def import_pdf_trainer(pdf_file: str):
 			first_page_size=first_page_size,
 		)
 		meta = json.loads((bundle_dir / "meta.json").read_text(encoding="utf-8"))
-		quiz = _create_quiz(meta)
+		quiz = _create_quiz(meta, source_folder)
 		quiz_name = quiz.name
 
 		for task in meta["tasks"]:
