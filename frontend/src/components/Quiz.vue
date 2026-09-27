@@ -297,16 +297,6 @@
 								{{ item }}
 							</component>
 
-							<Button
-								:label="__('Next question')"
-								@click="switchQuestion(activeQuestion + 1)"
-								:disabled="activeQuestion == questions.length"
-								class="rounded-full"
-							>
-								<template #icon>
-									<span class="lucide-chevron-right size-4" />
-								</template>
-							</Button>
 						</div>
 						<Button
 							v-if="
@@ -332,16 +322,20 @@
 								{{ __('Next') }}
 							</span>
 						</Button>
-						<Button
-							variant="solid"
-							v-else
-							@click="handleSubmitClick()"
-							class="ms-auto"
-						>
-							<span>
-								{{ __('Submit') }}
-							</span>
-						</Button>
+						<div v-else class="ms-auto flex items-center gap-2">
+							<Button
+								:label="__('Next question')"
+								@click="switchQuestion(activeQuestion + 1)"
+								:disabled="activeQuestion == questions.length"
+							>
+								<template #icon>
+									<span class="lucide-chevron-right size-4" />
+								</template>
+							</Button>
+							<Button variant="solid" @click="handleSubmitClick()">
+								<span>{{ __('Finish Quiz') }}</span>
+							</Button>
+						</div>
 					</div>
 				</div>
 			</div>

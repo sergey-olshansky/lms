@@ -5584,6 +5584,10 @@ msgstr "Следующий"
 msgid "Next question"
 msgstr "Следующий вопрос"
 
+#: frontend/src/components/Quiz.vue
+msgid "Finish Quiz"
+msgstr "Завершить тест"
+
 #: lms/templates/assessments.html:58
 msgid "No Assessments"
 msgstr "Нет оценок"

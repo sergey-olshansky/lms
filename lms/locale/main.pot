@@ -5899,6 +5899,10 @@ msgstr ""
 msgid "Next question"
 msgstr ""
 
+#: frontend/src/components/Quiz.vue
+msgid "Finish Quiz"
+msgstr ""
+
 #: lms/templates/assessments.html:58
 msgid "No Assessments"
 msgstr ""
@@ -10737,4 +10741,3 @@ msgstr ""
 #: lms/lms/workspace/learning/learning.json
 msgid "{} Published"
 msgstr ""
-
