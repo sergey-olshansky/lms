@@ -26,7 +26,7 @@
 					}"
 				>
 					<HeaderButton
-						:label="__('Check Submissions')"
+						:label="__('View Results')"
 						icon="lucide-clipboard-list"
 					/>
 				</router-link>

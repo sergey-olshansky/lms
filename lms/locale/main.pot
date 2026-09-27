@@ -225,6 +225,22 @@ msgstr ""
 msgid "Add Possibility"
 msgstr ""
 
+#: frontend/src/pages/QuizSubmission.vue
+msgid "Answered"
+msgstr ""
+
+#: frontend/src/pages/QuizSubmission.vue
+msgid "Could not load correct answers"
+msgstr ""
+
+#: lms/lms/doctype/lms_quiz/lms_quiz.py
+msgid "Invalid quiz submission."
+msgstr ""
+
+#: lms/lms/doctype/lms_quiz/lms_quiz.py
+msgid "You are not authorized to view correct quiz answers."
+msgstr ""
+
 #: frontend/src/pages/QuizForm.vue:225
 msgid "Add Question"
 msgstr ""
@@ -1508,7 +1524,6 @@ msgid "Check Submission"
 msgstr ""
 
 #: frontend/src/components/Modals/AssignmentForm.vue:56
-#: frontend/src/pages/QuizForm.vue:29
 msgid "Check Submissions"
 msgstr ""
 
@@ -9686,6 +9701,10 @@ msgstr ""
 
 #: frontend/src/pages/JobApplications.vue:253
 msgid "View Resume"
+msgstr ""
+
+#: frontend/src/pages/QuizForm.vue
+msgid "View Results"
 msgstr ""
 
 #: frontend/src/pages/Batches/components/BatchFeedback.vue:20

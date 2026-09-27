@@ -21,9 +21,7 @@ from lms.lms.doctype.lms_question.lms_question import (
 	QUESTION_OPTION_FIELDS,
 	QUESTION_POSSIBILITY_FIELDS,
 )
-from lms.lms.utils import (
-	generate_slug,
-)
+from lms.lms.utils import can_modify_batch, can_modify_course, generate_slug
 
 # Quiz answers may embed inline images as data: URIs. Only raster image types are
 # permitted. A data: URI with an active-document extension (.xhtml, .xsl, .html,
@@ -330,6 +328,89 @@ def create_submission(quiz: str, results: list, score_out_of: int, passing_perce
 	)
 	submission.save(ignore_permissions=True)
 	return submission
+
+
+def _can_review_submission(quiz: str) -> bool:
+	"""Return whether the current user may view answer keys for a quiz."""
+	if not frappe.session.user or frappe.session.user == "Guest":
+		return False
+	quiz_details = frappe.db.get_value(
+		"LMS Quiz", quiz, ["owner", "course"], as_dict=True
+	)
+	if not quiz_details:
+		return False
+
+	if {"System Manager", "Moderator"}.intersection(frappe.get_roles()):
+		return True
+	if quiz_details.owner == frappe.session.user:
+		return True
+	if quiz_details.course and can_modify_course(quiz_details.course):
+		return True
+	for course in frappe.get_all("Course Lesson", filters={"quiz_id": quiz}, pluck="course"):
+		if course and can_modify_course(course):
+			return True
+
+	assessment_batches = frappe.get_all(
+		"LMS Assessment",
+		filters={"assessment_type": "LMS Quiz", "assessment_name": quiz},
+		pluck="parent",
+	)
+	return any(can_modify_batch(batch) for batch in assessment_batches)
+
+
+@frappe.whitelist()
+def get_submission_correct_answers(submission: str) -> dict[str, list[str]]:
+	"""Return answer keys for an instructor's review of one quiz submission."""
+	if not isinstance(submission, str) or not submission:
+		frappe.throw(_("Invalid quiz submission."), frappe.ValidationError)
+
+	submission_doc = frappe.get_doc("LMS Quiz Submission", submission)
+	if not _can_review_submission(submission_doc.quiz):
+		frappe.throw(
+			_("You are not authorized to view correct quiz answers."),
+			frappe.PermissionError,
+		)
+	submission_doc.check_permission("read")
+
+	question_names = [
+		row.question_name for row in submission_doc.result if row.question_name
+	]
+	if not question_names:
+		return {}
+
+	fields = [
+		"name",
+		"type",
+		*QUESTION_OPTION_FIELDS,
+		*QUESTION_CORRECTNESS_FIELDS,
+		*QUESTION_POSSIBILITY_FIELDS,
+	]
+	questions = frappe.get_all(
+		"LMS Question",
+		filters=[["name", "in", question_names]],
+		fields=fields,
+		ignore_permissions=True,
+	)
+	correct_answers: dict[str, list[str]] = {}
+	for question in questions:
+		if question.type == "Choices":
+			correct_answers[question.name] = [
+				question[option]
+				for option, is_correct in zip(
+					QUESTION_OPTION_FIELDS, QUESTION_CORRECTNESS_FIELDS, strict=True
+				)
+				if question.get(is_correct) and question.get(option)
+			]
+		elif question.type == "User Input":
+			correct_answers[question.name] = [
+				question[possibility]
+				for possibility in QUESTION_POSSIBILITY_FIELDS
+				if question.get(possibility)
+			]
+		else:
+			correct_answers[question.name] = []
+
+	return correct_answers
 
 
 def save_progress_after_quiz(quiz_details: dict, percentage: float):

@@ -206,7 +206,23 @@ msgstr "Добавить вариант"
 
 #: frontend/src/components/Modals/Question.vue:135
 msgid "Add Possibility"
-msgstr "Добавить возможность"
+msgstr "Добавить правильный ответ"
+
+#: frontend/src/pages/QuizSubmission.vue
+msgid "Answered"
+msgstr "Ответил"
+
+#: frontend/src/pages/QuizSubmission.vue
+msgid "Could not load correct answers"
+msgstr "Не удалось загрузить правильные ответы"
+
+#: lms/lms/doctype/lms_quiz/lms_quiz.py
+msgid "Invalid quiz submission."
+msgstr "Некорректная попытка теста."
+
+#: lms/lms/doctype/lms_quiz/lms_quiz.py
+msgid "You are not authorized to view correct quiz answers."
+msgstr "У вас нет доступа к правильным ответам теста."
 
 #: frontend/src/pages/QuizForm.vue:250
 msgid "Add Question"
@@ -1382,7 +1398,6 @@ msgid "Check Submission"
 msgstr "Проверить отправку"
 
 #: frontend/src/components/Modals/AssignmentForm.vue:56
-#: frontend/src/pages/QuizForm.vue:39
 msgid "Check Submissions"
 msgstr "Проверить сообщения"
 
@@ -6575,7 +6590,7 @@ msgstr "Возможности"
 
 #: frontend/src/components/Modals/Question.vue:114
 msgid "Possibility"
-msgstr "Возможность"
+msgstr "Правильный ответ"
 
 #. Label of the possibility_1 (Small Text) field in DocType 'LMS Question'
 #: lms/lms/doctype/lms_question/lms_question.json
@@ -8971,6 +8986,10 @@ msgstr "Просмотр сертификата"
 #: frontend/src/pages/JobApplications.vue:318
 msgid "View Resume"
 msgstr "Посмотреть резюме"
+
+#: frontend/src/pages/QuizForm.vue
+msgid "View Results"
+msgstr "Посмотреть результаты"
 
 #: frontend/src/pages/Batches/components/BatchFeedback.vue:20
 msgid "View all feedback"

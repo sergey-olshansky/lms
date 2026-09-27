@@ -62,10 +62,22 @@
 						</span>
 					</div>
 					<div class="text-ink-gray-9">
-						<span class="font-semibold"> {{ __('Answer') }}: </span>
+						<span class="font-semibold"> {{ __('Answered') }}: </span>
 						<span
 							class="leading-5"
 							v-html="sanitizeRichHTML(row.answer)"
+						></span>
+					</div>
+					<div class="text-ink-gray-9">
+						<span class="font-semibold">{{ __('Correct Answer') }}: </span>
+						<span class="leading-5" v-if="correctAnswers.loading">…</span>
+						<span v-else-if="correctAnswers.error" class="text-ink-red-5">
+							{{ __('Could not load correct answers') }}
+						</span>
+						<span
+							v-else
+							class="leading-5"
+							v-html="sanitizeRichHTML(correctAnswer(row.question_name))"
 						></span>
 					</div>
 					<div class="grid grid-cols-2 gap-5">
@@ -84,6 +96,7 @@
 <script setup>
 import { sanitizeRichHTML } from '@/utils/sanitizeRichHTML'
 import {
+	createResource,
 	createDocumentResource,
 	FormControl,
 	Button,
@@ -108,7 +121,11 @@ const router = useRouter()
 const user = inject('$user')
 
 onMounted(() => {
-	if (!user.data?.is_instructor && !user.data?.is_moderator)
+	if (
+		!user.data?.is_instructor &&
+		!user.data?.is_moderator &&
+		!user.data?.is_system_manager
+	)
 		router.push({ name: 'Courses' })
 })
 
@@ -135,6 +152,19 @@ const submissionDetails = createDocumentResource({
 	auto: true,
 })
 
+const correctAnswers = createResource({
+	url: 'lms.lms.doctype.lms_quiz.lms_quiz.get_submission_correct_answers',
+	makeParams() {
+		return { submission: props.submission }
+	},
+	auto: true,
+})
+
+const correctAnswer = (questionName) => {
+	const answers = correctAnswers.data?.[questionName] || []
+	return answers.length ? answers.join(', ') : '—'
+}
+
 // The header renders before the doc lands. It used to be guarded by a `v-if`
 // on Breadcrumbs itself, and reading `.quiz` off an undefined doc threw during
 // render once the shared header took that guard away.
@@ -160,7 +190,7 @@ const saveSubmission = () => {
 			onError(err) {
 				toast.error(err.messages?.[0] || err)
 			},
-		}
+		},
 	)
 }
 

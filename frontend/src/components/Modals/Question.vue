@@ -111,7 +111,7 @@
 							>
 								<FormControl
 									class="flex-1"
-									:label="__('Possibility') + ' ' + n"
+									:label="__('Correct Answer') + ' ' + n"
 									v-model="question[`possibility_${n}`]"
 									:required="n == 1 ? true : false"
 								/>
