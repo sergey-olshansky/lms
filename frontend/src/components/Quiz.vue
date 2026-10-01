@@ -12,7 +12,7 @@
 			<div class="font-medium">
 				{{
 					__(
-						'Please read the following instructions carefully before starting the quiz'
+						'Please read the following instructions carefully before starting the quiz',
 					)
 				}}
 			</div>
@@ -23,7 +23,7 @@
 				<li>
 					{{
 						__(
-							'Do not refresh the page or close this window. If you do, the quiz will be submitted automatically.'
+							'Your answers are saved automatically on this device. You can return to this quiz later.',
 						)
 					}}
 				</li>
@@ -35,21 +35,21 @@
 				<li v-if="quiz.data?.duration">
 					{{
 						__(
-							'Please ensure that you complete all the questions in {0} minutes.'
+							'Please ensure that you complete all the questions in {0} minutes.',
 						).format(quiz.data.duration)
 					}}
 				</li>
 				<li v-if="quiz.data?.duration">
 					{{
 						__(
-							'If you fail to do so, the quiz will be automatically submitted when the timer ends.'
+							'If you fail to do so, the quiz will be automatically submitted when the timer ends.',
 						)
 					}}
 				</li>
 				<li v-if="quiz.data.passing_percentage">
 					{{
 						__(
-							'You will have to get {0}% correct answers in order to pass the quiz.'
+							'You will have to get {0}% correct answers in order to pass the quiz.',
 						).format(quiz.data.passing_percentage)
 					}}
 				</li>
@@ -58,17 +58,17 @@
 						__('You can attempt this quiz {0}.').format(
 							quiz.data.max_attempts == 1
 								? '1 time'
-								: `${quiz.data.max_attempts} times`
+								: `${quiz.data.max_attempts} times`,
 						)
 					}}
 				</li>
 				<li v-if="quiz.data.enable_negative_marking">
 					{{
 						__(
-							'If you answer incorrectly, {0} {1} will be deducted from your score for each incorrect answer.'
+							'If you answer incorrectly, {0} {1} will be deducted from your score for each incorrect answer.',
 						).format(
 							quiz.data.marks_to_cut,
-							quiz.data.marks_to_cut == 1 ? 'mark' : 'marks'
+							quiz.data.marks_to_cut == 1 ? 'mark' : 'marks',
 						)
 					}}
 				</li>
@@ -122,7 +122,7 @@
 					>
 						{{
 							__(
-								'You have already exceeded the maximum number of attempts allowed for this quiz.'
+								'You have already exceeded the maximum number of attempts allowed for this quiz.',
 							)
 						}}
 					</div>
@@ -296,7 +296,6 @@
 							>
 								{{ item }}
 							</component>
-
 						</div>
 						<Button
 							v-if="
@@ -366,18 +365,18 @@
 			>
 				{{
 					__(
-						"Your submission has been successfully saved. The instructor will review and grade it shortly, and you'll be notified of your final result."
+						"Your submission has been successfully saved. The instructor will review and grade it shortly, and you'll be notified of your final result.",
 					)
 				}}
 			</div>
 			<div v-else class="text-ink-gray-7">
 				{{
 					__(
-						'You got {0}% correct answers with a score of {1} out of {2}'
+						'You got {0}% correct answers with a score of {1} out of {2}',
 					).format(
 						Math.ceil(quizSubmission.data.percentage),
 						quizSubmission.data.score,
-						quizSubmission.data.score_out_of
+						quizSubmission.data.score_out_of,
 					)
 				}}
 			</div>
@@ -507,6 +506,9 @@ const reviewQuestions = ref([])
 const showSubmissionConfirmation = ref(false)
 const possibleAnswer = ref(null)
 const timer = ref(0)
+const savedAnswers = ref([])
+const deadline = ref(null)
+let restoringAnswer = false
 let timerInterval = null
 let submitTimeout = null
 
@@ -527,35 +529,16 @@ const props = defineProps({
 
 onMounted(() => {
 	window.addEventListener('pagehide', handlePageHide)
-	window.addEventListener('beforeunload', handleBeforeUnload)
 })
 
 onUnmounted(() => {
 	window.removeEventListener('pagehide', handlePageHide)
-	window.removeEventListener('beforeunload', handleBeforeUnload)
+	handlePageHide()
 	stopTimer()
 })
 
 const handlePageHide = () => {
-	if (activeQuestion.value > 0 && !quizSubmission.data) {
-		const params = new URLSearchParams({
-			quiz: quiz.data.name,
-			results: localStorage.getItem(quiz.data.title) || '[]',
-		})
-
-		navigator.sendBeacon(
-			'/api/method/lms.lms.doctype.lms_quiz.lms_quiz.submit_quiz?' +
-				params.toString()
-		)
-	}
-}
-
-const handleBeforeUnload = (event) => {
-	if (activeQuestion.value > 0 && !quizSubmission.data) {
-		recordCurrentAttempt()
-		event.preventDefault()
-		event.returnValue = ''
-	}
+	if (activeQuestion.value > 0 && !quizSubmission.data) saveCurrentAnswer()
 }
 
 // Quiz doc + every question's content in one round trip. The lesson-side
@@ -580,6 +563,8 @@ const quiz = createResource({
 	onSuccess() {
 		populateQuestions()
 		setupTimer()
+		restoreDraft()
+		if (quiz.data?.max_attempts) attempts.reload()
 	},
 })
 
@@ -592,7 +577,7 @@ const populateQuestions = () => {
 	// unload handlers, which, since the quiz now mounts inline in the lesson,
 	// blanks the whole lesson view.
 	const resolvable = rawQuestions.filter(
-		(row) => row?.question && questionsByName.value[row.question]
+		(row) => row?.question && questionsByName.value[row.question],
 	)
 	if (data?.shuffle_questions) {
 		let next = shuffleArray([...resolvable])
@@ -609,16 +594,13 @@ const setupTimer = () => {
 	// resetQuiz() reaches here from the quizName watcher, which fires before the
 	// new quiz has loaded — and on the very first navigation quiz.data is still
 	// null. Throwing here would abort the watcher before it can reload.
-	if (quiz.data?.duration) {
-		timer.value = quiz.data.duration * 60
-	}
+	timer.value = quiz.data?.duration ? quiz.data.duration * 60 : 0
 }
 
 const stopTimer = () => {
 	clearInterval(timerInterval)
 	timerInterval = null
-	// submitQuiz() defers createSubmission() by 500ms so the last answer can be
-	// written to localStorage first. Left pending, it fires against an unmounted
+	// submitQuiz() defers createSubmission() by 500ms. Left pending, it fires against an unmounted
 	// or already-switched component and marks progress on the wrong lesson.
 	clearTimeout(submitTimeout)
 	submitTimeout = null
@@ -629,12 +611,17 @@ const startTimer = () => {
 	// component reused for another quiz. Without this, each start leaves the
 	// previous interval running and every one of them submits on expiry.
 	stopTimer()
-	timerInterval = setInterval(() => {
-		timer.value--
-		if (timer.value == 0) {
+	const updateTimer = () => {
+		timer.value = Math.max(0, Math.ceil((deadline.value - Date.now()) / 1000))
+		if (timer.value === 0) {
 			stopTimer()
 			submitQuiz()
 		}
+	}
+	updateTimer()
+	if (timer.value === 0) return
+	timerInterval = setInterval(() => {
+		updateTimer()
 	}, 1000)
 }
 
@@ -689,25 +676,12 @@ const attempts = createResource({
 	},
 })
 
-watch(
-	() => quiz.data,
-	() => {
-		if (quiz.data) {
-			populateQuestions()
-		}
-		if (quiz.data && quiz.data.max_attempts) {
-			attempts.reload()
-			resetQuiz()
-		}
-	}
-)
-
 const quizSubmission = createResource({
 	url: 'lms.lms.doctype.lms_quiz.lms_quiz.submit_quiz',
 	makeParams(values) {
 		return {
 			quiz: quiz.data.name,
-			results: localStorage.getItem(quiz.data.title) || '[]',
+			results: JSON.stringify(savedAnswers.value),
 		}
 	},
 })
@@ -727,30 +701,24 @@ watch(activeQuestion, (value) => {
 	if (!row?.question) return
 	currentQuestion.value = row.question
 	questionDetails.data = questionsByName.value[currentQuestion.value] || null
-	if (!quiz.data?.show_answers) {
-		loadSavedAnswers()
-	}
+	loadSavedAnswers()
+	saveDraft()
 })
 
 const switchQuestion = (questionNumber) => {
-	let answers = getAnswers()
-	if (answers.length) {
-		if (!attemptedQuestions.value.includes(activeQuestion.value)) {
-			attemptedQuestions.value.push(activeQuestion.value)
-		}
-		addToLocalStorage()
-		resetQuestion()
-	}
-
 	if (questionNumber < 1 || questionNumber > questions.value.length) return
+	saveCurrentAnswer()
+	clearQuestionAnswer()
 	activeQuestion.value = questionNumber
 }
 
 const loadSavedAnswers = () => {
-	let quizData = JSON.parse(localStorage.getItem(quiz.data.title))
+	clearQuestionAnswer()
+	restoringAnswer = true
+	let quizData = savedAnswers.value
 	if (quizData) {
 		let localQuestion = quizData.find(
-			(q) => q.question_name == currentQuestion.value
+			(q) => q.question_name == currentQuestion.value,
 		)
 		if (localQuestion) {
 			let localAnswers = localQuestion.answer
@@ -769,6 +737,7 @@ const loadSavedAnswers = () => {
 			}
 		}
 	}
+	restoringAnswer = false
 }
 
 watch(
@@ -779,6 +748,7 @@ watch(
 			// between two lessons that both carry a quiz reuses this instance
 			// instead of remounting it. Reloading alone leaves the previous
 			// quiz's answers, flagged questions and submission on screen.
+			if (activeQuestion.value > 0 && !quizSubmission.data) saveCurrentAnswer()
 			stopTimer()
 			resetQuiz()
 			// Only on a genuine quiz switch, never from resetQuiz() itself — that is
@@ -791,12 +761,19 @@ watch(
 			// would only hide the result. It is ignored instead, by submittedQuiz.
 			quiz.reload()
 		}
-	}
+	},
 )
 
 const startQuiz = () => {
+	if (quizSubmission.data) quizSubmission.reset()
+	savedAnswers.value = []
+	attemptedQuestions.value = []
+	reviewQuestions.value = []
+	deadline.value = quiz.data.duration
+		? Date.now() + quiz.data.duration * 60 * 1000
+		: null
 	activeQuestion.value = 1
-	localStorage.removeItem(quiz.data.title)
+	saveDraft()
 	if (quiz.data.duration) startTimer()
 }
 
@@ -805,10 +782,19 @@ const markAnswer = (index) => {
 		selectedOptions.value.splice(
 			0,
 			selectedOptions.value.length,
-			...Array(MAX_OPTIONS).fill(0)
+			...Array(MAX_OPTIONS).fill(0),
 		)
 	selectedOptions.value[index - 1] = selectedOptions.value[index - 1] ? 0 : 1
+	saveCurrentAnswer()
 }
+
+watch(
+	possibleAnswer,
+	() => {
+		if (!restoringAnswer && activeQuestion.value > 0) saveCurrentAnswer()
+	},
+	{ flush: 'sync' },
+)
 
 const getAnswers = () => {
 	let answers = []
@@ -857,7 +843,7 @@ const checkAnswer = () => {
 			} else {
 				showAnswers.push(data)
 			}
-			addToLocalStorage()
+			saveCurrentAnswer()
 			if (!quiz.data.show_answers) {
 				resetQuestion()
 			}
@@ -865,30 +851,107 @@ const checkAnswer = () => {
 	})
 }
 
-const addToLocalStorage = () => {
-	let quizData = JSON.parse(localStorage.getItem(quiz.data.title))
-	let questionData = {
-		question_name: currentQuestion.value,
-		answer: getAnswers(),
-	}
-	if (quizData) {
-		let existingQuestion = quizData.find(
-			(q) => q.question_name == questionData.question_name
+const draftKey = () =>
+	`lms-quiz-draft:${user.data?.name || 'Guest'}:${quiz.data?.name}`
+
+const saveDraft = () => {
+	if (!quiz.data || activeQuestion.value < 1 || quizSubmission.data) return
+	try {
+		localStorage.setItem(
+			draftKey(),
+			JSON.stringify({
+				version: 1,
+				questions: questions.value.map((q) => q.question),
+				answers: savedAnswers.value,
+				activeQuestion: currentQuestion.value,
+				reviewQuestions: reviewQuestions.value.map(
+					(index) => questions.value[index - 1]?.question,
+				),
+				deadline: deadline.value,
+			}),
 		)
-		if (existingQuestion) {
-			existingQuestion.answer = questionData.answer
-		} else {
-			quizData.push(questionData)
-		}
-	} else {
-		quizData = [questionData]
+	} catch {
+		toast.error(__('Could not save quiz progress on this device.'))
 	}
-	localStorage.setItem(quiz.data.title, JSON.stringify(quizData))
+}
+
+const saveCurrentAnswer = () => {
+	if (!quiz.data || !currentQuestion.value || activeQuestion.value < 1) return
+	const answers = getAnswers()
+	const hasAnswer = answers.some(
+		(answer) => typeof answer === 'string' && answer.trim() !== '',
+	)
+	savedAnswers.value = savedAnswers.value.filter(
+		(q) => q.question_name !== currentQuestion.value,
+	)
+	if (hasAnswer) {
+		savedAnswers.value.push({
+			question_name: currentQuestion.value,
+			answer: answers,
+		})
+	}
+	attemptedQuestions.value = questions.value.flatMap((q, index) =>
+		savedAnswers.value.some((answer) => answer.question_name === q.question)
+			? [index + 1]
+			: [],
+	)
+	saveDraft()
+}
+
+const restoreDraft = () => {
+	if (!quiz.data) return
+	let draft
+	try {
+		draft = JSON.parse(localStorage.getItem(draftKey()))
+	} catch {
+		return
+	}
+	if (draft?.version !== 1 || !Array.isArray(draft.questions)) return
+	const byName = new Map(questions.value.map((row) => [row.question, row]))
+	if (
+		draft.questions.length === questions.value.length &&
+		draft.questions.every((name) => byName.has(name))
+	) {
+		questions.value = draft.questions.map((name) => byName.get(name))
+	}
+	const validNames = new Set(questions.value.map((q) => q.question))
+	savedAnswers.value = Array.isArray(draft.answers)
+		? draft.answers.filter(
+				(answer) =>
+					validNames.has(answer?.question_name) &&
+					Array.isArray(answer.answer) &&
+					answer.answer.every((value) => typeof value === 'string'),
+			)
+		: []
+	attemptedQuestions.value = questions.value.flatMap((q, index) =>
+		savedAnswers.value.some((answer) => answer.question_name === q.question)
+			? [index + 1]
+			: [],
+	)
+	reviewQuestions.value = Array.isArray(draft.reviewQuestions)
+		? draft.reviewQuestions.flatMap((name) => {
+				const index = questions.value.findIndex((q) => q.question === name)
+				return index < 0 ? [] : [index + 1]
+			})
+		: []
+	deadline.value =
+		quiz.data.duration && Number.isFinite(draft.deadline)
+			? draft.deadline
+			: null
+	const index = questions.value.findIndex(
+		(q) => q.question === draft.activeQuestion,
+	)
+	activeQuestion.value = index < 0 ? 1 : index + 1
+	if (quiz.data.duration) {
+		if (!deadline.value)
+			deadline.value = Date.now() + quiz.data.duration * 60 * 1000
+		startTimer()
+	}
 }
 
 const nextQuestion = () => {
 	if (!quiz.data.show_answers) return
-	if (questionDetails.data?.type == 'Open Ended') addToLocalStorage()
+	if (questionDetails.data?.type == 'Open Ended') saveCurrentAnswer()
 	resetQuestion()
 }
 
@@ -897,21 +960,26 @@ const resetQuestion = () => {
 	// the raw list and can be longer than what populateQuestions trimmed via
 	// limit_questions_to.
 	if (activeQuestion.value == questions.value.length) return
+	clearQuestionAnswer()
 	activeQuestion.value = activeQuestion.value + 1
+	showAnswers.length = 0
+}
+
+const clearQuestionAnswer = () => {
+	restoringAnswer = true
 	selectedOptions.value.splice(
 		0,
 		selectedOptions.value.length,
-		...Array(MAX_OPTIONS).fill(0)
+		...Array(MAX_OPTIONS).fill(0),
 	)
-	showAnswers.length = 0
 	possibleAnswer.value = null
+	restoringAnswer = false
 }
 
 const submitQuiz = () => {
+	if (submitTimeout || quizSubmission.loading || quizSubmission.data) return
 	if (!quiz.data.show_answers) {
-		if (questionDetails.data?.type == 'Open Ended' || getAnswers().length) {
-			addToLocalStorage()
-		}
+		saveCurrentAnswer()
 		submitTimeout = setTimeout(() => {
 			submitTimeout = null
 			createSubmission()
@@ -927,10 +995,12 @@ const createSubmission = () => {
 	// on — and markLessonProgress() reads window.location.pathname at that
 	// moment, which would credit whatever lesson is open by then.
 	const submittedQuiz = props.quizName
+	const submittedDraftKey = draftKey()
 	quizSubmission.submit(
 		{},
 		{
 			onSuccess(data) {
+				localStorage.removeItem(submittedDraftKey)
 				if (props.quizName !== submittedQuiz) return
 				markLessonProgress()
 				if (quiz.data && quiz.data.max_attempts) attempts.reload()
@@ -946,21 +1016,21 @@ const createSubmission = () => {
 					}, 3000)
 				}
 			},
-		}
+		},
 	)
 }
 
 const resetQuiz = () => {
+	stopTimer()
 	activeQuestion.value = 0
-	selectedOptions.value.splice(
-		0,
-		selectedOptions.value.length,
-		...Array(MAX_OPTIONS).fill(0)
-	)
+	clearQuestionAnswer()
+	currentQuestion.value = ''
+	questionDetails.data = null
 	showAnswers.length = 0
-	possibleAnswer.value = null
 	attemptedQuestions.value = []
 	reviewQuestions.value = []
+	savedAnswers.value = []
+	deadline.value = null
 	quizSubmission.reset()
 	populateQuestions()
 	setupTimer()
@@ -999,11 +1069,7 @@ const handleSubmitClick = () => {
 }
 
 const recordCurrentAttempt = () => {
-	if (!getAnswers().length) return
-	if (!attemptedQuestions.value.includes(activeQuestion.value)) {
-		attemptedQuestions.value.push(activeQuestion.value)
-	}
-	addToLocalStorage()
+	saveCurrentAnswer()
 }
 
 const paginationWindow = computed(() => {
@@ -1037,9 +1103,10 @@ const markForReview = (event, questionNumber) => {
 		}
 	} else {
 		reviewQuestions.value = reviewQuestions.value.filter(
-			(num) => num !== questionNumber
+			(num) => num !== questionNumber,
 		)
 	}
+	saveDraft()
 }
 
 const getSubmissionColumns = () => {

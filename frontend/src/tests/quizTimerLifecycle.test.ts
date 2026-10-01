@@ -47,9 +47,12 @@ const quizFixture = (name: string) => ({
 		duration: 1,
 		show_answers: 0,
 		max_attempts: 0,
-		questions: [{ question: `${name}-q1` }],
+		questions: [{ question: `${name}-q1` }, { question: `${name}-q2` }],
 	},
-	questions_by_name: { [`${name}-q1`]: question(`${name}-q1`) },
+	questions_by_name: {
+		[`${name}-q1`]: question(`${name}-q1`),
+		[`${name}-q2`]: question(`${name}-q2`),
+	},
 })
 
 let currentQuiz = 'quiz-a'
@@ -195,6 +198,60 @@ describe('Quiz.vue timer lifecycle', () => {
 
 		expect(vi.getTimerCount()).toBe(afterFirst)
 		wrapper.unmount()
+	})
+
+	it('keeps an unfinished answer after the page is hidden and the quiz is remounted', async () => {
+		const sendBeacon = vi.fn()
+		Object.defineProperty(navigator, 'sendBeacon', {
+			configurable: true,
+			value: sendBeacon,
+		})
+		const wrapper = mountQuiz('quiz-a')
+		await flushPromises()
+		const vm = wrapper.vm as any
+		vm.startQuiz()
+		await flushPromises()
+		vm.markAnswer(1)
+		vm.markForReview({ target: { checked: true } }, 1)
+		vm.switchQuestion(2)
+		await flushPromises()
+		vm.markAnswer(2)
+		window.dispatchEvent(new Event('pagehide'))
+
+		expect(sendBeacon).not.toHaveBeenCalled()
+		expect(submitSpy).not.toHaveBeenCalled()
+		expect(
+			JSON.parse(
+				localStorage.getItem('lms-quiz-draft:student@example.com:quiz-a')!,
+			).answers,
+		).toEqual([
+			{ question_name: 'quiz-a-q1', answer: ['a'] },
+			{ question_name: 'quiz-a-q2', answer: ['b'] },
+		])
+		wrapper.unmount()
+
+		const restored = mountQuiz('quiz-a')
+		await flushPromises()
+		const restoredVm = restored.vm as any
+		expect(restoredVm.activeQuestion).toBe(2)
+		expect(restoredVm.selectedOptions[1]).toBe(1)
+		expect(restoredVm.reviewQuestions).toEqual([1])
+		expect(submitSpy).not.toHaveBeenCalled()
+		restored.unmount()
+	})
+
+	it('does not restart the timer when the quiz is reopened', async () => {
+		const wrapper = mountQuiz('quiz-a')
+		await flushPromises()
+		;(wrapper.vm as any).startQuiz()
+		await flushPromises()
+		await vi.advanceTimersByTimeAsync(20_000)
+		wrapper.unmount()
+
+		const restored = mountQuiz('quiz-a')
+		await flushPromises()
+		expect((restored.vm as any).timer).toBe(40)
+		restored.unmount()
 	})
 })
 
