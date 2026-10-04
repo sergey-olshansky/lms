@@ -129,7 +129,7 @@ async function mountPdf() {
 	const wrapper = mount(PdfBlock, {
 		props: { file: '/files/x.pdf' },
 		...i18nMocks
-	}
+	})
 	await flushPromises()
 	await flushPromises()
 	return wrapper
@@ -173,7 +173,7 @@ describe('PdfBlock', () => {
 		const { default: PdfBlock } = await import('@/components/PdfBlock.vue')
 		const wrapper = mount(PdfBlock, {
 			props: { file: '/files/x.pdf' },
-			...i18nMocks,
+			...i18nMocks
 		})
 		expect(createPdfWorker).toHaveBeenCalledTimes(1)
 		wrapper.unmount() // before any flushPromises -> load() still pending
@@ -239,7 +239,7 @@ describe('PdfBlock', () => {
 		} as unknown as ReturnType<typeof pdf.getDocument>)
 		const wrapper = mount(PdfBlock, {
 			props: { file: '/files/slow.pdf' },
-			...i18nMocks,
+			...i18nMocks
 		})
 		await flushPromises()
 		wrapper.unmount()
