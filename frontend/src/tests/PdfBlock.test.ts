@@ -126,7 +126,10 @@ const i18nMocks = { global: { mocks: { __: (s: string) => s } } }
 
 async function mountPdf() {
 	const { default: PdfBlock } = await import('@/components/PdfBlock.vue')
-	const wrapper = mount(PdfBlock, { props: { file: '/files/x.pdf' }, ...i18nMocks })
+	const wrapper = mount(PdfBlock, {
+		props: { file: '/files/x.pdf' },
+		...i18nMocks,
+	})
 	await flushPromises()
 	await flushPromises()
 	return wrapper
@@ -146,7 +149,7 @@ describe('PdfBlock', () => {
 		const wrapper = await mountPdf()
 		expect(wrapper.find('.pdf-error').exists()).toBe(true)
 		expect(wrapper.find('.pdf-fallback-link').attributes('href')).toBe(
-			'/files/x.pdf'
+			'/files/x.pdf',
 		)
 		wrapper.unmount()
 	})
@@ -168,7 +171,10 @@ describe('PdfBlock', () => {
 		// The ref is taken synchronously at mount, so an unmount that races the
 		// in-flight dynamic import must still balance it (no stranded worker).
 		const { default: PdfBlock } = await import('@/components/PdfBlock.vue')
-		const wrapper = mount(PdfBlock, { props: { file: '/files/x.pdf' }, ...i18nMocks })
+		const wrapper = mount(PdfBlock, {
+			props: { file: '/files/x.pdf' },
+			...i18nMocks,
+		})
 		expect(createPdfWorker).toHaveBeenCalledTimes(1)
 		wrapper.unmount() // before any flushPromises -> load() still pending
 		expect(terminate).toHaveBeenCalledTimes(1)
@@ -231,7 +237,10 @@ describe('PdfBlock', () => {
 			}),
 			destroy: state.taskDestroy,
 		} as unknown as ReturnType<typeof pdf.getDocument>)
-		const wrapper = mount(PdfBlock, { props: { file: '/files/slow.pdf' } })
+		const wrapper = mount(PdfBlock, {
+			props: { file: '/files/slow.pdf' },
+			...i18nMocks,
+		})
 		await flushPromises()
 		wrapper.unmount()
 		expect(state.taskDestroy).toHaveBeenCalledTimes(1)
