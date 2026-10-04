@@ -128,8 +128,8 @@ async function mountPdf() {
 	const { default: PdfBlock } = await import('@/components/PdfBlock.vue')
 	const wrapper = mount(PdfBlock, {
 		props: { file: '/files/x.pdf' },
-		...i18nMocks,
-	})
+		...i18nMocks
+	}
 	await flushPromises()
 	await flushPromises()
 	return wrapper
