@@ -134,6 +134,27 @@ String.prototype.format = function (...args: unknown[]) {
 	return this.replace(/\{(\d+)\}/g, (_: string, i: number) => String(args[i]))
 }
 
+// jsdom's Storage.setItem schedules an internal setTimeout per write (storage
+// event batching). Under fake timers those pile up and break the
+// getTimerCount() assertions below, so replace localStorage with a plain
+// in-memory shim that schedules nothing.
+const installStorageShim = () => {
+	const store = new Map<string, string>()
+	Object.defineProperty(window, 'localStorage', {
+		configurable: true,
+		value: {
+			getItem: (k: string) => store.get(k) ?? null,
+			setItem: (k: string, v: string) => void store.set(k, String(v)),
+			removeItem: (k: string) => void store.delete(k),
+			clear: () => store.clear(),
+			key: (i: number) => [...store.keys()][i] ?? null,
+			get length() {
+				return store.size
+			},
+		},
+	})
+}
+
 const mountQuiz = (quizName: string) =>
 	mount(Quiz, {
 		props: { quizName },
@@ -151,6 +172,7 @@ describe('Quiz.vue timer lifecycle', () => {
 		resetSpy.mockClear()
 		currentQuiz = 'quiz-a'
 		neverResolve = false
+		installStorageShim()
 		localStorage.clear()
 		vi.useFakeTimers()
 	})
@@ -262,6 +284,7 @@ describe('Quiz.vue state reset when the instance is reused', () => {
 		resetSpy.mockClear()
 		currentQuiz = 'quiz-a'
 		neverResolve = false
+		installStorageShim()
 		localStorage.clear()
 		vi.useFakeTimers()
 	})
@@ -326,6 +349,7 @@ describe('Quiz.vue submit and reset on a reused instance', () => {
 		resetSpy.mockClear()
 		currentQuiz = 'quiz-a'
 		neverResolve = false
+		installStorageShim()
 		localStorage.clear()
 		vi.useFakeTimers()
 	})
