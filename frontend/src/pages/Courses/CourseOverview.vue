@@ -27,7 +27,7 @@
 						</template>
 						<template v-if="Number(course.data.rating) > 0">
 							<div class="flex items-center gap-1">
-								<LucideStar class="size-4 text-transparent fill-yellow-500" />
+								<LucideStar class="size-4 text-transparent fill-ink-amber-7" />
 								<span class="font-medium text-ink-gray-9">{{
 									formatRating(course.data.rating)
 								}}</span>
@@ -96,18 +96,18 @@
 							{{ outlineStats }}
 						</div>
 					</div>
-					<div class="border rounded-md p-2">
+					<div class="border rounded-5 p-2">
 						<SkeletonLoader
 							v-if="outline.loading && !outline.data"
-							variant="list"
-							:count="6"
+							variant="course-outline"
+							:count="10"
 						/>
 						<div
 							v-else-if="!hasCourseContent"
 							class="flex items-center justify-center px-4 py-10 text-center"
 						>
 							<span class="text-sm text-ink-gray-5">
-								{{ __('Course Content coming soon!') }}
+								{{ __('Course content coming soon!') }}
 							</span>
 						</div>
 						<CourseOutline
@@ -124,7 +124,7 @@
 						{{ __('About this course') }}
 					</h2>
 					<div
-						v-html="sanitizeRichHTML(course.data.description)"
+						v-safe-html:rich="course.data.description"
 						class="ProseMirror prose prose-sm max-w-none !whitespace-normal prose-table:table-fixed prose-td:p-2 prose-th:p-2 prose-td:border prose-th:border prose-td:border-outline-gray-2 prose-th:border-outline-gray-2 prose-td:relative prose-th:relative prose-th:bg-surface-gray-2"
 					/>
 				</section>
@@ -149,7 +149,6 @@
 </template>
 
 <script setup lang="ts">
-import { sanitizeRichHTML } from '@/utils/sanitizeRichHTML'
 import { computed, inject, watch } from 'vue'
 import { createResource, Badge } from 'frappe-ui'
 import { formatAmount, formatRating } from '@/utils/'

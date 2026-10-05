@@ -1,6 +1,6 @@
 <template>
 	<Dialog
-		v-model="show"
+		v-model:open="show"
 		:title="__('New Address')"
 		size="xl"
 		:actions="[
@@ -12,7 +12,7 @@
 		]"
 	>
 		<template #default>
-			<div class="grid grid-cols-2 gap-5">
+			<div class="grid grid-cols-1 md:grid-cols-2 gap-5">
 				<FormControl
 					v-model="address.address_title"
 					:label="__('Address Title')"
@@ -75,6 +75,7 @@
 </template>
 <script setup lang="ts">
 import { call, Dialog, FormControl, Select, toast } from 'frappe-ui'
+import type { FrappeResourceError } from 'frappe-ui'
 import { reactive, watch } from 'vue'
 import Link from '@/components/Controls/Link.vue'
 
@@ -146,7 +147,7 @@ const createAddress = (close: () => void) => {
 			close()
 			toast.success(__('Address created successfully'))
 		})
-		.catch((err: { messages?: string[] }) => {
+		.catch((err: FrappeResourceError) => {
 			toast.error(err.messages?.[0] || __('Error creating Address'))
 			console.error(err)
 		})

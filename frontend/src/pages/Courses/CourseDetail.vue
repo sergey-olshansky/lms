@@ -10,7 +10,7 @@
 	>
 		<template #actions="{ tab }">
 			<template v-if="tab?.key === 'settings' && courseFormRef">
-				<Badge v-if="courseFormRef.isDirty" theme="orange">
+				<Badge v-if="courseFormRef.isDirty" theme="amber">
 					{{ __('Not Saved') }}
 				</Badge>
 				<Dropdown
@@ -23,29 +23,28 @@
 					side="bottom"
 					align="end"
 				/>
+				<Button
+					v-if="user.data?.is_moderator && !isMobile"
+					:variant="course.data?.published ? 'subtle' : 'solid'"
+					:theme="course.data?.published ? 'red' : 'gray'"
+					:loading="publishToggle.loading"
+					@click="togglePublishCourse"
+				>
+					{{ course.data?.published ? __('Unpublish') : __('Publish') }}
+				</Button>
 				<Tooltip
 					v-if="!courseFormRef.isDirty"
 					:text="__('No changes to save')"
-					:hoverDelay="0.1"
+					:hoverDelay="100"
 				>
-					<Button
-						variant="solid"
-						:disabled="true"
-						:class="isMobile ? '!size-9' : ''"
-					>
-						<span v-if="isMobile" class="lucide-save size-4" />
-						<span v-else>{{ __('Save') }}</span>
-					</Button>
+					<HeaderButton :label="__('Save')" variant="solid" disabled />
 				</Tooltip>
 				<ShortcutTooltip v-else :label="__('Save')" combo="Mod+S">
-					<Button
+					<HeaderButton
+						:label="__('Save')"
 						variant="solid"
-						:class="isMobile ? '!size-9' : ''"
 						@click="courseFormRef.submitCourse()"
-					>
-						<span v-if="isMobile" class="lucide-save size-4" />
-						<span v-else>{{ __('Save') }}</span>
-					</Button>
+					/>
 				</ShortcutTooltip>
 			</template>
 			<template v-if="tab?.key === 'editor' && editorSelected">
@@ -76,38 +75,32 @@
 						</template>
 					</Button>
 				</Tooltip>
-				<router-link
-					:to="{
-						name: 'Lesson',
-						params: {
-							courseName: props.courseName,
-							chapterNumber: editorSelected.chapterNumber,
-							lessonNumber: editorSelected.lessonNumber,
-						},
-						query: { studentView: 1 },
-					}"
-				>
-					<Tooltip v-if="isMobile" :text="__('Student View')">
-						<Button variant="outline" class="!size-9">
-							<template #icon>
-								<span class="lucide-eye size-4" />
-							</template>
-						</Button>
-					</Tooltip>
-					<Button v-else variant="outline">
-						<template #prefix>
+				<Tooltip v-if="isMobile" :text="__('Student View')">
+					<Button
+						variant="outline"
+						class="!size-9"
+						:label="__('Student View')"
+						:route="studentViewRoute"
+					>
+						<template #icon>
 							<span class="lucide-eye size-4" />
 						</template>
-						{{ __('Student View') }}
 					</Button>
-				</router-link>
+				</Tooltip>
+				<Button v-else variant="outline" :route="studentViewRoute">
+					<template #prefix>
+						<span class="lucide-eye size-4" />
+					</template>
+					{{ __('Student View') }}
+				</Button>
 			</template>
 			<Button
 				v-if="tab?.key === 'dashboard' && course.data && isMobile"
 				variant="outline"
 				class="!size-9"
+				:label="__('Enroll')"
 				:tooltip="__('Enroll')"
-				@click="courseDashboardRef?.openEnrollModal()"
+				@click="openEnrollForm()"
 			>
 				<template #icon>
 					<span class="lucide-plus size-4" />
@@ -116,21 +109,12 @@
 			<Button
 				v-else-if="tab?.key === 'dashboard' && course.data"
 				variant="outline"
-				@click="courseDashboardRef?.openEnrollModal()"
+				@click="openEnrollForm()"
 			>
 				<template #prefix>
 					<span class="lucide-plus size-4" />
 				</template>
 				{{ __('Enroll') }}
-			</Button>
-			<Button
-				v-if="tab?.key === 'settings' && user.data?.is_moderator && !isMobile"
-				:variant="course.data?.published ? 'outline' : 'solid'"
-				:theme="course.data?.published ? 'red' : 'gray'"
-				:loading="publishToggle.loading"
-				@click="togglePublishCourse"
-			>
-				{{ course.data?.published ? __('Unpublish') : __('Publish') }}
 			</Button>
 		</template>
 
@@ -142,7 +126,7 @@
 		<template #tab-body-editor>
 			<div
 				v-if="isMobile && editorSelected"
-				class="flex items-center gap-2 border-b bg-surface-base px-3 py-2"
+				class="flex items-center gap-2 border-b bg-surface-base px-5 py-2.5"
 			>
 				<Button
 					variant="subtle"
@@ -183,11 +167,6 @@
 		</template>
 
 		<template #overlay="{ tab }">
-			<!-- Chapters as a floating pill rather than a header icon: on a phone
-			     the outline is the control you reach for most while editing, and
-			     the bottom-right corner is where a thumb already is. Uses the
-			     ordinary outline Button so it carries espresso's surface, border
-			     and ink tokens instead of an ad-hoc dark fill. -->
 			<Button
 				v-if="isMobile && tab?.key === 'editor'"
 				variant="outline"
@@ -206,10 +185,12 @@
 				class="pointer-events-none absolute inset-x-0 top-0 z-10 hidden md:flex"
 			>
 				<div class="w-[70%]" />
+				<!-- h-12 is the tab strip's height: the bar sits level with it, so
+				     the two bottom borders have to meet. -->
 				<div
-					class="pointer-events-auto flex w-[30%] items-center justify-between gap-x-2 border-s border-b bg-surface-base p-1 px-5"
+					class="pointer-events-auto flex h-12 w-[30%] items-center justify-between gap-x-2 border-s border-b bg-surface-base px-5"
 				>
-					<div class="py-2.5 text-base-medium text-ink-gray-9">
+					<div class="text-p-base-medium text-ink-gray-9">
 						{{ __('Chapters') }}
 					</div>
 					<Button size="sm" @click="courseEditorRef?.openAddChapter()">
@@ -223,11 +204,13 @@
 		</template>
 	</TabbedDetailPage>
 	<LessonHelp v-model="showLessonHelp" />
+
+	<router-view />
 </template>
 <script setup lang="ts">
 import { computed, inject, markRaw, ref, useTemplateRef, watch } from 'vue'
 import type { ComputedRef } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import type { Router } from 'vue-router'
 import {
 	Badge,
@@ -238,10 +221,11 @@ import {
 	toast,
 	usePageMeta,
 } from 'frappe-ui'
+import type { FrappeResourceError } from 'frappe-ui'
 import { sessionStore } from '@/stores/session'
 import { useScreenSize } from '@/utils/composables'
-import TabbedDetailPage from '@/components/Layouts/TabbedDetailPage.vue'
-import type { DetailTab } from '@/components/Layouts/TabbedDetailPage.vue'
+import TabbedDetailPage from '@/components/Layouts/pages/TabbedDetailPage.vue'
+import type { DetailTab } from '@/components/Layouts/pages/TabbedDetailPage.vue'
 import CourseOverview from '@/pages/Courses/CourseOverview.vue'
 import SkeletonLoader from '@/components/SkeletonLoader.vue'
 import CourseDashboard from '@/pages/Courses/CourseDashboard.vue'
@@ -249,6 +233,8 @@ import CourseEditor from '@/pages/Courses/CourseEditor.vue'
 import CourseForm from '@/pages/Courses/CourseForm.vue'
 import LessonHelp from '@/components/LessonHelp.vue'
 import ShortcutTooltip from '@/components/ShortcutTooltip.vue'
+import HeaderButton from '@/components/HeaderButton.vue'
+import { openFormRoute } from '@/composables/useFormRoute'
 import type {
 	CourseDetails,
 	CourseInstructorInfo,
@@ -260,6 +246,7 @@ type Brand = { name?: string; logo?: string; favicon?: string }
 
 const { brand } = sessionStore() as { brand: Brand }
 const router: Router = useRouter()
+const route = useRoute()
 const user = inject<SessionUser>('$user')!
 const { isMobile } = useScreenSize()
 
@@ -272,6 +259,16 @@ interface EditorSelection {
 
 const editorSelected = ref<EditorSelection | null>(null)
 const showLessonHelp = ref(false)
+
+const studentViewRoute = computed(() => ({
+	name: 'Lesson',
+	params: {
+		courseName: props.courseName,
+		chapterNumber: editorSelected.value?.chapterNumber,
+		lessonNumber: editorSelected.value?.lessonNumber,
+	},
+	query: { studentView: 1 },
+}))
 
 type CourseMenuItem = {
 	label: string
@@ -288,12 +285,6 @@ const page = useTemplateRef('page')
 
 const courseFormRef = computed<CourseFormApi | null>(
 	() => (page.value?.instanceFor('settings') ?? null) as CourseFormApi | null
-)
-
-type CourseDashboardApi = { openEnrollModal: () => void }
-const courseDashboardRef = computed<CourseDashboardApi | null>(
-	() =>
-		(page.value?.instanceFor('dashboard') ?? null) as CourseDashboardApi | null
 )
 
 type CourseEditorApi = {
@@ -328,11 +319,8 @@ const publishToggle = createResource({
 		)
 		course.reload()
 	},
-	onError(err: { messages?: string[] } | string) {
-		const msg =
-			typeof err === 'string'
-				? err
-				: err.messages?.[0] ?? __('Could not update publish status')
+	onError(err: FrappeResourceError) {
+		const msg = err.messages?.[0] ?? __('Could not update publish status')
 		toast.error(msg)
 	},
 }) as Resource<unknown>
@@ -356,6 +344,19 @@ const courseOptions = computed<CourseMenuItem[]>(() => {
 
 function togglePublishCourse() {
 	publishToggle.submit()
+}
+
+// The enrollment form is a child route now, not a modal the dashboard tab owned,
+// so the button navigates instead of reaching into the tab instance. Hash and
+// query both travel: the hash names the tab this page returns to, and the query
+// holds CourseEditor's open lesson.
+function openEnrollForm() {
+	openFormRoute(router, {
+		name: 'NewCourseEnrollment',
+		params: { courseName: props.courseName },
+		hash: route.hash,
+		query: { ...route.query },
+	})
 }
 
 const props = defineProps<{

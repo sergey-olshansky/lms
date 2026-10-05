@@ -15,29 +15,15 @@
 		@load-more="exercises.next()"
 	>
 		<template #actions>
-			<router-link
-				v-if="exercises.data?.length"
-				class="hidden md:block"
-				:to="{
-					name: 'ProgrammingExerciseSubmissions',
-				}"
-			>
-				<Button class="text-p-base-medium">
-					<template #prefix>
-						<span class="lucide-clipboard-list size-4" />
-					</template>
-					{{ __('Check All Submissions') }}
-				</Button>
-			</router-link>
+			<HeaderButton
+				:route="{ name: 'ProgrammingExerciseSubmissions' }"
+				:label="__('Submissions')"
+				icon="lucide-clipboard-list"
+			/>
 			<Button
 				v-if="!readOnlyMode"
 				variant="solid"
-				@click="
-					() => {
-						exerciseID = 'new'
-						showForm = true
-					}
-				"
+				@click="openExerciseForm('new')"
 			>
 				<template #prefix>
 					<span class="lucide-plus size-4" />
@@ -51,7 +37,6 @@
 				v-model="titleFilter"
 				:placeholder="__('Search')"
 				:aria-label="__('Search')"
-				@input="updateList"
 			>
 				<template #prefix>
 					<span class="lucide-search size-4 text-ink-gray-5" />
@@ -67,8 +52,6 @@
 
 		<template #cell="{ column, value }">
 			<div v-if="column.key == 'modified'" class="text-sm text-ink-gray-5">
-				<!-- A cell value is `unknown`: a row is a bag of fields and only
-				     the branch it lands in knows what one holds. -->
 				{{ dayjs(value as string).format('MMM D, YYYY') }}
 			</div>
 			<div v-else>{{ value }}</div>
@@ -80,20 +63,22 @@
 				:label="__('Delete')"
 				@click="showDeleteConfirmation(selections, unselectAll)"
 			>
-				<span class="lucide-trash-2 size-4" />
+				<template #icon>
+					<span class="lucide-trash-2 size-4" aria-hidden="true" />
+				</template>
 			</Button>
 		</template>
 	</ListPage>
-
-	<ProgrammingExerciseForm
-		v-model="showForm"
-		v-model:exercises="exercises"
-		:exerciseID="exerciseID"
-		v-model:totalExercises="totalExercises"
-	/>
 </template>
 <script setup lang="ts">
-import { computed, getCurrentInstance, inject, onMounted, ref } from 'vue'
+import {
+	computed,
+	getCurrentInstance,
+	inject,
+	onMounted,
+	ref,
+	watch,
+} from 'vue'
 import type dayjsType from 'dayjs'
 import {
 	Button,
@@ -103,23 +88,22 @@ import {
 	FormControl,
 	toast,
 	usePageMeta,
+	type FrappeResourceError,
 } from 'frappe-ui'
-import ListPage from '@/components/Layouts/ListPage.vue'
+import ListPage from '@/components/Layouts/pages/ListPage.vue'
+import HeaderButton from '@/components/HeaderButton.vue'
 import Select from '@/components/Controls/Select.vue'
 import type { ListRow } from '@/types'
 
 import { sessionStore } from '@/stores/session'
 import { useRouter } from 'vue-router'
-import ProgrammingExerciseForm from '@/pages/ProgrammingExercises/ProgrammingExerciseForm.vue'
 
 const readOnlyMode = window.read_only_mode
 const { brand } = sessionStore()
-const showForm = ref<boolean>(false)
-const exerciseID = ref<string>('new')
 const user = inject<any>('$user')
 const dayjs = inject<typeof dayjsType>('$dayjs')!
 const titleFilter = ref<string>('')
-const languageFilter = ref<string>('')
+const languageFilter = ref<string | null>('')
 const router = useRouter()
 const app = getCurrentInstance()
 const { $dialog } = app?.appContext.config.globalProperties
@@ -149,13 +133,23 @@ const exercises = createListResource({
 	pageLength: 24,
 })
 
+// A plain push, not openFormRoute: the marker it stamps exists so a dialog's
+// own close can pop the entry it opened, and the form is a page now — it goes
+// back through its breadcrumbs.
+const openExerciseForm = (exerciseID: string) => {
+	router.push(
+		exerciseID === 'new'
+			? { name: 'NewProgrammingExercise' }
+			: { name: 'ProgrammingExerciseForm', params: { exerciseID } }
+	)
+}
+
 const listOptions = computed(() => ({
 	showTooltip: false,
 	selectable: true,
 	onRowClick: (row: ListRow) => {
 		if (readOnlyMode) return
-		exerciseID.value = row.name as string
-		showForm.value = true
+		openExerciseForm(row.name as string)
 	},
 }))
 
@@ -196,7 +190,7 @@ const showDeleteConfirmation = (
 				label: __('Delete'),
 				theme: 'red',
 				variant: 'solid',
-				onClick(close: () => void) {
+				onClick({ close }: { close: () => void }) {
 					deleteExercises(selections, unselectAll)
 					close()
 				},
@@ -222,6 +216,9 @@ const deleteExercises = (selections: Set<string>, unselectAll: () => void) => {
 	unselectAll()
 }
 
+// Watch, not a listener. TextInput emits on both input and change.
+watch(titleFilter, () => updateList())
+
 const pageLength = computed({
 	get: () => exercises.pageLength,
 	set: (value) => {
@@ -240,8 +237,8 @@ const totalExercises = createResource({
 	},
 	auto: true,
 	cache: ['programming_exercises_count', user.data?.name],
-	onError(err: any) {
-		toast.error(err.messages?.[0] || err)
+	onError(err: FrappeResourceError) {
+		toast.error(err.messages?.[0] || err.message)
 		console.error(err)
 	},
 })

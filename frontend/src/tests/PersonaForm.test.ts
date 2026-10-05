@@ -16,7 +16,8 @@ vi.mock('frappe-ui', () => ({
 	call: callMock,
 	usePageMeta: vi.fn(),
 }))
-vi.mock('frappe-ui/frappe', () => ({
+vi.mock('@framework/ui/telemetry/index', async (importOriginal) => ({
+	...(await importOriginal<typeof import('@framework/ui/telemetry/index')>()),
 	useTelemetry: () => ({ capture: captureMock }),
 }))
 vi.mock('vue-router', () => ({
@@ -64,7 +65,7 @@ vi.mock('@/components/Persona/PersonaCard.vue', async () => {
 	}
 })
 
-import PersonaForm from '@/pages/PersonaForm.vue'
+import PersonaForm from '@/pages/Forms/PersonaForm.vue'
 
 function mountForm() {
 	return mount(PersonaForm, {
