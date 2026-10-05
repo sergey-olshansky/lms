@@ -654,7 +654,7 @@ def validate_format(
 	for previous, current in zip(numbers, numbers[1:], strict=False):
 		if current > previous + 1:
 			skipped = list(range(previous + 1, current))
-			validation_warnings.append(f"Task numbering skips {', '.join(map(str, skipped))}")
+			validation_warnings.append(f"Task numbering skips {', '.join(str(number) for number in skipped)}")
 
 	id_occurrences: dict[str, list[int]] = {}
 	id_spellings: dict[str, str] = {}

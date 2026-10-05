@@ -2656,6 +2656,7 @@ def get_progress_distribution(progressList: list):
 	return distribution
 
 
+# nosemgrep: frappe-semgrep-rules.rules.security.guest-whitelisted-method - reviewed: a guest gets only the public site title (Website Settings app_name, already on every page), the LMS route (frappe.conf lms_path, public URL path) and static manifest icon paths; no user or document data, no writes. Unchanged from upstream frappe/lms develop.
 @frappe.whitelist(allow_guest=True)
 def get_pwa_manifest():
 	"""Web app manifest for installing the LMS as a PWA."""
