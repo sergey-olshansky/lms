@@ -208,10 +208,10 @@ test.describe("Quiz", () => {
 			);
 
 			// show_answers defaults to 1 on LMS Quiz, so a choice question offers
-			// Check before it offers Submit. Submit only replaces it once the
-			// answer has been revealed.
+			// Check before it offers Finish Quiz. The latter only replaces it once
+			// the answer has been revealed.
 			await button(page, "Check").click();
-			await button(page, "Submit").click();
+			await button(page, "Finish Quiz").click();
 			await submitQuiz;
 
 			// Result panel appears after submission

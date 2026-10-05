@@ -24,6 +24,10 @@ import { defineComponent, h } from 'vue'
 vi.stubGlobal('__', (text: string) => text)
 enableAutoUnmount(afterEach)
 
+vi.mock('@/customization/sidebar', () => ({
+	isSidebarItemHidden: () => false,
+}))
+
 const {
 	ensureMobileNavLinks,
 	isLoggedIn,

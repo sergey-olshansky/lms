@@ -3,7 +3,11 @@
  * destination on both the bar and this list, an unrecognised destination
  * landing somewhere, and the emitted icon classes matching real lucide SVGs.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+
+vi.mock('@/customization/sidebar', () => ({
+	isSidebarItemHidden: () => false,
+}))
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 

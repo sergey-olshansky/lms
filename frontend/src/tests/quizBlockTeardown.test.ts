@@ -74,9 +74,11 @@ vi.mock('frappe-ui', async () => {
 		Checkbox: passthrough,
 		Dialog: { props: ['open'], template: '<div v-if="open"><slot /></div>' },
 		FormControl: passthrough,
+		ListView: passthrough,
 		LoadingIndicator: passthrough,
 		Progress: passthrough,
 		Skeleton: passthrough,
+		TextEditor: passthrough,
 	}
 })
 
@@ -116,12 +118,30 @@ const startButton = (tool: Quiz) =>
 		(button) => button.textContent?.trim() === 'Start Quiz'
 	)
 
+const installStorageShim = () => {
+	const store = new Map<string, string>()
+	Object.defineProperty(window, 'localStorage', {
+		configurable: true,
+		value: {
+			getItem: (key: string) => store.get(key) ?? null,
+			setItem: (key: string, value: string) => void store.set(key, String(value)),
+			removeItem: (key: string) => void store.delete(key),
+			clear: () => store.clear(),
+			key: (index: number) => [...store.keys()][index] ?? null,
+			get length() {
+				return store.size
+			},
+		},
+	})
+}
+
 beforeEach(() => {
 	submitted.length = 0
 	called.length = 0
 	sendBeacon.mockClear()
 	Object.assign(navigator, { sendBeacon })
 	Object.assign(window, { translatedMessages: {} })
+	installStorageShim()
 	localStorage.clear()
 	vi.useFakeTimers()
 })
@@ -157,7 +177,7 @@ describe('tearing down an inline quiz keeps the completion gate shut', () => {
 		expect(sendBeacon).not.toHaveBeenCalled()
 	})
 
-	it('starts a remounted quiz from the beginning, with no result to show', async () => {
+	it('resumes a remounted quiz without inventing a result or submission', async () => {
 		const first = await renderQuizBlock()
 		startButton(first)!.click()
 		await flushPromises()
@@ -166,7 +186,7 @@ describe('tearing down an inline quiz keeps the completion gate shut', () => {
 
 		const second = await renderQuizBlock()
 
-		expect(startButton(second)).toBeDefined()
+		expect(second.wrapper.textContent).toContain('Pick a')
 		expect(second.wrapper.textContent).not.toContain('Quiz Summary')
 		expect(submitted).not.toContain(SUBMIT_URL)
 	})

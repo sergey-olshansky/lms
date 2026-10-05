@@ -107,6 +107,13 @@ jobs:
           # local ref before get-app clones the workspace; fetching an unadvertised
           # raw SHA from a local Git remote is rejected by upload-pack.
           git -C "$GITHUB_WORKSPACE" update-ref refs/heads/ci-pr-head "$PR_HEAD_SHA"
+          # The fork does not carry upstream release tags. Import the exact,
+          # immutable seed tag into the local checkout before bench clones it.
+          # Fetching the explicit ref must fail if upstream ever loses it; do not
+          # let the ladder silently seed from the PR head.
+          git -C "$GITHUB_WORKSPACE" fetch --force https://github.com/frappe/lms.git \
+            'refs/tags/v2.0.0:refs/tags/v2.0.0'
+          git -C "$GITHUB_WORKSPACE" rev-parse --verify 'v2.0.0^{commit}'
           bench get-app --skip-assets --branch v2.0.0 lms "${GITHUB_WORKSPACE}"
 
           # bench init clones frappe and payments with their remote named upstream.
