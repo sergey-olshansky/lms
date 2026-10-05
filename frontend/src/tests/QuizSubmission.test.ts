@@ -22,6 +22,11 @@ vi.mock('frappe-ui', () => ({
 	Badge: { template: '<div />' },
 	Button: { template: '<button />' },
 	Breadcrumbs: { template: '<nav />' },
+	Popover: { template: '<div><slot /></div>' },
+	Avatar: {
+		props: ['label'],
+		template: '<span data-testid="avatar">{{ label }}</span>',
+	},
 	usePageMeta: vi.fn(),
 	toast: { error: vi.fn() },
 }))
