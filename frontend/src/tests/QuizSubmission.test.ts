@@ -79,7 +79,7 @@ beforeEach(() => {
 describe('Quiz submission review', () => {
 	it('shows student and accepted answers separately for a system manager', () => {
 		const wrapper = render()
-		expect(wrapper.text()).toMatch(/Answered\s*:\s*21/)
+		expect(wrapper.text()).toMatch(/Answer\s*:\s*21/)
 		expect(wrapper.text()).toMatch(/Correct Answer\s*:\s*12, 21/)
 		expect(state.push).not.toHaveBeenCalled()
 		wrapper.unmount()
