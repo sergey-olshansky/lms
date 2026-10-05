@@ -705,9 +705,7 @@ def _can_review_submission(quiz: str) -> bool:
 	"""Return whether the current user may view answer keys for a quiz."""
 	if not frappe.session.user or frappe.session.user == "Guest":
 		return False
-	quiz_details = frappe.db.get_value(
-		"LMS Quiz", quiz, ["owner", "course"], as_dict=True
-	)
+	quiz_details = frappe.db.get_value("LMS Quiz", quiz, ["owner", "course"], as_dict=True)
 	if not quiz_details:
 		return False
 
@@ -743,9 +741,7 @@ def get_submission_correct_answers(submission: str) -> dict[str, list[str]]:
 		)
 	submission_doc.check_permission("read")
 
-	question_names = [
-		row.question_name for row in submission_doc.result if row.question_name
-	]
+	question_names = [row.question_name for row in submission_doc.result if row.question_name]
 	if not question_names:
 		return {}
 

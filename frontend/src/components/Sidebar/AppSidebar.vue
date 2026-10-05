@@ -94,10 +94,7 @@
 						</div>
 					</template>
 				</Tooltip>
-				<Tooltip
-					v-if="SHOW_SIDEBAR_HELP && showOnboarding"
-					:text="__('Help')"
-				>
+				<Tooltip v-if="SHOW_SIDEBAR_HELP && showOnboarding" :text="__('Help')">
 					<span
 						class="lucide-circle-help size-4 text-ink-gray-7 cursor-pointer"
 						@click="

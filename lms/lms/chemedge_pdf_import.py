@@ -15,7 +15,6 @@ from frappe.utils.html_utils import sanitize_html
 from lms.lms.pdf_task_bundle_extractor import FormatError, build_bundle, validate_format
 from lms.lms.utils import has_course_instructor_role, has_moderator_role
 
-
 SOURCE_PDF_FIELD = "chemedge_source_pdf"
 TASK_IMAGE_FIELD = "chemedge_task_image"
 
@@ -38,9 +37,7 @@ def _uploaded_pdf(file_name: str):
 		frappe.throw(_("Please upload a PDF file."), frappe.ValidationError)
 
 	file_doc = frappe.get_doc("File", file_name)
-	if file_doc.owner != frappe.session.user and not (
-		_is_system_manager() or has_moderator_role()
-	):
+	if file_doc.owner != frappe.session.user and not (_is_system_manager() or has_moderator_role()):
 		frappe.throw(_("You are not permitted to use this file."), frappe.PermissionError)
 	if Path(file_doc.file_name or "").suffix.lower() != ".pdf":
 		frappe.throw(_("The uploaded file must be a PDF."), frappe.ValidationError)
@@ -68,7 +65,7 @@ def _question_html(task: dict, image_url: str) -> str:
 	number = int(task["number"])
 	task_id = frappe.utils.escape_html(str(task["id"]))
 	return sanitize_html(
-		f"<p>Task {number} · FIPI ID {task_id}</p><p><img src=\"{image_url}\" alt=\"Task {number}\"></p>",
+		f'<p>Task {number} · FIPI ID {task_id}</p><p><img src="{image_url}" alt="Task {number}"></p>',
 		always_sanitize=True,
 	)
 
@@ -80,11 +77,7 @@ def _source_folder_label(source_folder: str | None) -> str:
 
 	# The browser sends a relative folder path. Keep only ordinary path parts so
 	# it cannot introduce traversal-looking labels into a quiz title.
-	folder_parts = [
-		part.strip()
-		for part in source_folder.split("/")
-		if part.strip() not in {"", ".", ".."}
-	]
+	folder_parts = [part.strip() for part in source_folder.split("/") if part.strip() not in {"", ".", ".."}]
 	return " / ".join(folder_parts)
 
 

@@ -136,28 +136,25 @@
 								</span>
 								<span v-safe-html:rich="row.answer" />
 							</div>
-						<!-- Tutor customization: show the correct answer next to the
+							<!-- Tutor customization: show the correct answer next to the
 						     learner's answer while grading. -->
-						<div
-							class="text-base leading-6 text-ink-gray-6 [&_p]:m-0 [&_p]:inline"
-						>
-							<span
-								class="me-2 text-xs font-medium uppercase tracking-wide text-ink-gray-4"
+							<div
+								class="text-base leading-6 text-ink-gray-6 [&_p]:m-0 [&_p]:inline"
 							>
-								{{ __('Correct Answer:') }}
-							</span>
-							<span class="leading-5" v-if="correctAnswers.loading">…</span>
-							<span
-								v-else-if="correctAnswers.error"
-								class="text-ink-red-5"
-							>
-								{{ __('Could not load correct answers') }}
-							</span>
-							<span
-								v-else
-								v-safe-html:rich="correctAnswer(row.question_name)"
-							/>
-						</div>
+								<span
+									class="me-2 text-xs font-medium uppercase tracking-wide text-ink-gray-4"
+								>
+									{{ __('Correct Answer:') }}
+								</span>
+								<span class="leading-5" v-if="correctAnswers.loading">…</span>
+								<span v-else-if="correctAnswers.error" class="text-ink-red-5">
+									{{ __('Could not load correct answers') }}
+								</span>
+								<span
+									v-else
+									v-safe-html:rich="correctAnswer(row.question_name)"
+								/>
+							</div>
 						</div>
 						<!-- Only an open-ended answer is a judgement call; a choice was
 						     already marked when it was submitted. -->
@@ -572,7 +569,7 @@ const saveSubmission = (opts = {}) => {
 			onError(err) {
 				toast.error(err.messages?.[0] || err)
 			},
-		},
+		}
 	)
 }
 

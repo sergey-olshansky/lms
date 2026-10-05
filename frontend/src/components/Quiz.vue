@@ -452,10 +452,7 @@
 									>
 										<span>{{ __('Next') }}</span>
 									</Button>
-									<div
-										v-else-if="!preview"
-										class="flex items-center gap-2"
-									>
+									<div v-else-if="!preview" class="flex items-center gap-2">
 										<Button
 											v-if="!quiz.data.show_answers"
 											:label="__('Next question')"
@@ -1549,7 +1546,7 @@ const restoreDraft = () => {
 					validNames.has(answer?.question_name) &&
 					Array.isArray(answer.answer) &&
 					answer.answer.every((value) => typeof value === 'string')
-			)
+		  )
 		: []
 	attemptedQuestions.value = questions.value.flatMap((q, index) =>
 		savedAnswers.value.some((answer) => answer.question_name === q.question)
@@ -1560,7 +1557,7 @@ const restoreDraft = () => {
 		? draft.reviewQuestions.flatMap((name) => {
 				const index = questions.value.findIndex((q) => q.question === name)
 				return index < 0 ? [] : [index + 1]
-			})
+		  })
 		: []
 	deadline.value =
 		quiz.data.duration && Number.isFinite(draft.deadline)
