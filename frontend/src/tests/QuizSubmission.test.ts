@@ -21,6 +21,7 @@ vi.mock('frappe-ui', () => ({
 	FormControl: { template: '<input />' },
 	Badge: { template: '<div />' },
 	Button: { template: '<button />' },
+	Breadcrumbs: { template: '<nav />' },
 	usePageMeta: vi.fn(),
 	toast: { error: vi.fn() },
 }))
