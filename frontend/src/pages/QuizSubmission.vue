@@ -372,7 +372,6 @@
 import {
 	createResource,
 	createDocumentResource,
-	createResource,
 	FormControl,
 	Badge,
 	Avatar,
