@@ -45,6 +45,16 @@ vi.mock('@/components/ShortcutTooltip.vue', () => ({
 }))
 
 vi.stubGlobal('__', (s: string) => s)
+// translation.js installs String.prototype.format at app boot; the page
+// calls __('Q{0}:').format(index + 1) and never reaches Vue without it.
+if (!('format' in String.prototype)) {
+	// eslint-disable-next-line no-extend-native
+	Object.defineProperty(String.prototype, 'format', {
+		value: function (...args: string[]) {
+			return this.replace(/\{(\d+)\}/g, (_: string, i: number) => args[i] ?? '')
+		},
+	})
+}
 const render = () =>
 	mount(QuizSubmission, {
 		props: { submission: 'submission' },
