@@ -1,402 +1,696 @@
 <template>
-	<div
+	<AssessmentCard
 		v-if="quiz.loading && !quiz.data"
-		class="flex items-center justify-center py-12"
+		aria-busy="true"
+		data-testid="quiz-skeleton"
 	>
-		<LoadingIndicator class="size-4 text-ink-gray-5" />
-	</div>
-	<div v-else-if="quiz.data">
-		<div
-			class="bg-surface-blue-2 text-ink-blue-6 space-y-2 p-3 mb-4 rounded-lg leading-5"
-		>
-			<div class="font-medium">
-				{{
-					__(
-						'Please read the following instructions carefully before starting the quiz',
-					)
-				}}
+		<AssessmentCardHeader icon="lucide-circle-help" :title="__('Quiz')" />
+		<div class="space-y-4 p-3.5">
+			<Skeleton class="h-5 w-1/3 rounded-4" />
+			<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+				<Skeleton v-for="i in 4" :key="i" class="h-14 rounded-6" />
 			</div>
-			<ol class="list-decimal list-inside space-y-2">
-				<li v-if="inVideo">
-					{{ __('You will have to complete the quiz to continue the video') }}
-				</li>
-				<li>
-					{{
-						__(
-							'Your answers are saved automatically on this device. You can return to this quiz later.',
-						)
-					}}
-				</li>
-				<li>
-					{{
-						__('This quiz consists of {0} questions.').format(questions.length)
-					}}
-				</li>
-				<li v-if="quiz.data?.duration">
-					{{
-						__(
-							'Please ensure that you complete all the questions in {0} minutes.',
-						).format(quiz.data.duration)
-					}}
-				</li>
-				<li v-if="quiz.data?.duration">
-					{{
-						__(
-							'If you fail to do so, the quiz will be automatically submitted when the timer ends.',
-						)
-					}}
-				</li>
-				<li v-if="quiz.data.passing_percentage">
-					{{
-						__(
-							'You will have to get {0}% correct answers in order to pass the quiz.',
-						).format(quiz.data.passing_percentage)
-					}}
-				</li>
-				<li v-if="quiz.data.max_attempts">
-					{{
-						__('You can attempt this quiz {0}.').format(
-							quiz.data.max_attempts == 1
-								? '1 time'
-								: `${quiz.data.max_attempts} times`,
-						)
-					}}
-				</li>
-				<li v-if="quiz.data.enable_negative_marking">
-					{{
-						__(
-							'If you answer incorrectly, {0} {1} will be deducted from your score for each incorrect answer.',
-						).format(
-							quiz.data.marks_to_cut,
-							quiz.data.marks_to_cut == 1 ? 'mark' : 'marks',
-						)
-					}}
-				</li>
-			</ol>
+			<div class="flex justify-end">
+				<Skeleton class="h-8 w-24 rounded-4" />
+			</div>
 		</div>
-
-		<div v-if="quiz.data.duration" class="flex flex-col gap-x-1 my-4 px-2">
-			<div class="mb-2">
-				<span class="text-ink-gray-9"> {{ __('Time') }}: </span>
-				<span class="font-semibold text-ink-gray-9">
-					{{ formatTimer(timer) }}
+	</AssessmentCard>
+	<div v-else-if="quiz.data" class="space-y-4">
+		<AssessmentCard>
+			<AssessmentCardHeader
+				icon="lucide-circle-help"
+				:title="__('Quiz')"
+				:subtitle="quizSubtitle"
+			>
+				<Badge v-if="quiz.data.enable_proctoring" theme="amber" size="sm">
+					{{ __('Proctored') }}
+				</Badge>
+				<span
+					v-if="attemptsLeft !== null"
+					class="hidden text-xs text-ink-gray-5 sm:inline"
+				>
+					{{ attemptsLeftLabel(attemptsLeft) }}
 				</span>
-			</div>
-			<ProgressBar :progress="timerProgress" />
-		</div>
+				<Badge
+					v-if="
+						activeQuestion > 0 && !quizSubmission.data && quiz.data.duration
+					"
+					data-testid="quiz-timer"
+					size="sm"
+					:theme="timerTheme"
+				>
+					<template #prefix>
+						<span class="lucide-timer size-3" />
+					</template>
+					{{ formatTimer(timer) }}
+				</Badge>
+			</AssessmentCardHeader>
 
-		<div v-if="activeQuestion == 0">
-			<div class="border text-center p-6 sm:p-20 rounded-md">
-				<div class="text-lg-semibold text-ink-gray-9">
-					{{ quiz.data.title }}
-				</div>
-				<template v-if="questions.length">
-					<div class="flex items-center justify-center gap-x-2 mt-4">
-						<Button
-							v-if="
-								!quiz.data.max_attempts ||
-								attempts.data?.length < quiz.data.max_attempts
-							"
-							variant="solid"
-							class="text-p-base-medium"
-							@click="startQuiz"
+			<div
+				v-if="
+					activeQuestion > 0 &&
+					!quizSubmission.data &&
+					quiz.data.enable_proctoring
+				"
+				class="flex justify-end border-b border-outline-gray-1 px-3.5 py-2"
+			>
+				<ProctoringMonitor
+					:max-violations="quiz.data.max_violations"
+					:active="proctoringActive"
+					:violation-count="violationCount"
+					@violation="handleViolation"
+					@warning="handleWarning"
+					@camera-ready="() => {}"
+					@camera-denied="() => {}"
+				/>
+			</div>
+
+			<div v-if="activeQuestion == 0">
+				<div
+					v-if="introTips.length && questions.length && !attemptsExhausted"
+					class="space-y-2 border-b border-outline-gray-1 p-3.5"
+				>
+					<div class="text-sm text-ink-gray-5">
+						{{ __('Before you start') }}
+					</div>
+					<ol class="space-y-1.5">
+						<li
+							v-for="(tip, index) in introTips"
+							:key="index"
+							class="flex gap-x-2 text-p-base text-ink-gray-7"
 						>
-							<span>
-								{{ inVideo ? __('Start the Quiz') : __('Start') }}
+							<span class="shrink-0 font-mono text-ink-gray-4">
+								{{ index + 1 }}
 							</span>
-						</Button>
-						<Button
-							v-if="inVideo"
-							class="text-p-base-medium"
-							@click="props.backToVideo()"
+							<span>{{ tip }}</span>
+						</li>
+					</ol>
+				</div>
+
+				<div class="space-y-3.5 p-3.5">
+					<div class="text-base-semibold text-ink-gray-9">
+						{{ quiz.data.title }}
+					</div>
+					<QuizStats
+						:questions="questions.length"
+						:duration="quiz.data.duration"
+						:passingPercentage="quiz.data.passing_percentage"
+						:attemptsLeft="attemptsLeft"
+					/>
+
+					<div
+						v-if="
+							quiz.data.enable_scheduling &&
+							(quiz.data.schedule_start || quiz.data.schedule_end)
+						"
+						class="flex flex-wrap gap-x-4 gap-y-1 text-sm text-ink-gray-6"
+					>
+						<span
+							v-if="quiz.data.schedule_start"
+							class="inline-flex items-center gap-1.5"
 						>
-							{{ __('Resume Video') }}
-						</Button>
+							<span class="lucide-calendar size-3.5" />
+							{{ __('Opens') }}:
+							{{
+								formatScheduleDate(
+									quiz.data.schedule_start_iso || quiz.data.schedule_start
+								)
+							}}
+						</span>
+						<span
+							v-if="quiz.data.schedule_end"
+							class="inline-flex items-center gap-1.5"
+						>
+							<span class="lucide-calendar-x size-3.5" />
+							{{ __('Closes') }}:
+							{{
+								formatScheduleDate(
+									quiz.data.schedule_end_iso || quiz.data.schedule_end
+								)
+							}}
+						</span>
+					</div>
+
+					<template v-if="!questions.length">
+						<p class="text-p-base text-ink-gray-5">
+							{{ __('This quiz has no questions available yet.') }}
+						</p>
+						<Button v-if="inVideo" @click="props.backToVideo()">{{
+							__('Resume Video')
+						}}</Button>
+					</template>
+					<template v-else-if="attemptsExhausted">
+						<FeedbackBanner :correct="false">
+							{{
+								__(
+									"You've used all {0} {1} for this quiz. Reach out to your instructor if you need to try again."
+								).format(
+									quiz.data.max_attempts,
+									quiz.data.max_attempts == 1 ? __('attempt') : __('attempts')
+								)
+							}}
+						</FeedbackBanner>
+						<Button v-if="inVideo" @click="props.backToVideo()">{{
+							__('Resume Video')
+						}}</Button>
+					</template>
+					<template v-else-if="scheduleBlocked">
+						<div
+							data-testid="quiz-schedule-blocked"
+							class="rounded-6 bg-surface-amber-1 px-4 py-3 text-p-base text-ink-amber-5"
+						>
+							{{ scheduleMessage }}
+						</div>
+						<Button v-if="inVideo" @click="props.backToVideo()">{{
+							__('Resume Video')
+						}}</Button>
+					</template>
+					<div v-else class="flex flex-wrap items-center justify-between gap-3">
+						<span class="text-sm text-ink-gray-6">
+							<template v-if="quiz.data.enable_proctoring && !cameraReady">
+								{{
+									__(
+										'Position your face in the camera to enable the start button.'
+									)
+								}}
+							</template>
+							<template v-else-if="quiz.data.duration">
+								{{ __('The timer starts as soon as you begin.') }}
+							</template>
+						</span>
+						<div class="flex items-center gap-2">
+							<Button v-if="inVideo" @click="props.backToVideo()">{{
+								__('Resume Video')
+							}}</Button>
+							<Button
+								variant="solid"
+								:disabled="!!quiz.data.enable_proctoring && !cameraReady"
+								@click="startQuiz"
+							>
+								{{ __('Start Quiz') }}
+							</Button>
+						</div>
+					</div>
+
+					<div
+						v-if="
+							quiz.data.enable_proctoring &&
+							!attemptsExhausted &&
+							!scheduleBlocked
+						"
+						class="grid gap-4 md:grid-cols-2"
+					>
+						<div
+							class="flex flex-col overflow-hidden rounded-6 border border-outline-gray-2"
+						>
+							<div class="border-b border-outline-gray-1 px-3.5 py-2.5">
+								<div class="text-sm-semibold text-ink-gray-8">
+									{{ __('Camera Setup') }}
+								</div>
+							</div>
+							<div class="flex min-h-[18rem] flex-1 flex-col p-3.5 md:min-h-0">
+								<ProctoringMonitor
+									class="flex min-h-0 flex-1 flex-col"
+									:max-violations="quiz.data.max_violations"
+									:active="false"
+									:violation-count="violationCount"
+									@camera-ready="cameraReady = true"
+									@camera-lost="cameraReady = false"
+									@camera-denied="() => {}"
+									@violation="handleViolation"
+									@warning="handleWarning"
+								/>
+							</div>
+						</div>
+
+						<div
+							class="flex flex-col overflow-hidden rounded-6 border border-outline-gray-2"
+						>
+							<div class="border-b border-outline-gray-1 px-3.5 py-2.5">
+								<div class="text-sm-semibold text-ink-gray-8">
+									{{ __('Proctoring Rules') }}
+								</div>
+							</div>
+							<div class="divide-y divide-outline-gray-1">
+								<div
+									v-for="rule in proctoringRules"
+									:key="rule.icon"
+									class="flex items-start gap-3 px-3.5 py-3"
+								>
+									<span
+										:class="rule.icon"
+										class="mt-0.5 size-4 shrink-0 text-ink-gray-5"
+									/>
+									<div>
+										<div class="text-base text-ink-gray-8">
+											{{ rule.title }}
+										</div>
+										<div class="mt-0.5 text-p-sm text-ink-gray-5">
+											{{ rule.hint }}
+										</div>
+									</div>
+								</div>
+								<div
+									class="flex items-start gap-3 bg-surface-orange-1 px-3.5 py-3"
+								>
+									<span
+										class="lucide-alert-triangle mt-0.5 size-4 shrink-0 text-ink-orange-4"
+									/>
+									<div class="text-p-base text-ink-orange-5">
+										{{
+											__(
+												'After {0} {1}, the quiz will be automatically submitted.'
+											).format(
+												quiz.data.max_violations,
+												quiz.data.max_violations == 1
+													? __('violation')
+													: __('violations')
+											)
+										}}
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<div v-else-if="!quizSubmission.data">
+				<template v-for="(question, qtidx) in questions" :key="question.name">
+					<div v-if="qtidx == activeQuestion - 1 && questionDetails.data">
+						<div
+							class="flex h-11 items-center gap-3 border-b border-outline-gray-1 bg-surface-gray-1 px-3.5"
+						>
+							<span class="shrink-0 text-sm text-ink-gray-5">
+								{{
+									__('Question {0} of {1}').format(
+										activeQuestion,
+										questions.length
+									)
+								}}
+							</span>
+							<Progress
+								class="min-w-0 flex-1"
+								size="sm"
+								:value="(activeQuestion / questions.length) * 100"
+							/>
+							<span class="shrink-0 text-sm text-ink-gray-5">
+								{{ question.marks }}
+								{{ question.marks == 1 ? __('Mark') : __('Marks') }}
+							</span>
+						</div>
+
+						<div class="space-y-3 p-3.5">
+							<div class="space-y-1">
+								<div class="text-sm text-ink-gray-5">
+									{{
+										questionDetails.data.type == 'Open Ended'
+											? __('Written response')
+											: getInstructions(questionDetails.data)
+									}}
+								</div>
+								<div
+									class="text-p-base font-semibold text-ink-gray-9 break-words [&_img]:h-auto [&_img]:max-w-full"
+									v-safe-html:rich="questionDetails.data.question"
+								></div>
+							</div>
+
+							<div
+								v-if="questionDetails.data.type == 'Choices'"
+								class="flex flex-col gap-1.5"
+							>
+								<template v-for="index in MAX_OPTIONS" :key="index">
+									<template v-if="questionDetails.data[`option_${index}`]">
+										<OptionRow>
+											<template #control>
+												<input
+													:type="
+														questionDetails.data.multiple ? 'checkbox' : 'radio'
+													"
+													:name="`${optionGroup}-${activeQuestion}`"
+													class="size-3.5 shrink-0 text-ink-gray-9 focus:ring-outline-elevation-2"
+													:class="
+														questionDetails.data.multiple
+															? 'rounded-1'
+															: 'border-outline-gray-4 bg-surface-base checked:border-4 checked:border-[color:var(--ink-gray-9)] checked:bg-surface-base checked:bg-none'
+													"
+													:disabled="!!showAnswers.length"
+													:checked="!!selectedOptions[index - 1]"
+													@change="markAnswer(index)"
+												/>
+											</template>
+											<span
+												v-safe-html:rich="
+													questionDetails.data[`option_${index}`]
+												"
+											></span>
+											<template
+												v-if="showAnswers.length && quiz.data.show_answers"
+												#end
+											>
+												<span
+													v-if="showAnswers[index - 1] == 1"
+													class="lucide-check-circle size-4 shrink-0 text-ink-green-4"
+												/>
+												<span
+													v-else-if="showAnswers[index - 1] == 2"
+													class="lucide-minus-circle size-4 shrink-0 text-ink-green-4"
+												/>
+												<span
+													v-else-if="showAnswers[index - 1] == 0"
+													class="lucide-x-circle size-4 shrink-0 text-ink-red-5"
+												/>
+											</template>
+										</OptionRow>
+										<div
+											v-if="questionDetails.data[`explanation_${index}`]"
+											v-show="showAnswers.length"
+											class="break-words px-3 text-p-base text-ink-gray-7"
+										>
+											{{ questionDetails.data[`explanation_${index}`] }}
+										</div>
+									</template>
+								</template>
+								<FeedbackBanner
+									v-if="showAnswers.length && quiz.data.show_answers"
+									data-testid="quiz-feedback"
+									:correct="choiceCorrect"
+								>
+									{{ choiceCorrect ? __('Correct') : __('Incorrect') }}
+								</FeedbackBanner>
+							</div>
+							<div
+								v-else-if="questionDetails.data.type == 'User Input'"
+								class="space-y-3"
+							>
+								<FormControl
+									v-model="possibleAnswer"
+									type="textarea"
+									:disabled="showAnswers.length ? true : false"
+								/>
+								<FeedbackBanner
+									v-if="showAnswers.length"
+									data-testid="quiz-feedback"
+									:correct="!!showAnswers[0]"
+								>
+									{{ showAnswers[0] ? __('Correct') : __('Incorrect') }}
+								</FeedbackBanner>
+							</div>
+							<div v-else>
+								<RichTextEditor
+									:content="possibleAnswer"
+									@change="(val) => (possibleAnswer = val)"
+									:editable="true"
+									:fixedMenu="true"
+									minHeight="7rem"
+								/>
+							</div>
+
+							<div class="flex flex-wrap items-center gap-4 pt-2">
+								<div class="flex-1">
+									<Checkbox
+										v-if="!quiz.data.show_answers"
+										:label="__('Mark for review')"
+										:model-value="reviewQuestions.includes(activeQuestion)"
+										@update:model-value="
+											(checked) => markForReview(!!checked, activeQuestion)
+										"
+									/>
+									<span
+										v-else-if="questionDetails.data.type == 'Open Ended'"
+										class="text-sm text-ink-gray-5"
+									>
+										{{ __('Marked by your instructor') }}
+									</span>
+								</div>
+								<div class="flex flex-1 justify-end gap-2">
+									<Button
+										v-if="!quiz.data.show_answers && activeQuestion > 1"
+										@click="switchQuestion(activeQuestion - 1)"
+									>
+										<span>{{ __('Previous') }}</span>
+									</Button>
+									<Button
+										v-if="
+											quiz.data.show_answers &&
+											!showAnswers.length &&
+											questionDetails.data.type != 'Open Ended'
+										"
+										variant="solid"
+										@click="checkAnswer()"
+									>
+										<span>{{ __('Check') }}</span>
+									</Button>
+									<Button
+										v-else-if="activeQuestion != questions.length"
+										:variant="quiz.data.show_answers ? 'solid' : 'subtle'"
+										@click="
+											quiz.data.show_answers
+												? nextQuestion()
+												: switchQuestion(activeQuestion + 1)
+										"
+									>
+										<span>{{ __('Next') }}</span>
+									</Button>
+									<div v-else-if="!preview" class="flex items-center gap-2">
+										<Button
+											v-if="!quiz.data.show_answers"
+											:label="__('Next question')"
+											@click="switchQuestion(activeQuestion + 1)"
+											:disabled="activeQuestion == questions.length"
+										>
+											<template #icon>
+												<span class="lucide-chevron-right size-4" />
+											</template>
+										</Button>
+										<Button variant="solid" @click="handleSubmitClick()">
+											<span>{{ __('Finish Quiz') }}</span>
+										</Button>
+									</div>
+									<!-- Tutor customization: the quiz can be finished early from any
+									     question, not only from the last one. -->
+									<Button
+										v-if="!preview && activeQuestion != questions.length"
+										variant="solid"
+										@click="handleSubmitClick()"
+									>
+										<span>{{ __('Finish Quiz') }}</span>
+									</Button>
+								</div>
+							</div>
+						</div>
+					</div>
+				</template>
+			</div>
+
+			<div v-else>
+				<div
+					v-if="
+						quiz.data.enable_proctoring && submissionReason === 'max_violations'
+					"
+					class="border-b border-outline-red-2 bg-surface-red-2 px-3.5 py-3"
+				>
+					<div class="mb-1 flex items-center gap-2.5">
+						<span class="lucide-shield-x size-4 shrink-0 text-ink-red-5" />
+						<span class="text-sm-semibold text-ink-red-6">{{
+							__('Maximum violations reached')
+						}}</span>
+					</div>
+					<p class="ps-6.5 text-p-base text-ink-red-5">
+						{{
+							__(
+								'This quiz was submitted automatically because you reached the maximum of {0} {1}. Reach out to your instructor if you need to try again.'
+							).format(
+								quiz.data.max_violations,
+								quiz.data.max_violations == 1
+									? __('violation')
+									: __('violations')
+							)
+						}}
+					</p>
+				</div>
+				<div class="space-y-3 p-3.5">
+					<div class="text-base-semibold text-ink-gray-9">
+						{{ __('Quiz Summary') }}
+					</div>
+					<div
+						class="flex items-start gap-2 rounded-6 border border-outline-gray-2 bg-surface-gray-1 p-3"
+					>
+						<span
+							class="lucide-check-circle mt-0.5 size-4 shrink-0 text-ink-gray-6"
+						/>
+						<p
+							v-if="quizSubmission.data.is_open_ended"
+							class="text-p-base text-ink-gray-7"
+						>
+							{{
+								__(
+									"Your submission has been successfully saved. The instructor will review and grade it shortly, and you'll be notified of your final result."
+								)
+							}}
+						</p>
+						<p v-else class="text-p-base text-ink-gray-7">
+							{{
+								__(
+									'You got {0}% correct answers with a score of {1} out of {2}'
+								).format(
+									Math.ceil(quizSubmission.data.percentage),
+									quizSubmission.data.score,
+									quizSubmission.data.score_out_of
+								)
+							}}
+						</p>
 					</div>
 					<div
 						v-if="
-							quiz.data.max_attempts &&
-							attempts.data?.length >= quiz.data.max_attempts
+							!quiz.data.max_attempts ||
+							(attempts.data?.length ?? 0) < quiz.data.max_attempts ||
+							inVideo
 						"
-						class="leading-5 text-ink-gray-7"
+						class="flex items-center justify-end gap-x-2"
 					>
-						{{
-							__(
-								'You have already exceeded the maximum number of attempts allowed for this quiz.',
-							)
-						}}
-					</div>
-				</template>
-				<div v-else class="mt-4 leading-5 text-ink-gray-7">
-					{{ __('This quiz has no questions available yet.') }}
-					<div v-if="inVideo" class="flex justify-center mt-3">
-						<Button @click="props.backToVideo()">
+						<Button v-if="inVideo" @click="props.backToVideo()">
 							{{ __('Resume Video') }}
 						</Button>
-					</div>
-				</div>
-			</div>
-		</div>
-		<div v-else-if="!quizSubmission.data">
-			<div v-for="(question, qtidx) in questions" :key="question.name">
-				<div
-					v-if="qtidx == activeQuestion - 1 && questionDetails.data"
-					class="border rounded-lg p-5"
-				>
-					<div class="flex flex-wrap items-baseline justify-between gap-x-4">
-						<div class="min-w-0 text-sm text-ink-gray-5">
-							{{ __('Question {0}').format(activeQuestion) }} -
-							{{ getInstructions(questionDetails.data) }}
-						</div>
-						<div class="shrink-0 text-ink-gray-9 text-sm-semibold">
-							{{ question.marks }}
-							{{ question.marks == 1 ? __('Mark') : __('Marks') }}
-						</div>
-					</div>
-					<div
-						class="text-ink-gray-9 font-semibold mt-2 leading-5 break-words [&_img]:h-auto [&_img]:max-w-full"
-						v-html="sanitizeRichHTML(questionDetails.data.question)"
-					></div>
-					<div
-						v-if="questionDetails.data.type == 'Choices'"
-						v-for="index in MAX_OPTIONS"
-						:key="index"
-					>
-						<label
-							v-if="questionDetails.data[`option_${index}`]"
-							class="flex items-center bg-surface-gray-3 rounded-md p-3 mt-4 w-full min-w-0 cursor-pointer focus:border-blue-600"
-						>
-							<input
-								v-if="!showAnswers.length && !questionDetails.data.multiple"
-								type="radio"
-								:name="encodeURIComponent(questionDetails.data.question)"
-								class="w-3.5 h-3.5 shrink-0 text-ink-gray-9 focus:ring-outline-elevation-2"
-								@change="markAnswer(index)"
-								:checked="selectedOptions[index - 1]"
-							/>
-
-							<input
-								v-else-if="!showAnswers.length && questionDetails.data.multiple"
-								type="checkbox"
-								:name="encodeURIComponent(questionDetails.data.question)"
-								class="w-3.5 h-3.5 shrink-0 text-ink-gray-9 rounded-sm focus:ring-outline-elevation-2"
-								@change="markAnswer(index)"
-								:checked="selectedOptions[index - 1]"
-							/>
-							<div
-								v-else-if="quiz.data.show_answers"
-								v-for="(answer, idx) in showAnswers"
-								:key="idx"
-								class="shrink-0"
-							>
-								<div v-if="index - 1 == idx">
-									<span
-										v-if="answer == 1"
-										class="lucide-check-circle w-4 h-4 text-ink-green-5"
-									/>
-									<span
-										v-else-if="answer == 2"
-										class="lucide-minus-circle w-4 h-4 text-ink-green-5"
-									/>
-									<span
-										v-else-if="answer == 0"
-										class="lucide-x-circle w-4 h-4 text-ink-red-6"
-									/>
-									<span v-else class="lucide-minus-circle w-4 h-4" />
-								</div>
-							</div>
-							<span
-								class="ms-2 min-w-0 flex-1 break-words text-ink-gray-9 [&_img]:h-auto [&_img]:max-w-full"
-								v-html="
-									sanitizeRichHTML(questionDetails.data[`option_${index}`])
-								"
-							>
-							</span>
-						</label>
-						<div
-							v-if="questionDetails.data[`explanation_${index}`]"
-							class="mt-2 break-words text-xs text-ink-gray-7"
-							v-show="showAnswers.length"
-						>
-							{{ questionDetails.data[`explanation_${index}`] }}
-						</div>
-					</div>
-					<div v-else-if="questionDetails.data.type == 'User Input'">
-						<FormControl
-							v-model="possibleAnswer"
-							type="textarea"
-							:disabled="showAnswers.length ? true : false"
-							class="my-2"
-						/>
-						<div v-if="showAnswers.length">
-							<Badge v-if="showAnswers[0]" :label="__('Correct')" theme="green">
-								<template #prefix>
-									<span
-										class="lucide-check-circle w-4 h-4 text-ink-green-5 me-1"
-									/>
-								</template>
-							</Badge>
-							<Badge v-else theme="red" :label="__('Incorrect')">
-								<template #prefix>
-									<span class="lucide-x-circle w-4 h-4 text-ink-red-6 me-1" />
-								</template>
-							</Badge>
-						</div>
-					</div>
-					<div v-else>
-						<RichTextEditor
-							class="mt-4"
-							:content="possibleAnswer"
-							@change="(val) => (possibleAnswer = val)"
-							:editable="true"
-							:fixedMenu="true"
-							editorClass="prose-sm max-w-none border-b border-x border-outline-elevation-2 bg-surface-gray-2 rounded-b-md py-1 px-2 min-h-[7rem]"
-						/>
-					</div>
-					<div class="flex flex-wrap items-center justify-between gap-3 mt-8">
-						<Checkbox
-							v-if="!quiz.data.show_answers"
-							:label="__('Mark for review')"
-							:model-value="reviewQuestions.includes(activeQuestion) ? 1 : 0"
-							@change="markForReview($event, activeQuestion)"
-						/>
-						<div
-							v-if="!quiz.data.show_answers"
-							class="flex flex-wrap items-center gap-2"
-						>
-							<Button
-								:label="__('Previous question')"
-								@click="switchQuestion(activeQuestion - 1)"
-								:disabled="activeQuestion == 1"
-								class="rounded-full"
-							>
-								<template #icon>
-									<span class="lucide-chevron-left size-4" />
-								</template>
-							</Button>
-							<component
-								:is="item === '...' ? 'span' : 'button'"
-								v-for="(item, pidx) in paginationWindow"
-								:key="pidx"
-								:type="item === '...' ? null : 'button'"
-								class="w-6 h-6 rounded-full flex items-center justify-center text-sm"
-								:class="{
-									'cursor-pointer': item !== '...',
-									'bg-surface-gray-4 border border-outline-gray-7 font-medium':
-										activeQuestion == item,
-									'text-ink-gray-5': item === '...',
-									'bg-surface-blue-3 text-ink-base':
-										attemptedQuestions.includes(item) && activeQuestion != item,
-									'bg-surface-gray-3 text-ink-gray-6':
-										activeQuestion != item &&
-										item !== '...' &&
-										!attemptedQuestions.includes(item),
-								}"
-								@click="item !== '...' && switchQuestion(item)"
-							>
-								{{ item }}
-							</component>
-						</div>
 						<Button
+							@click="resetQuiz()"
 							v-if="
-								quiz.data.show_answers &&
-								!showAnswers.length &&
-								questionDetails.data.type != 'Open Ended'
+								!quiz.data.max_attempts ||
+								(attempts.data?.length ?? 0) < quiz.data.max_attempts
 							"
-							class="ms-auto"
-							@click="checkAnswer()"
 						>
 							<span>
-								{{ __('Check') }}
+								{{ __('Try Again') }}
 							</span>
 						</Button>
-						<Button
-							v-else-if="
-								activeQuestion != questions.length && quiz.data.show_answers
-							"
-							@click="nextQuestion()"
-							class="ms-auto"
-						>
-							<span>
-								{{ __('Next') }}
-							</span>
-						</Button>
-						<div v-else class="ms-auto flex items-center gap-2">
-							<Button
-								:label="__('Next question')"
-								@click="switchQuestion(activeQuestion + 1)"
-								:disabled="activeQuestion == questions.length"
-							>
-								<template #icon>
-									<span class="lucide-chevron-right size-4" />
-								</template>
-							</Button>
-							<Button variant="solid" @click="handleSubmitClick()">
-								<span>{{ __('Finish Quiz') }}</span>
-							</Button>
-						</div>
 					</div>
 				</div>
 			</div>
-			<div v-if="reviewQuestions.length" class="border rounded-lg p-4 mt-4">
-				<div class="font-semibold">
-					{{ __('Questions marked for review') }}
-				</div>
-				<div class="flex flex-wrap items-center gap-2 mt-2">
-					<button
-						v-for="index in reviewQuestions"
-						:key="index"
-						type="button"
-						@click="switchQuestion(index)"
-						class="w-6 h-6 rounded-full flex items-center justify-center text-sm cursor-pointer bg-surface-gray-3"
-					>
-						{{ index }}
-					</button>
-				</div>
-			</div>
-		</div>
-		<div v-else class="border rounded-lg p-6 sm:p-20 space-y-2 text-center">
-			<div class="text-lg-semibold text-ink-gray-9">
-				{{ __('Quiz Summary') }}
-			</div>
+		</AssessmentCard>
+
+		<div
+			v-if="
+				activeQuestion > 0 && quiz.data.enable_proctoring && summaryLog.length
+			"
+			class="overflow-hidden rounded-6 border border-outline-gray-2"
+		>
 			<div
-				v-if="quizSubmission.data.is_open_ended"
-				class="leading-5 text-ink-gray-7"
+				class="flex items-center justify-between border-b border-outline-gray-1 bg-surface-gray-1 px-3.5 py-2.5"
 			>
-				{{
-					__(
-						"Your submission has been successfully saved. The instructor will review and grade it shortly, and you'll be notified of your final result.",
-					)
-				}}
-			</div>
-			<div v-else class="text-ink-gray-7">
-				{{
-					__(
-						'You got {0}% correct answers with a score of {1} out of {2}',
-					).format(
-						Math.ceil(quizSubmission.data.percentage),
-						quizSubmission.data.score,
-						quizSubmission.data.score_out_of,
-					)
-				}}
-			</div>
-			<div class="flex items-center justify-center gap-x-2">
-				<Button
-					@click="resetQuiz()"
-					v-if="
-						!quiz.data.max_attempts ||
-						attempts?.data.length < quiz.data.max_attempts
-					"
+				<span class="text-xs font-semibold text-ink-gray-8">{{
+					__('Activity')
+				}}</span>
+				<span class="text-xs text-ink-gray-5"
+					>{{ summaryLog.length }}
+					{{ summaryLog.length == 1 ? __('event') : __('events') }}</span
 				>
-					<span>
-						{{ __('Try Again') }}
+			</div>
+			<div class="max-h-64 divide-y divide-outline-gray-1 overflow-y-auto">
+				<div
+					v-for="(entry, i) in summaryLog"
+					:key="i"
+					class="flex items-center gap-2.5 px-3.5 py-2.5"
+				>
+					<span
+						class="size-1.5 shrink-0 rounded-full"
+						:class="
+							entry.severity === 'violation'
+								? 'bg-surface-red-6'
+								: 'bg-surface-orange-6'
+						"
+					/>
+					<span class="flex-1 text-sm text-ink-gray-7">{{
+						violationEventLabels[entry.eventType] || entry.eventType
+					}}</span>
+					<a
+						v-if="safeUrl(entry.frame)"
+						v-external
+						:href="safeUrl(entry.frame)"
+						class="shrink-0"
+					>
+						<img
+							:src="safeUrl(entry.frame)"
+							:alt="
+								__('Camera at {0}').format(
+									violationEventLabels[entry.eventType] || entry.eventType
+								)
+							"
+							class="h-8 w-11 rounded-4 border object-cover"
+						/>
+					</a>
+					<span
+						class="shrink-0 text-xs font-medium uppercase tracking-wide"
+						:class="
+							entry.severity === 'violation'
+								? 'text-ink-red-5'
+								: 'text-ink-orange-5'
+						"
+					>
+						{{
+							entry.severity === 'violation' ? __('Violation') : __('Warning')
+						}}
 					</span>
-				</Button>
-				<Button v-if="inVideo" @click="props.backToVideo()">
-					{{ __('Resume Video') }}
-				</Button>
+				</div>
 			</div>
 		</div>
+
+		<div
+			v-if="
+				activeQuestion > 0 && !quizSubmission.data && !quiz.data.show_answers
+			"
+			class="rounded-6 border border-outline-gray-2 p-3.5"
+		>
+			<div class="text-sm-semibold text-ink-gray-9">
+				{{ __('Questions') }}
+			</div>
+			<nav
+				:aria-label="__('Question navigation')"
+				class="mt-2 flex flex-wrap items-center gap-2"
+			>
+				<button
+					v-for="index in questions.length"
+					:key="index"
+					type="button"
+					:aria-label="__('Question {0}').format(index)"
+					:aria-current="activeQuestion == index ? 'page' : undefined"
+					@click="switchQuestion(index)"
+					class="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full text-sm"
+					:class="{
+						'bg-surface-gray-7 text-ink-base font-medium':
+							activeQuestion == index,
+						'bg-surface-blue-2 text-ink-blue-5':
+							activeQuestion != index && attemptedQuestions.includes(index),
+						'bg-surface-gray-3':
+							activeQuestion != index && !attemptedQuestions.includes(index),
+					}"
+				>
+					{{ index }}
+				</button>
+			</nav>
+		</div>
+
+		<div
+			v-if="
+				activeQuestion > 0 && !quizSubmission.data && reviewQuestions.length
+			"
+			class="rounded-6 border border-outline-gray-2 p-3.5"
+		>
+			<div class="text-sm-semibold text-ink-gray-9">
+				{{ __('Questions marked for review') }}
+			</div>
+			<div class="mt-2 flex flex-wrap items-center gap-2">
+				<button
+					v-for="index in reviewQuestions"
+					:key="index"
+					type="button"
+					@click="switchQuestion(index)"
+					class="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full bg-surface-gray-3 text-sm"
+				>
+					{{ index }}
+				</button>
+			</div>
+		</div>
+
 		<div
 			v-if="
 				quiz.data.show_submission_history &&
@@ -407,7 +701,7 @@
 		>
 			<ResponsiveListView
 				:columns="getSubmissionColumns()"
-				:rows="attempts?.data"
+				:rows="attempts.data ?? []"
 				row-key="name"
 				title-key="creation"
 				:options="getSubmissionOptions()"
@@ -430,56 +724,75 @@
 		]"
 	>
 		<template #default>
-			<div class="border border-outline-elevation-2 rounded-lg text-base">
-				<div class="divide-y divide-outline-elevation-2">
+			<div class="space-y-3">
+				<p
+					v-if="questions.length - attemptedQuestions.length > 0"
+					class="text-base text-ink-gray-6 leading-5"
+				>
+					{{
+						__(
+							'You have {0} unattempted {1}. They will be marked incorrect if you submit.'
+						).format(
+							questions.length - attemptedQuestions.length,
+							questions.length - attemptedQuestions.length == 1
+								? __('question')
+								: __('questions')
+						)
+					}}
+				</p>
+				<p v-else class="text-base text-ink-gray-6 leading-5">
+					{{ __('All questions have been attempted.') }}
+				</p>
+				<div class="space-y-1.5">
 					<div
-						class="grid grid-cols-2 divide-x rtl:divide-x-reverse divide-outline-elevation-2"
+						class="flex h-2.5 rounded-full overflow-hidden bg-surface-gray-3"
 					>
-						<div class="p-2">
-							{{ __('Total Questions') }}
-						</div>
-						<div class="p-2">
-							{{ questions.length }}
-						</div>
+						<div
+							class="h-full rounded-full transition-all"
+							:class="
+								attemptedQuestions.length === questions.length
+									? 'bg-surface-green-7'
+									: 'bg-surface-green-7'
+							"
+							:style="{
+								width:
+									(attemptedQuestions.length / questions.length) * 100 + '%',
+							}"
+						/>
 					</div>
-					<div
-						class="grid grid-cols-2 divide-x rtl:divide-x-reverse divide-outline-elevation-2"
-					>
-						<div class="p-2">
-							{{ __('Attempted Questions') }}
-						</div>
-						<div class="p-2">
-							{{ attemptedQuestions.length }}
-						</div>
-					</div>
-					<div
-						class="grid grid-cols-2 divide-x rtl:divide-x-reverse divide-outline-elevation-2"
-					>
-						<div class="p-2">
-							{{ __('Unattempted Questions') }}
-						</div>
-						<div class="p-2">
+					<div class="flex justify-between text-xs">
+						<span class="text-ink-green-6 font-medium"
+							>{{ attemptedQuestions.length }} {{ __('attempted') }}</span
+						>
+						<span
+							:class="
+								questions.length - attemptedQuestions.length > 0
+									? 'text-ink-orange-6 font-medium'
+									: 'text-ink-gray-5'
+							"
+						>
 							{{ questions.length - attemptedQuestions.length }}
-						</div>
+							{{ __('unattempted') }}
+						</span>
 					</div>
 				</div>
 			</div>
 		</template>
 	</Dialog>
 </template>
-<script setup>
-import { sanitizeRichHTML } from '@/utils/sanitizeRichHTML'
+<script setup lang="ts">
 import {
 	Badge,
 	Button,
-	call,
 	Checkbox,
 	createResource,
 	Dialog,
-	LoadingIndicator,
 	FormControl,
+	Progress,
+	Skeleton,
 	toast,
 } from 'frappe-ui'
+import type { FrappeResourceError } from 'frappe-ui'
 import {
 	computed,
 	inject,
@@ -487,66 +800,169 @@ import {
 	onUnmounted,
 	reactive,
 	ref,
+	useId,
 	watch,
 } from 'vue'
 import { timeAgo } from '@/utils/format'
-import ProgressBar from '@/components/ProgressBar.vue'
+import { safeUrl } from '@/utils/safeUrl'
+import {
+	formatScheduleDate,
+	useAssessmentSchedule,
+} from '@/composables/useAssessmentSchedule'
+import { markLessonProgress } from '@/utils/markLessonProgress'
 import ResponsiveListView from '@/components/ResponsiveListView.vue'
 import RichTextEditor from '@/components/RichTextEditor.vue'
+import ProctoringMonitor from '@/components/ProctoringMonitor.vue'
+import AssessmentCard from '@/components/Assessment/AssessmentCard.vue'
+import AssessmentCardHeader from '@/components/Assessment/AssessmentCardHeader.vue'
+import OptionRow from '@/components/Assessment/OptionRow.vue'
+import FeedbackBanner from '@/components/Assessment/FeedbackBanner.vue'
+import QuizStats from '@/components/Assessment/QuizStats.vue'
+import { attemptsLeftLabel, formatQuizSubtitle } from '@/utils/quizSummary'
+import type {
+	AnswerVerdict,
+	QuizAttempt,
+	QuizDetails,
+	QuizQuestionDetails,
+	QuizQuestionRow,
+	QuizSubmissionResult,
+	QuizWithQuestions,
+	SavedAnswer,
+	SessionUser,
+	StoredViolationRow,
+	ViolationEvent,
+} from '@/types'
 
-const user = inject('$user')
+type Answer = string | null | undefined
+type SubmissionReason =
+	| 'manual'
+	| 'timer_expired'
+	| 'max_violations'
+	| 'browser_closed'
+
+const user = inject<SessionUser>('$user')!
 const activeQuestion = ref(0)
 const currentQuestion = ref('')
 const MAX_OPTIONS = 10
-const selectedOptions = ref(Array(MAX_OPTIONS).fill(0))
-const showAnswers = reactive([])
-const questions = ref([])
-const attemptedQuestions = ref([])
-const reviewQuestions = ref([])
-const showSubmissionConfirmation = ref(false)
-const possibleAnswer = ref(null)
-const timer = ref(0)
-const savedAnswers = ref([])
-const deadline = ref(null)
-let restoringAnswer = false
-let timerInterval = null
-let submitTimeout = null
+const selectedOptions = ref<number[]>(Array(MAX_OPTIONS).fill(0))
 
-const props = defineProps({
-	quizName: {
-		type: String,
-		required: true,
-	},
-	inVideo: {
-		type: Boolean,
-		default: false,
-	},
-	backToVideo: {
-		type: Function,
-		default: () => {},
-	},
-})
+const showAnswers = reactive<AnswerVerdict[]>([])
+const questions = ref<QuizQuestionRow[]>([])
+const attemptedQuestions = ref<number[]>([])
+const reviewQuestions = ref<number[]>([])
+const showSubmissionConfirmation = ref(false)
+const possibleAnswer = ref<string | null>(null)
+const timer = ref(0)
+const savedAnswers = ref<SavedAnswer[]>([])
+// Per-question answer-check verdicts, keyed by question name. Persisted in the
+// draft so a checked answer stays locked (and its verdict visible) after a page
+// reload, instead of letting the learner re-answer and re-check.
+const checkedVerdicts = ref<Record<string, AnswerVerdict[]>>({})
+const deadline = ref<number | null>(null)
+let restoringAnswer = false
+let timerInterval: ReturnType<typeof setInterval> | undefined
+const violationCount = ref(0)
+const proctoringActive = ref(false)
+const cameraReady = ref(false)
+const violationLog = ref<ViolationEvent[]>([])
+const submissionReason = ref<SubmissionReason | ''>('')
+let submitTimeout: ReturnType<typeof setTimeout> | undefined
+
+const props = withDefaults(
+	defineProps<{
+		quizName: string
+		// Author preview: rendered as shipped, but writes nothing. A submission
+		// here would be real, notify, and spend one of the author's attempts.
+		preview?: boolean
+		inVideo?: boolean
+		backToVideo?: () => void
+	}>(),
+	{
+		preview: false,
+		inVideo: false,
+		backToVideo: () => {},
+	}
+)
 
 onMounted(() => {
 	window.addEventListener('pagehide', handlePageHide)
+	window.addEventListener('beforeunload', handleBeforeUnload)
 })
 
 onUnmounted(() => {
 	window.removeEventListener('pagehide', handlePageHide)
-	handlePageHide()
+	window.removeEventListener('beforeunload', handleBeforeUnload)
+	saveCurrentAnswer()
 	stopTimer()
 })
 
-const handlePageHide = () => {
-	if (activeQuestion.value > 0 && !quizSubmission.data) saveCurrentAnswer()
+// Oldest first. violationLog is built newest-first for the on-screen activity
+// list, but the server derives the stored violation count from this payload, so
+// it ships in the order the events actually happened.
+// withFrames=false for the pagehide beacon: that goes out as a query string, and a
+// handful of base64 stills would push it past the URL limit and drop the log
+// entirely. The events matter more there than the pictures of them.
+const serialiseViolationLog = (withFrames = true): string =>
+	JSON.stringify(
+		[...violationLog.value]
+			.reverse()
+			.map(({ frame, ...event }) => (withFrames ? { ...event, frame } : event))
+	)
+
+const handlePageHide = (): void => {
+	if (props.preview) return
+	// Tutor customization: quizzes are not auto-submitted on close. Progress is
+	// saved on the device so the learner can return. Proctored attempts are the
+	// exception: closing mid-attempt must end it and report the violation log.
+	saveCurrentAnswer()
+	if (
+		quiz.data?.enable_proctoring &&
+		proctoringActive.value &&
+		activeQuestion.value > 0 &&
+		!quizSubmission.data &&
+		quiz.data
+	) {
+		const params = new URLSearchParams({
+			quiz: quiz.data.name,
+			results: JSON.stringify(savedAnswers.value),
+			violation_count: String(violationCount.value),
+			submission_reason: 'browser_closed',
+		})
+		// Beacons go out as a query string, so only spend the URL budget on the
+		// log when there is one.
+		if (violationLog.value.length) {
+			params.set('violation_events', serialiseViolationLog(false))
+		}
+
+		navigator.sendBeacon(
+			'/api/method/lms.lms.doctype.lms_quiz.lms_quiz.submit_quiz?' +
+				params.toString()
+		)
+	}
+}
+
+const handleBeforeUnload = (event: BeforeUnloadEvent): void => {
+	if (
+		!quiz.data?.enable_proctoring ||
+		!proctoringActive.value ||
+		activeQuestion.value <= 0 ||
+		quizSubmission.data
+	)
+		return
+	recordCurrentAttempt()
+	event.preventDefault()
+	event.returnValue = ''
 }
 
 // Quiz doc + every question's content in one round trip. The lesson-side
 // quiz used to fetch the quiz, then fire one get_question_details per
 // question as the learner advanced. Pulling them all up front lets the
 // activeQuestion watcher read from a local map instead of round-tripping.
-const questionsByName = ref({})
-const quiz = createResource({
+const questionsByName = ref<Record<string, QuizQuestionDetails>>({})
+// Native radios group by name across the page, and a lesson can show two quizzes.
+const optionGroup = useId()
+
+const quiz = createResource<QuizDetails>({
 	url: 'lms.lms.utils.get_quiz_with_questions',
 	makeParams() {
 		return { quiz: props.quizName }
@@ -554,9 +970,9 @@ const quiz = createResource({
 	// Keep this resource instance-local: its callbacks update component-local
 	// question and timer state on every mount.
 	auto: true,
-	transform(data) {
-		const quizDoc = data?.quiz || {}
-		quizDoc.duration = parseInt(quizDoc.duration)
+	transform(data: QuizWithQuestions) {
+		const quizDoc = data?.quiz || ({} as QuizDetails)
+		quizDoc.duration = parseInt(String(quizDoc.duration))
 		questionsByName.value = data?.questions_by_name || {}
 		return quizDoc
 	},
@@ -577,7 +993,8 @@ const populateQuestions = () => {
 	// unload handlers, which, since the quiz now mounts inline in the lesson,
 	// blanks the whole lesson view.
 	const resolvable = rawQuestions.filter(
-		(row) => row?.question && questionsByName.value[row.question],
+		(row: QuizQuestionRow) =>
+			row?.question && questionsByName.value[row.question]
 	)
 	if (data?.shuffle_questions) {
 		let next = shuffleArray([...resolvable])
@@ -599,11 +1016,12 @@ const setupTimer = () => {
 
 const stopTimer = () => {
 	clearInterval(timerInterval)
-	timerInterval = null
-	// submitQuiz() defers createSubmission() by 500ms. Left pending, it fires against an unmounted
+	timerInterval = undefined
+	// submitQuiz() defers createSubmission() by 500ms so the last answer can be
+	// written to localStorage first. Left pending, it fires against an unmounted
 	// or already-switched component and marks progress on the wrong lesson.
 	clearTimeout(submitTimeout)
-	submitTimeout = null
+	submitTimeout = undefined
 }
 
 const startTimer = () => {
@@ -612,10 +1030,14 @@ const startTimer = () => {
 	// previous interval running and every one of them submits on expiry.
 	stopTimer()
 	const updateTimer = () => {
-		timer.value = Math.max(0, Math.ceil((deadline.value - Date.now()) / 1000))
+		timer.value = Math.max(
+			0,
+			Math.ceil(((deadline.value ?? 0) - Date.now()) / 1000)
+		)
 		if (timer.value === 0) {
+			clearInterval(timerInterval)
 			stopTimer()
-			submitQuiz()
+			submitQuiz('timer_expired')
 		}
 	}
 	updateTimer()
@@ -625,7 +1047,7 @@ const startTimer = () => {
 	}, 1000)
 }
 
-const formatTimer = (seconds) => {
+const formatTimer = (seconds: number): string => {
 	const hrs = Math.floor(seconds / 3600)
 		.toString()
 		.padStart(2, '0')
@@ -636,11 +1058,123 @@ const formatTimer = (seconds) => {
 	return hrs != '00' ? `${hrs}:${mins}:${secs}` : `${mins}:${secs}`
 }
 
-const timerProgress = computed(() => {
-	return (timer.value / (quiz.data.duration * 60)) * 100
+const timerUrgency = computed(() => {
+	if (!quiz.data?.duration) return 'normal'
+	const pct = timer.value / (quiz.data.duration * 60)
+	if (pct <= 0.1) return 'critical'
+	if (pct <= 0.25) return 'warning'
+	return 'normal'
 })
 
-const shuffleArray = (array) => {
+// frappe-ui 1.0 has no orange Badge theme; amber is the warning tone.
+const timerTheme = computed<'red' | 'amber' | 'gray'>(() => {
+	if (timerUrgency.value === 'critical') return 'red'
+	if (timerUrgency.value === 'warning') return 'amber'
+	return 'gray'
+})
+
+const attemptsLeft = computed(() => {
+	if (!quiz.data?.max_attempts) return null
+	return Math.max(quiz.data.max_attempts - (attempts.data?.length ?? 0), 0)
+})
+
+const quizSubtitle = computed(() =>
+	formatQuizSubtitle(
+		questions.value.map((row) => questionsByName.value[row.question]?.type),
+		quiz.data?.passing_percentage
+	)
+)
+
+const introTips = computed(() => {
+	if (!quiz.data) return []
+	const proctored = quiz.data.enable_proctoring
+	const tips: string[] = []
+	if (props.inVideo) tips.push(__('Complete the quiz to continue the video.'))
+	if (!proctored) {
+		tips.push(
+			__(
+				'Use "Mark for Review" to flag questions you want to revisit before submitting.'
+			),
+			__(
+				'Answer all questions before you submit. You can navigate freely between them.'
+			)
+		)
+	}
+	if (proctored) {
+		tips.push(
+			__('Closing or refreshing the page will submit your quiz automatically.')
+		)
+	} else {
+		tips.push(
+			__(
+				'Your answers are saved automatically on this device. You can return to this quiz later.'
+			)
+		)
+	}
+	if (!proctored && quiz.data.duration) {
+		tips.push(
+			__('The quiz will be submitted automatically when the timer runs out.')
+		)
+	}
+	if (quiz.data.enable_negative_marking) {
+		tips.push(
+			__('Wrong answers deduct {0} {1}.').format(
+				quiz.data.marks_to_cut,
+				quiz.data.marks_to_cut == 1 ? __('mark') : __('marks')
+			)
+		)
+	}
+	return tips
+})
+
+const proctoringRules = computed(() => [
+	{
+		icon: 'lucide-eye-off',
+		title: __('Face must be visible'),
+		hint: __('Looking away for too long counts as a violation.'),
+	},
+	{
+		icon: 'lucide-users',
+		title: __('One person only'),
+		hint: __('Multiple faces in the frame will be flagged.'),
+	},
+	{
+		icon: 'lucide-monitor-x',
+		title: __('Stay on this tab'),
+		hint: __('Switching tabs or minimizing the window is flagged immediately.'),
+	},
+	{
+		icon: 'lucide-camera-off',
+		title: __('Keep camera connected'),
+		hint: __('Disconnecting your camera counts as a violation.'),
+	},
+])
+
+const choiceCorrect = computed(
+	() => !showAnswers.some((answer) => answer == 0 || answer == 2)
+)
+
+const attemptsExhausted = computed(
+	() =>
+		!!quiz.data?.max_attempts &&
+		(attempts.data?.length ?? 0) >= quiz.data.max_attempts
+)
+
+const { scheduleBlockReason, scheduleBlocked, scheduleMessage } =
+	useAssessmentSchedule(() => quiz.data, {
+		opensOn: (date) => __('This quiz opens on {0}.').format(date),
+		ended: () => __('The schedule for this quiz has ended.'),
+	})
+
+watch(scheduleBlockReason, (reason, previous) => {
+	// Questions are withheld while blocked; once the window opens, refetch so
+	// Start can load real prompts without a full page reload.
+	if (previous && !reason && !Object.keys(questionsByName.value).length) {
+		quiz.reload()
+	}
+})
+
+const shuffleArray = <T>(array: T[]): T[] => {
 	for (let i = array.length - 1; i > 0; i--) {
 		const j = Math.floor(Math.random() * (i + 1))
 		;[array[i], array[j]] = [array[j], array[i]]
@@ -648,9 +1182,9 @@ const shuffleArray = (array) => {
 	return array
 }
 
-const attempts = createResource({
+const attempts = createResource<QuizAttempt[]>({
 	url: 'frappe.client.get_list',
-	makeParams(values) {
+	makeParams() {
 		return {
 			doctype: 'LMS Quiz Submission',
 			filters: {
@@ -668,7 +1202,7 @@ const attempts = createResource({
 			order_by: 'creation desc',
 		}
 	},
-	transform(data) {
+	transform(data: QuizAttempt[]) {
 		data.forEach((submission, index) => {
 			submission.creation = timeAgo(submission.creation)
 			submission.idx = index + 1
@@ -676,12 +1210,18 @@ const attempts = createResource({
 	},
 })
 
-const quizSubmission = createResource({
+const quizSubmission = createResource<QuizSubmissionResult>({
 	url: 'lms.lms.doctype.lms_quiz.lms_quiz.submit_quiz',
-	makeParams(values) {
+	makeParams(values?: {
+		violation_count?: number
+		submission_reason?: SubmissionReason
+	}) {
 		return {
-			quiz: quiz.data.name,
+			quiz: quiz.data?.name,
 			results: JSON.stringify(savedAnswers.value),
+			violation_count: values?.violation_count ?? violationCount.value,
+			submission_reason: values?.submission_reason ?? 'manual',
+			violation_events: serialiseViolationLog(),
 		}
 	},
 })
@@ -689,7 +1229,9 @@ const quizSubmission = createResource({
 // Mirror the previous createResource shape ({ data: ... }) so existing
 // template refs (questionDetails.data.option_X, etc.) keep working. We
 // just pull the row from the pre-fetched map instead of an API call.
-const questionDetails = reactive({ data: null })
+const questionDetails = reactive<{ data: QuizQuestionDetails | null }>({
+	data: null,
+})
 
 watch(activeQuestion, (value) => {
 	if (value <= 0) return
@@ -705,38 +1247,45 @@ watch(activeQuestion, (value) => {
 	saveDraft()
 })
 
-const switchQuestion = (questionNumber) => {
+const switchQuestion = (questionNumber: number): void => {
 	if (questionNumber < 1 || questionNumber > questions.value.length) return
 	saveCurrentAnswer()
 	clearQuestionAnswer()
 	activeQuestion.value = questionNumber
 }
 
-const loadSavedAnswers = () => {
+const loadSavedAnswers = (): void => {
 	clearQuestionAnswer()
 	restoringAnswer = true
-	let quizData = savedAnswers.value
-	if (quizData) {
-		let localQuestion = quizData.find(
-			(q) => q.question_name == currentQuestion.value,
+	const details = questionDetails.data
+	const quizData = savedAnswers.value
+	if (quizData && details) {
+		const localQuestion = quizData.find(
+			(q) => q.question_name == currentQuestion.value
 		)
 		if (localQuestion) {
-			let localAnswers = localQuestion.answer
+			const localAnswers = localQuestion.answer
 			if (localAnswers.length) {
-				if (questionDetails.data.type == 'Choices') {
+				if (details.type == 'Choices') {
 					localAnswers.forEach((answer) => {
 						for (let i = 1; i <= MAX_OPTIONS; i++) {
-							if (questionDetails.data[`option_${i}`] == answer) {
+							if (details[`option_${i}`] == answer) {
 								selectedOptions.value[i - 1] = 1
 							}
 						}
 					})
 				} else {
-					possibleAnswer.value = localAnswers[0]
+					possibleAnswer.value = localAnswers[0] ?? null
 				}
 			}
 		}
 	}
+	// Re-apply the checked verdict for this question (or clear a verdict that
+	// belongs to the question we just left). Without this, a checked answer
+	// unlocks after a reload or a Previous jump and can be answered again.
+	showAnswers.length = 0
+	const verdict = checkedVerdicts.value[currentQuestion.value]
+	if (verdict?.length) showAnswers.push(...verdict)
 	restoringAnswer = false
 }
 
@@ -761,12 +1310,15 @@ watch(
 			// would only hide the result. It is ignored instead, by submittedQuiz.
 			quiz.reload()
 		}
-	},
+	}
 )
 
 const startQuiz = () => {
+	if (scheduleBlocked.value) return
+	if (!quiz.data) return
 	if (quizSubmission.data) quizSubmission.reset()
 	savedAnswers.value = []
+	checkedVerdicts.value = {}
 	attemptedQuestions.value = []
 	reviewQuestions.value = []
 	deadline.value = quiz.data.duration
@@ -774,36 +1326,122 @@ const startQuiz = () => {
 		: null
 	activeQuestion.value = 1
 	saveDraft()
+	// Neither in an author preview. Nothing may be submitted there, so a countdown
+	// would reach zero with no way to end the attempt and the camera would stay on
+	// with it, and a violation cap would do the same.
+	if (props.preview) return
 	if (quiz.data.duration) startTimer()
+	if (quiz.data.enable_proctoring) proctoringActive.value = true
 }
 
-const markAnswer = (index) => {
-	if (!questionDetails.data.multiple)
+// The stored log, read back after submitting. It is the same rows an instructor
+// sees, and unlike the client's own list it carries the camera stills as file URLs
+// rather than data: URIs.
+const storedViolationLog = createResource<StoredViolationRow[]>({
+	url: 'lms.lms.doctype.lms_quiz.lms_quiz.get_quiz_violation_logs',
+	makeParams() {
+		return { submission: quizSubmission.data?.submission }
+	},
+})
+
+watch(
+	() => quizSubmission.data?.submission,
+	(submission) => {
+		if (submission) storedViolationLog.fetch()
+	}
+)
+
+// Prefer the stored log once it lands. Before that — and during the quiz itself,
+// where there is no submission to read — the client's own list stands in, so the
+// activity table is never empty while events are happening.
+const summaryLog = computed<ViolationEvent[]>(() =>
+	storedViolationLog.data?.length
+		? storedViolationLog.data.map((row: StoredViolationRow) => ({
+				eventType: row.event_type,
+				severity: row.severity,
+				timestamp: row.timestamp,
+				frame: row.frame,
+		  }))
+		: violationLog.value
+)
+
+const violationEventLabels: Record<string, string> = {
+	tab_switch: __('Tab switch'),
+	no_face: __('Face not visible'),
+	multiple_faces: __('Multiple faces'),
+	focus_loss: __('Window focus lost'),
+	camera_disconnect: __('Camera disconnected'),
+}
+
+const handleViolation = (
+	eventType: string,
+	frame: string | null = null
+): void => {
+	if (submissionReason.value || quizSubmission.loading || quizSubmission.data)
+		return
+	violationCount.value++
+	violationLog.value.unshift({
+		eventType,
+		severity: 'violation',
+		timestamp: new Date().toISOString(),
+		frame,
+	})
+	const remaining = (quiz.data?.max_violations ?? 0) - violationCount.value
+	if (remaining <= 0) {
+		submitQuiz('max_violations')
+	} else {
+		const label = violationEventLabels[eventType] || __('Proctoring violation')
+		toast.warning(label + '. ' + __('Remaining: {0}').format(remaining))
+	}
+}
+
+const handleWarning = (
+	eventType: string,
+	frame: string | null = null
+): void => {
+	// Deduplicate consecutive warnings of the same type
+	if (
+		violationLog.value[0]?.eventType === eventType &&
+		violationLog.value[0]?.severity === 'warning'
+	)
+		return
+	violationLog.value.unshift({
+		eventType,
+		severity: 'warning',
+		timestamp: new Date().toISOString(),
+		frame,
+	})
+}
+
+const markAnswer = (index: number): void => {
+	if (!questionDetails.data?.multiple)
 		selectedOptions.value.splice(
 			0,
 			selectedOptions.value.length,
-			...Array(MAX_OPTIONS).fill(0),
+			...Array(MAX_OPTIONS).fill(0)
 		)
 	selectedOptions.value[index - 1] = selectedOptions.value[index - 1] ? 0 : 1
 	saveCurrentAnswer()
 }
 
+// Keep open-ended drafts in sync the moment they are typed, not on submit:
+// the quiz no longer auto-submits on unload, so this is the only chance an
+// unsaved textarea has of surviving a reload.
 watch(
 	possibleAnswer,
 	() => {
 		if (!restoringAnswer && activeQuestion.value > 0) saveCurrentAnswer()
 	},
-	{ flush: 'sync' },
+	{ flush: 'sync' }
 )
 
-const getAnswers = () => {
-	let answers = []
-	if (!questionDetails.data) return answers
-	const type = questionDetails.data.type
-	if (type == 'Choices') {
+const getAnswers = (): Answer[] => {
+	const answers: Answer[] = []
+	const details = questionDetails.data
+	if (!details) return answers
+	if (details.type == 'Choices') {
 		selectedOptions.value.forEach((value, index) => {
-			if (selectedOptions.value[index])
-				answers.push(questionDetails.data[`option_${index + 1}`])
+			if (value) answers.push(details[`option_${index + 1}`])
 		})
 	} else {
 		answers.push(possibleAnswer.value)
@@ -812,8 +1450,10 @@ const getAnswers = () => {
 	return answers
 }
 
-const checkAnswer = () => {
-	let answers = getAnswers()
+const checkAnswer = (): void => {
+	const answers = getAnswers()
+	const details = questionDetails.data
+	if (!quiz.data || !details) return
 	if (!answers.length) {
 		toast.warning(__('Please select an option'))
 		return
@@ -824,54 +1464,63 @@ const checkAnswer = () => {
 		params: {
 			quiz: quiz.data.name,
 			question: currentQuestion.value,
-			question_type: questionDetails.data.type,
+			question_type: details.type,
 			answers: JSON.stringify(answers),
 		},
 		auto: true,
-		onSuccess(data) {
-			let type = questionDetails.data.type
-			if (type == 'Choices') {
+		onSuccess(data: AnswerVerdict[] | AnswerVerdict) {
+			if (details.type == 'Choices' && Array.isArray(data)) {
 				selectedOptions.value.forEach((option, index) => {
 					if (option) {
-						showAnswers[index] = option && data[index]
+						showAnswers[index] = data[index]
 					} else if (data[index] == 2) {
 						showAnswers[index] = 2
 					} else {
 						showAnswers[index] = undefined
 					}
 				})
-			} else {
+			} else if (!Array.isArray(data)) {
 				showAnswers.push(data)
 			}
+			checkedVerdicts.value[currentQuestion.value] = [...showAnswers]
 			saveCurrentAnswer()
-			if (!quiz.data.show_answers) {
+			if (!quiz.data?.show_answers) {
 				resetQuestion()
 			}
 		},
 	})
 }
 
+// --- Tutor customization: per-device draft persistence ---------------------
+// The draft stores everything needed to resume: question order (so a shuffled
+// quiz restores in the same order), answers, the active question, review flags
+// and the deadline. Drafts are keyed per user per quiz, cleared on submit.
 const draftKey = () =>
 	`lms-quiz-draft:${user.data?.name || 'Guest'}:${quiz.data?.name}`
 
 const saveDraft = () => {
+	if (props.preview) return
 	if (!quiz.data || activeQuestion.value < 1 || quizSubmission.data) return
 	try {
 		localStorage.setItem(
 			draftKey(),
 			JSON.stringify({
-				version: 1,
+				version: 2,
 				questions: questions.value.map((q) => q.question),
 				answers: savedAnswers.value,
 				activeQuestion: currentQuestion.value,
 				reviewQuestions: reviewQuestions.value.map(
-					(index) => questions.value[index - 1]?.question,
+					(index) => questions.value[index - 1]?.question
 				),
+				// undefined verdict slots survive JSON as null; restoreDraft
+				// normalises them back.
+				verdicts: checkedVerdicts.value,
 				deadline: deadline.value,
-			}),
+			})
 		)
 	} catch {
-		toast.error(__('Could not save quiz progress on this device.'))
+		// Quota errors are expected in private windows; the quiz stays usable
+		// without persistence rather than failing the interaction.
 	}
 }
 
@@ -879,10 +1528,10 @@ const saveCurrentAnswer = () => {
 	if (!quiz.data || !currentQuestion.value || activeQuestion.value < 1) return
 	const answers = getAnswers()
 	const hasAnswer = answers.some(
-		(answer) => typeof answer === 'string' && answer.trim() !== '',
+		(answer) => typeof answer === 'string' && answer.trim() !== ''
 	)
 	savedAnswers.value = savedAnswers.value.filter(
-		(q) => q.question_name !== currentQuestion.value,
+		(q) => q.question_name !== currentQuestion.value
 	)
 	if (hasAnswer) {
 		savedAnswers.value.push({
@@ -893,7 +1542,7 @@ const saveCurrentAnswer = () => {
 	attemptedQuestions.value = questions.value.flatMap((q, index) =>
 		savedAnswers.value.some((answer) => answer.question_name === q.question)
 			? [index + 1]
-			: [],
+			: []
 	)
 	saveDraft()
 }
@@ -902,11 +1551,15 @@ const restoreDraft = () => {
 	if (!quiz.data) return
 	let draft
 	try {
-		draft = JSON.parse(localStorage.getItem(draftKey()))
+		draft = JSON.parse(localStorage.getItem(draftKey()) ?? 'null')
 	} catch {
 		return
 	}
-	if (draft?.version !== 1 || !Array.isArray(draft.questions)) return
+	if (
+		(draft?.version !== 1 && draft?.version !== 2) ||
+		!Array.isArray(draft.questions)
+	)
+		return
 	const byName = new Map(questions.value.map((row) => [row.question, row]))
 	if (
 		draft.questions.length === questions.value.length &&
@@ -920,26 +1573,35 @@ const restoreDraft = () => {
 				(answer) =>
 					validNames.has(answer?.question_name) &&
 					Array.isArray(answer.answer) &&
-					answer.answer.every((value) => typeof value === 'string'),
-			)
+					answer.answer.every((value) => typeof value === 'string')
+		  )
 		: []
 	attemptedQuestions.value = questions.value.flatMap((q, index) =>
 		savedAnswers.value.some((answer) => answer.question_name === q.question)
 			? [index + 1]
-			: [],
+			: []
 	)
 	reviewQuestions.value = Array.isArray(draft.reviewQuestions)
 		? draft.reviewQuestions.flatMap((name) => {
 				const index = questions.value.findIndex((q) => q.question === name)
 				return index < 0 ? [] : [index + 1]
-			})
+		  })
 		: []
+	checkedVerdicts.value = Object.fromEntries(
+		Object.entries(draft.verdicts ?? {}).flatMap(([name, verdict]) => {
+			if (!validNames.has(name) || !Array.isArray(verdict)) return []
+			const normalised = verdict.map((value) =>
+				value === 0 || value === 1 || value === 2 ? value : undefined
+			)
+			return [[name, normalised]]
+		})
+	)
 	deadline.value =
 		quiz.data.duration && Number.isFinite(draft.deadline)
 			? draft.deadline
 			: null
 	const index = questions.value.findIndex(
-		(q) => q.question === draft.activeQuestion,
+		(q) => q.question === draft.activeQuestion
 	)
 	activeQuestion.value = index < 0 ? 1 : index + 1
 	if (quiz.data.duration) {
@@ -948,9 +1610,10 @@ const restoreDraft = () => {
 		startTimer()
 	}
 }
+// ---------------------------------------------------------------------------
 
-const nextQuestion = () => {
-	if (!quiz.data.show_answers) return
+const nextQuestion = (): void => {
+	if (!quiz.data?.show_answers) return
 	if (questionDetails.data?.type == 'Open Ended') saveCurrentAnswer()
 	resetQuestion()
 }
@@ -965,31 +1628,36 @@ const resetQuestion = () => {
 	showAnswers.length = 0
 }
 
+// Clear without advancing: switching to a question repopulates its saved
+// answer via loadSavedAnswers, which itself runs under restoringAnswer so
+// the sync watcher does not treat the restore as a new edit.
 const clearQuestionAnswer = () => {
 	restoringAnswer = true
 	selectedOptions.value.splice(
 		0,
 		selectedOptions.value.length,
-		...Array(MAX_OPTIONS).fill(0),
+		...Array(MAX_OPTIONS).fill(0)
 	)
 	possibleAnswer.value = null
 	restoringAnswer = false
 }
 
-const submitQuiz = () => {
+const submitQuiz = (reason: SubmissionReason = 'manual'): void => {
 	if (submitTimeout || quizSubmission.loading || quizSubmission.data) return
-	if (!quiz.data.show_answers) {
+	submissionReason.value = reason
+	if (!quiz.data?.show_answers) {
 		saveCurrentAnswer()
 		submitTimeout = setTimeout(() => {
-			submitTimeout = null
-			createSubmission()
+			submitTimeout = undefined
+			createSubmission(reason)
 		}, 500)
 		return
 	}
-	createSubmission()
+	createSubmission(reason)
 }
 
-const createSubmission = () => {
+const createSubmission = (reason: SubmissionReason = 'manual'): void => {
+	if (props.preview) return
 	// Which quiz this submission belongs to. The component is reused across
 	// lessons, so by the time the response lands props.quizName may have moved
 	// on — and markLessonProgress() reads window.location.pathname at that
@@ -997,26 +1665,45 @@ const createSubmission = () => {
 	const submittedQuiz = props.quizName
 	const submittedDraftKey = draftKey()
 	quizSubmission.submit(
-		{},
 		{
-			onSuccess(data) {
-				localStorage.removeItem(submittedDraftKey)
+			violation_count: violationCount.value,
+			submission_reason: reason,
+		},
+		{
+			onSuccess() {
+				proctoringActive.value = false
+				try {
+					localStorage.removeItem(submittedDraftKey)
+				} catch {}
 				if (props.quizName !== submittedQuiz) return
 				markLessonProgress()
 				if (quiz.data && quiz.data.max_attempts) attempts.reload()
 				stopTimer()
 			},
-			onError(err) {
+			onError(err: FrappeResourceError) {
 				const errorTitle = err?.message || ''
 				if (errorTitle.includes('MaximumAttemptsExceededError')) {
-					const errorMessage = err.messages?.[0] || err
+					const errorMessage = err.messages?.[0] || err.message
 					toast.error(__(errorMessage))
 					setTimeout(() => {
 						window.location.reload()
 					}, 3000)
+				} else {
+					// Never re-submit automatically here. A failure can land after the
+					// server already created the submission — or its response can simply
+					// be lost — and a second POST would spend another attempt and record
+					// a duplicate. Saving the violation log is best effort on the server,
+					// so it can no longer be the thing that fails a submission; anything
+					// reaching this branch is worth showing to the learner instead.
+					toast.error(
+						__(
+							err?.messages?.[0] ||
+								'Could not submit the quiz. Please try again.'
+						)
+					)
 				}
 			},
-		},
+		}
 	)
 }
 
@@ -1030,37 +1717,27 @@ const resetQuiz = () => {
 	attemptedQuestions.value = []
 	reviewQuestions.value = []
 	savedAnswers.value = []
+	checkedVerdicts.value = {}
 	deadline.value = null
 	quizSubmission.reset()
+	violationCount.value = 0
+	proctoringActive.value = false
+	cameraReady.value = false
+	violationLog.value = []
+	submissionReason.value = ''
 	populateQuestions()
 	setupTimer()
 }
 
-const getInstructions = (question) => {
+const getInstructions = (question: QuizQuestionDetails): string => {
 	if (question.type == 'Choices')
 		if (question.multiple) return __('Choose all answers that apply')
 		else return __('Choose one answer')
 	else return __('Type your answer')
 }
 
-const markLessonProgress = () => {
-	let pathname = window.location.pathname.split('/')
-	if (!pathname.includes('courses'))
-		pathname = window.parent.location.pathname.split('/')
-	if (pathname[2] != 'courses') return
-	let lessonIndex = pathname.pop().split('-')
-
-	if (lessonIndex.length == 2) {
-		call('lms.lms.api.mark_lesson_progress', {
-			course: pathname[3],
-			chapter_number: lessonIndex[0],
-			lesson_number: lessonIndex[1],
-		})
-	}
-}
-
-const handleSubmitClick = () => {
-	if (!quiz.data.show_answers) {
+const handleSubmitClick = (): void => {
+	if (!quiz.data?.show_answers) {
 		recordCurrentAttempt()
 		showSubmissionConfirmation.value = true
 	} else {
@@ -1072,38 +1749,14 @@ const recordCurrentAttempt = () => {
 	saveCurrentAnswer()
 }
 
-const paginationWindow = computed(() => {
-	const total = questions.value.length
-	const current = activeQuestion.value
-	const pages = []
-	const size = 5
-
-	let start = Math.floor((current - 1) / size) * size + 1
-	let end = Math.min(start + size - 1, total)
-
-	if (start > 1) {
-		pages.push('...')
-	}
-
-	for (let i = start; i <= end; i++) {
-		pages.push(i)
-	}
-
-	if (end < total) {
-		pages.push('...')
-	}
-
-	return pages
-})
-
-const markForReview = (event, questionNumber) => {
-	if (event.target.checked) {
+const markForReview = (checked: boolean, questionNumber: number): void => {
+	if (checked) {
 		if (!reviewQuestions.value.includes(questionNumber)) {
 			reviewQuestions.value.push(questionNumber)
 		}
 	} else {
 		reviewQuestions.value = reviewQuestions.value.filter(
-			(num) => num !== questionNumber,
+			(num) => num !== questionNumber
 		)
 	}
 	saveDraft()

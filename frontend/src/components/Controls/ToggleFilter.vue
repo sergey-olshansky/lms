@@ -1,71 +1,75 @@
 <template>
-	<!-- One boolean filter, declared once by the page. A checkbox row is the
-	     desk idiom but does not survive a 390px header, so the same filter is a
-	     pressable chip on a phone. Which control that is stops being the page's
-	     business. Mirrors helpdesk's QuickFilterField.vue, which likewise picks
-	     the control from the filter's declaration. -->
-	<Tooltip v-if="!isMobile" :text="tooltip" class="!w-fit shrink-0">
-		<Checkbox
-			:modelValue="modelValue"
-			:label="label"
-			@update:modelValue="set(Boolean($event))"
-		/>
+	<Tooltip v-if="!isMobile" :text="tooltip">
+		<span
+			class="inline-flex !w-fit shrink-0"
+			@focusin="relayFocus"
+			@focusout="relayFocus"
+		>
+			<Checkbox
+				:modelValue="modelValue"
+				:label="label"
+				:aria-description="tooltip || undefined"
+				@update:modelValue="emit('update:modelValue', Boolean($event))"
+			/>
+		</span>
 	</Tooltip>
-	<!-- A phone has no hover, so the desk's tooltip has nowhere to live. Rather
-	     than give the chip a second control to explain it, the chip says what it
-	     does: `mobileLabel` is the whole sentence shortened to a name. -->
-	<FilterChip
+	<Checkbox
 		v-else
-		:active="modelValue"
-		:theme="theme"
-		class="!w-fit shrink-0"
-		@click="set(!modelValue)"
-	>
-		{{ mobileLabel || label }}
-	</FilterChip>
+		:modelValue="modelValue"
+		:label="mobileLabel || label"
+		:description="tooltip || undefined"
+		size="md"
+		@update:modelValue="emit('update:modelValue', Boolean($event))"
+	/>
 </template>
 
 <script setup lang="ts">
-import { nextTick } from 'vue'
 import { Checkbox, Tooltip } from 'frappe-ui'
-import FilterChip from './FilterChip.vue'
-import type { FilterChipTheme } from '@/types'
 import { useScreenSize } from '@/utils/composables'
 
-const props = withDefaults(
+// One boolean filter, declared once by the page. Which control it becomes stops
+// being the page's business. Mirrors helpdesk's QuickFilterField.vue, which
+// likewise picks the control from the filter's declaration.
+//
+// A phone gets a checkbox too, not a chip.
+//
+// Filters now live in a sheet rather than a strip across the header (see
+// PageBody), so the reason the chip existed — a checkbox row does not survive a
+// 390px header — is gone, and the sheet has room for the desk idiom.
+//
+// The checkbox is also the better target: frappe-ui renders it as an <input>
+// plus a <label for>, so the label is part of the hit area natively. A chip
+// carried its text as a <button> child with no such association.
+//
+// The desk's tooltip has nowhere to live on a phone, so it becomes the
+// checkbox's description instead of being dropped.
+//
+// The span is the Tooltip trigger. Checkbox passes fallthrough attrs to its
+// <input>, so the trigger's data-state/data-slot would overwrite the input's.
+// focus/blur do not bubble, so the span replays the input's focusin/focusout.
+
+withDefaults(
 	defineProps<{
 		modelValue: boolean
 		label: string
 		/** Hovered on the desk control; a phone gets `mobileLabel` instead. */
 		tooltip?: string
 		/**
-		 * What the chip is called on a phone. The desk label sits beside a
+		 * What the filter is called on a phone. The desk label sits beside a
 		 * tooltip that carries the rest of the meaning, so it can be a bare
-		 * noun; the chip has to say the whole thing itself.
+		 * noun; in the sheet the label has to say the whole thing itself.
 		 */
 		mobileLabel?: string
-		theme?: FilterChipTheme
 	}>(),
-	{ tooltip: '', mobileLabel: '', theme: 'gray' }
+	{ tooltip: '', mobileLabel: '' }
 )
 
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 
 const { isMobile } = useScreenSize()
 
-// frappe-ui's Checkbox reports one click twice: onChange assigns its
-// defineModel and then re-emits update:modelValue (Checkbox.vue:76-77). Both
-// emits happen in the same tick, so `modelValue` has not round-tripped by the
-// second one and comparing against it alone lets the echo through, which
-// costs the page a second list request. Remember what was just sent instead.
-let sent: boolean | null = null
-
-function set(value: boolean): void {
-	if (value === props.modelValue || value === sent) return
-	sent = value
-	emit('update:modelValue', value)
-	nextTick(() => {
-		sent = null
-	})
+function relayFocus(event: FocusEvent): void {
+	const type = event.type === 'focusin' ? 'focus' : 'blur'
+	event.currentTarget?.dispatchEvent(new FocusEvent(type))
 }
 </script>

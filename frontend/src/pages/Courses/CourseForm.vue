@@ -4,11 +4,6 @@
 		variant="form"
 		class="flex-1 min-h-0"
 	/>
-	<!-- Below `md` the two panes stack, so neither may keep its own scroll box:
-	     the aside's settings have to continue the same scroll the details
-	     started. Everything responsive here hangs off `md`, the width at which
-	     the columns actually split; a narrower cutoff would leave a band where
-	     the panes are stacked but still scroll independently. -->
 	<div v-else class="grid grid-cols-1 flex-1 md:min-h-0 md:grid-cols-[70%,30%]">
 		<div class="space-y-8 p-5 md:overflow-y-auto">
 			<CourseDetailsSection />
@@ -24,6 +19,8 @@
 
 <script setup lang="ts">
 import { createResource, createDocumentResource, toast } from 'frappe-ui'
+import type { FrappeResourceError } from 'frappe-ui'
+import { reportAutosaveError, resourceErrorMessage } from '@/utils/resource'
 import {
 	computed,
 	getCurrentInstance,
@@ -45,8 +42,8 @@ import {
 } from '@/composables/useKeyboardShortcuts'
 import { exportCourseAsZip } from '@/utils/exportCourse'
 import SkeletonLoader from '@/components/SkeletonLoader.vue'
-import CourseDetailsSection from '@/pages/Courses/CourseDetailsSection.vue'
-import CourseOverviewSection from '@/pages/Courses/CourseOverviewSection.vue'
+import CourseDetailsSection from '@/components/Courses/CourseDetailsSection.vue'
+import CourseOverviewSection from '@/components/Courses/CourseOverviewSection.vue'
 import CoursePublishSettings from '@/pages/Courses/CoursePublishSettings.vue'
 import type { LMSCourse } from '@/types/lms/LMSCourse'
 import type { CourseInstructor } from '@/types/lms/CourseInstructor'
@@ -63,7 +60,7 @@ interface DialogAction {
 	label: string
 	theme?: string
 	variant?: string
-	onClick: (close: () => void) => void
+	onClick: (context: { close: () => void }) => void
 }
 type DialogFn = (opts: {
 	title: string
@@ -191,6 +188,7 @@ const updateCourseData = (): void => {
 		'published',
 		'upcoming',
 		'disable_self_learning',
+		'enforce_lesson_completion',
 		'paid_course',
 		'featured',
 		'enable_certification',
@@ -235,12 +233,8 @@ const updateCourse = (opts: { silent?: boolean } = {}): void => {
 				// Dashboard) reflect the saved changes without a page reload.
 				props.course.reload()
 			},
-			onError(err: { messages?: string[] } | string) {
-				const msg = typeof err === 'string' ? err : err.messages?.[0] ?? 'Error'
-				// Autosave failures stay quiet; the orange "unsaved" badge remains
-				// (isDirty is untouched) so the change isn't silently lost.
-				if (!opts.silent) toast.error(msg)
-				console.error(err)
+			onError(err: FrappeResourceError) {
+				reportAutosaveError(err, opts.silent)
 			},
 		}
 	)
@@ -256,10 +250,8 @@ const deleteCourse = createResource({
 		// Land on the creator's "Created" courses. Pick another course to edit.
 		router.push({ name: 'Courses', query: { tab: 'created' } })
 	},
-	onError(err: { messages?: string[] } | string) {
-		toast.error(
-			typeof err === 'string' ? err : err.messages?.[0] ?? __('Error')
-		)
+	onError(err: FrappeResourceError) {
+		toast.error(resourceErrorMessage(err, __('Error')))
 	},
 }) as Resource<unknown>
 
@@ -274,7 +266,7 @@ const trashCourse = (): void => {
 				label: __('Delete'),
 				theme: 'red',
 				variant: 'solid',
-				onClick(close) {
+				onClick({ close }) {
 					deleteCourse.submit()
 					close()
 				},

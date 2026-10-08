@@ -9,11 +9,11 @@
 		/>
 		<div class="flex flex-col gap-4 sm:flex-row sm:items-start">
 			<div
-				class="relative aspect-[750/422] w-full shrink-0 grid place-items-center overflow-hidden rounded-lg border border-outline-gray-2 bg-surface-gray-2 sm:w-56"
+				class="relative aspect-[750/422] w-full shrink-0 grid place-items-center overflow-hidden rounded-6 border border-outline-gray-2 bg-surface-gray-2 sm:w-56"
 			>
 				<iframe
 					v-if="preview.type === 'youtube'"
-					:src="preview.src"
+					:src="safeUrl(preview.src)"
 					:title="__('Video preview')"
 					class="size-full"
 					frameborder="0"
@@ -22,16 +22,16 @@
 				/>
 				<video
 					v-else-if="isUploadedVideo && !videoError"
-					:src="preview.src"
+					:src="safeUrl(preview.src)"
 					controls
-					class="size-full bg-black object-contain"
+					class="size-full bg-black-overlay-950 object-contain"
 					@error="videoError = true"
 				/>
 				<div
 					v-else-if="isUploadedVideo && videoError"
 					class="flex flex-col items-center gap-1 px-3 text-center"
 				>
-					<span class="lucide-circle-check size-5 text-ink-green-600" />
+					<span class="lucide-circle-check size-5 text-ink-green-5" />
 					<span class="text-xs text-ink-gray-5">
 						{{ __("Saved. This format can't be previewed here.") }}
 					</span>
@@ -41,14 +41,13 @@
 					v-if="modelValue && !isUploadedVideo"
 					type="button"
 					:aria-label="__('Remove video')"
-					class="absolute end-1 top-1 grid size-6 place-items-center rounded bg-surface-base/90 shadow"
+					class="absolute end-1 top-1 grid size-6 place-items-center rounded-4 bg-surface-base/90 shadow"
 					@click="update('')"
 				>
 					<span class="lucide-x size-4 text-ink-gray-7" />
 				</button>
 			</div>
 
-			<!-- Uploaded video: thumbnail-style controls (no raw filename in an input). -->
 			<div v-if="isUploadedVideo" class="min-w-0 space-y-2 sm:flex-1">
 				<div class="text-p-sm-medium text-ink-gray-7 truncate">
 					{{ fileName }}
@@ -56,7 +55,7 @@
 				<div class="flex items-center gap-2">
 					<FileUploader
 						:fileTypes="['video/mp4', 'video/webm', 'video/ogg']"
-						:uploadArgs="{ private: false }"
+						:private="false"
 						:validateFile="validatePlayableVideo"
 						@success="(file: { file_url: string }) => update(file.file_url)"
 						@failure="onUploadFailure"
@@ -90,7 +89,6 @@
 				</p>
 			</div>
 
-			<!-- Empty or YouTube link: URL input + upload. -->
 			<div v-else class="min-w-0 space-y-2 sm:flex-1">
 				<FormControl
 					:id="inputId"
@@ -102,7 +100,7 @@
 				/>
 				<FileUploader
 					:fileTypes="['video/*']"
-					:uploadArgs="{ private: false }"
+					:private="false"
 					@success="(file: { file_url: string }) => update(file.file_url)"
 				>
 					<template #default="{ openFileSelector, uploading, progress }">
@@ -137,15 +135,22 @@
 </template>
 
 <script setup lang="ts">
-import { Button, FileUploader, FormControl, toast } from 'frappe-ui'
+import {
+	Button,
+	FileUploader,
+	FormControl,
+	UploadError,
+	toast,
+} from 'frappe-ui'
 import {
 	InputDescription,
 	InputError,
 	InputLabel,
 	useInputLabeling,
-} from '@/components/Form/labeling'
+} from 'frappe-ui/experimental'
 import { computed, ref, watch } from 'vue'
 import { getVideoPreview, getYouTubeId } from '@/utils/video'
+import { safeUrl } from '@/utils/safeUrl'
 
 // Only formats browsers can actually play. Reject the rest at upload time so a
 // course never ends up with an unplayable preview (e.g. .MOV/H.265).
@@ -192,13 +197,15 @@ async function validatePlayableVideo(file: File): Promise<string | void> {
 	}
 }
 
+function uploadErrorMessage(error: unknown): string {
+	if (typeof error === 'string') return error
+	if (error instanceof UploadError) return error.messages[0] || error.message
+	if (error instanceof Error) return error.message || __('Upload failed')
+	return __('Upload failed')
+}
+
 function onUploadFailure(error: unknown) {
-	const e = error as { messages?: string[]; message?: string } | string
-	const msg =
-		typeof e === 'string'
-			? e
-			: e?.messages?.[0] || e?.message || __('Upload failed')
-	toast.error(msg)
+	toast.error(uploadErrorMessage(error))
 }
 
 const props = defineProps<{

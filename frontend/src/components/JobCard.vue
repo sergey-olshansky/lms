@@ -1,6 +1,6 @@
 <template>
 	<div
-		class="flex flex-col border rounded-md p-3 h-full hover:border-outline-gray-3"
+		class="flex flex-col border rounded-5 p-3 h-full hover:border-outline-gray-3"
 	>
 		<div class="flex gap-x-4 mb-4">
 			<div class="flex flex-col space-y-2 flex-1 break-all">
@@ -27,7 +27,6 @@
 					</span>
 				</div>
 			</div>
-			<!-- <img :src="job.company_logo" alt="Company Logo" class="size-8  rounded-full object-contain  bg-surface-base" /> -->
 		</div>
 		<div class="flex gap-x-2 items-center mt-auto">
 			<Badge>
@@ -40,14 +39,9 @@
 				{{ dayjs(job.creation).fromNow() }}
 			</Badge>
 		</div>
-		<!-- <div
-			class="description text-ink-gray-9 text-sm"
-			v-html="sanitizeRichHTML(job.description)"
-		></div> -->
 	</div>
 </template>
 <script setup>
-import { sanitizeRichHTML } from '@/utils/sanitizeRichHTML'
 import { inject } from 'vue'
 import { Badge } from 'frappe-ui'
 

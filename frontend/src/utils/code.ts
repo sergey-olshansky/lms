@@ -1,4 +1,5 @@
 import { Code } from 'lucide-vue-next'
+import { registerDirectives } from '@/directives'
 import { h, createApp } from 'vue'
 import { HTML_ESCAPE_MAP } from '@/utils/format'
 // lib/core registers no languages; register just the picker's set to avoid bundling all ~190.
@@ -80,6 +81,7 @@ for (const [name, language] of Object.entries(HLJS_LANGUAGES)) {
 }
 
 // Atom One Dark, self-hosted and scoped tightly to out-specify frappe-ui's .ProseMirror .hljs-* rules.
+// token-exempt-start: highlight.js atom-one theme, own light/dark pair
 const CODEBOX_THEME_CSS = `
 .codeBoxHolder { max-width: 100%; }
 .codeBoxHolder .codeBoxTextArea { overflow-x: auto; max-width: 100%; }
@@ -122,6 +124,7 @@ const CODEBOX_THEME_CSS = `
 .codeBoxHolder .codeBoxTextArea.dark .hljs-strong { font-weight: bold; }
 .codeBoxHolder .codeBoxTextArea.dark .hljs-link { text-decoration: underline; }
 `
+// token-exempt-end
 
 // Convert legacy contenteditable HTML to plain text: block tags -> line breaks,
 // <br> -> \n, inline tags stripped. DOMParser is inert (no scripts/loads).
@@ -339,6 +342,7 @@ export class CodeBox {
 			render: () =>
 				h(Code, { size: 18, strokeWidth: 1.5, color: 'currentColor' }),
 		})
+		registerDirectives(app)
 
 		const div = document.createElement('div')
 		app.mount(div)

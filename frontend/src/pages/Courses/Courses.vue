@@ -13,7 +13,7 @@
 	>
 		<template #actions>
 			<Dropdown
-				placement="right"
+				align="end"
 				side="bottom"
 				v-if="canCreateCourse()"
 				:options="courseMenu"
@@ -48,7 +48,6 @@
 				:placeholder="__('Search')"
 				:aria-label="__('Search')"
 				type="text"
-				@input="updateCourses()"
 			>
 				<template #prefix>
 					<span class="lucide-search size-4 text-ink-gray-5" />
@@ -79,16 +78,7 @@
 		</template>
 	</ListPage>
 
-	<NewCourseModal
-		v-if="showCourseModal"
-		v-model="showCourseModal"
-		:courses="courses"
-	/>
-
-	<CourseImportModal
-		v-if="showCourseImportModal"
-		v-model="showCourseImportModal"
-	/>
+	<router-view />
 </template>
 <script setup>
 import {
@@ -102,14 +92,13 @@ import {
 } from 'frappe-ui'
 import ClearableCombobox from '@/components/Controls/ClearableCombobox.vue'
 import ToggleFilter from '@/components/Controls/ToggleFilter.vue'
-import ListPage from '@/components/Layouts/ListPage.vue'
+import ListPage from '@/components/Layouts/pages/ListPage.vue'
 import { computed, inject, onMounted, ref, watch } from 'vue'
 import { sessionStore } from '@/stores/session'
 import { canCreateCourse } from '@/utils'
 import CourseCard from '@/components/CourseCard.vue'
 import { useRouter } from 'vue-router'
-import NewCourseModal from '@/pages/Courses/NewCourseModal.vue'
-import CourseImportModal from '@/pages/Courses/CourseImportModal.vue'
+import { openFormRoute } from '@/composables/useFormRoute'
 
 const user = inject('$user')
 const dayjs = inject('$dayjs')
@@ -126,12 +115,12 @@ const filters = ref({})
 const currentTab = ref('live')
 const { brand } = sessionStore()
 const router = useRouter()
-const showCourseModal = ref(false)
-const showCourseImportModal = ref(false)
 
 onMounted(() => {
 	setFiltersFromQuery()
 	updateCourses()
+	// TextInput emits on input and change; watched after query hydration to avoid a refetch.
+	watch(title, updateCourses)
 })
 
 const setFiltersFromQuery = () => {
@@ -142,8 +131,13 @@ const setFiltersFromQuery = () => {
 	certification.value = queries.get('certification') === 'true'
 	const tab = queries.get('tab')
 	if (tab) currentTab.value = tab
+	// Compatibility shim: ?newCourse=1 was this page's ad-hoc deep link before
+	// /courses/new existed. BatchCourseModal.vue:27 still emits it, as may
+	// bookmarks and anything outside the SPA, so forward it rather than drop it.
+	// replace(), so the query-param URL is not left behind as an entry the user
+	// can go Back to and re-open the form from.
 	if (queries.get('newCourse') == '1') {
-		showCourseModal.value = true
+		router.replace({ name: 'NewCourse' })
 	}
 }
 
@@ -314,7 +308,12 @@ const setQueryParams = () => {
 		queryString = `?${queries.toString()}`
 	}
 
-	history.replaceState({}, '', `${location.pathname}${queryString}`)
+	// Carry the existing state forward rather than replacing it with `{}`. This
+	// page hosts form child routes whose open/close semantics hang off a marker
+	// in history.state, and that marker only survives a reload through
+	// window.history. `{}` also being truthy means vue-router never re-seeds its
+	// own `position` key after such a reload, so every later pop delta is NaN.
+	history.replaceState(history.state, '', `${location.pathname}${queryString}`)
 }
 
 watch(currentTab, () => {
@@ -351,7 +350,9 @@ const courseMenu = computed(() => {
 			label: __('New Course'),
 			icon: 'lucide-book-open',
 			onClick() {
-				showCourseModal.value = true
+				// openFormRoute, not a bare router.push: it stamps the history
+				// entry so the form's own close() pops it instead of replacing.
+				openFormRoute(router, { name: 'NewCourse' })
 			},
 		},
 		{
@@ -368,7 +369,7 @@ const courseMenu = computed(() => {
 			label: __('Import via ZIP'),
 			icon: 'lucide-folder-plus',
 			onClick() {
-				showCourseImportModal.value = true
+				openFormRoute(router, { name: 'CourseImport' })
 			},
 		},
 	]

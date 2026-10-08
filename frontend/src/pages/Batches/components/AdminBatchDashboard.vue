@@ -3,7 +3,7 @@
 		<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
 			<NumberChartGraph
 				:title="__('Enrolled')"
-				:value="formatAmount(batch.data?.students?.length) || 0"
+				:value="formatAmount(studentCount.data) || 0"
 			/>
 
 			<NumberChartGraph
@@ -40,7 +40,7 @@
 			v-else
 			class="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-5 items-start"
 		>
-			<div class="border rounded-lg py-3 px-4 order-2 lg:order-1">
+			<div class="border rounded-6 py-3 px-4 order-2 lg:order-1">
 				<div class="flex items-center justify-between gap-x-2 mb-3">
 					<h2 class="text-lg-semibold text-ink-gray-9">
 						{{ __('Students') }}
@@ -112,45 +112,31 @@
 			</div>
 
 			<div class="order-1 lg:order-2 space-y-5">
-				<AxisChart
-					v-if="showProgressChart"
-					class="border rounded-lg p-3 min-h-[300px]"
-					:config="{
-						data: filteredChartData,
-						title: __('Batch Summary'),
-						subtitle: __('Progress of students in courses and assessments'),
-						xAxis: {
-							key: 'task',
-							title: __('Tasks'),
-							type: 'category',
-						},
-						yAxis: {
+				<ChartCard v-if="showProgressChart" class="h-[300px]">
+					<BarChart
+						:data="filteredChartData"
+						x="task"
+						y="value"
+						:title="__('Batch Summary')"
+						:subtitle="__('Progress of students in courses and assessments')"
+						:x-axis="{ title: __('Tasks'), type: 'category' }"
+						:y-axis="{
 							title: __('Number of Students'),
-							echartOptions: {
-								minInterval: 1,
-							},
-						},
-						series: [
-							{
-								name: 'value',
-								type: 'bar',
-							},
-						],
-					}"
-				/>
+							echartOptions: { minInterval: 1 },
+						}"
+					/>
+				</ChartCard>
 
-				<div class="p-4 border rounded-lg">
-					<BatchFeedback v-if="batch.data" :batch="batch.data.name" />
+				<div class="p-4 border rounded-6">
+					<BatchFeedback
+						v-if="batch.data"
+						:batch="batch.data.name"
+						:can-manage="Boolean(batch.data?.can_manage)"
+					/>
 				</div>
 			</div>
 		</div>
 	</div>
-	<StudentModal
-		v-if="showEnrollmentModal"
-		v-model="showEnrollmentModal"
-		:batch="batch"
-		:students="students"
-	/>
 	<BatchStudentProgress
 		v-if="showProgressModal"
 		v-model="showProgressModal"
@@ -160,35 +146,27 @@
 </template>
 <script setup lang="ts">
 import {
-	AxisChart,
 	createResource,
 	createListResource,
 	FormControl,
 	Avatar,
 	Button,
 } from 'frappe-ui'
-import { computed, inject, ref, watch } from 'vue'
+import { BarChart, ChartCard } from 'frappe-ui/charts'
+import { computed, inject, onMounted, ref, watch } from 'vue'
 import type dayjsType from 'dayjs'
 import { formatAmount } from '@/utils'
 import BatchFeedback from '@/pages/Batches/components/BatchFeedback.vue'
 import BatchStudentProgress from '@/pages/Batches/components/BatchStudentProgress.vue'
 import NumberChartGraph from '@/components/NumberChartGraph.vue'
 import ResponsiveListView from '@/components/ResponsiveListView.vue'
-import StudentModal from '@/components/Modals/StudentModal.vue'
 import EmptyStateLayout from '@/components/Layouts/EmptyStateLayout.vue'
 import type { ListColumn, ListRow, ListViewOptions } from '@/types'
 
 const dayjs = inject<typeof dayjsType>('$dayjs')!
 const searchFilter = ref<string | null>(null)
-const showEnrollmentModal = ref<boolean>(false)
 const showProgressModal = ref<boolean>(false)
 const currentStudent = ref<any>(null)
-
-function openEnrollModal() {
-	showEnrollmentModal.value = true
-}
-
-defineExpose({ openEnrollModal })
 
 const props = defineProps<{
 	batch: { [key: string]: any } | null
@@ -211,6 +189,23 @@ const certificationCount = createResource({
 	auto: true,
 })
 
+// The Enrolled card used to read batch.data.students.length, refreshed by the
+// enrollment modal calling batch.reload() on the resource it was handed. The
+// routed form has no such handle — get_batch_details deliberately carries no
+// cache key (useBatchForms.ts) — so the count comes from its own cached
+// resource, shaped like certificationCount above, which the form can reach by
+// key. The two numbers are identical: get_batch_details builds `students` from
+// exactly this get_all with no further filter.
+const studentCount = createResource({
+	url: 'frappe.client.get_count',
+	cache: ['batch_student_count', props.batch?.data?.name],
+	params: {
+		doctype: 'LMS Batch Enrollment',
+		filters: { batch: props.batch?.data?.name },
+	},
+	auto: true,
+})
+
 const students = createListResource({
 	doctype: 'LMS Batch Enrollment',
 	filters: {
@@ -226,14 +221,17 @@ const students = createListResource({
 	],
 	orderBy: 'creation desc',
 	auto: true,
+	// Named so BatchStudentForm can reload it through getCachedListResource
+	// after inserting. Keyed by batch, because BatchDetail is per-batch.
+	cache: ['batchStudents', props.batch?.data?.name],
 })
 
 const filteredChartData = computed(() =>
 	(chartData.data || []).filter((item: { value: number }) => item.value > 0)
 )
 
-watch(searchFilter, () => {
-	let filters: Record<string, any> = {
+const studentFilters = (): Record<string, any> => {
+	const filters: Record<string, any> = {
 		batch: props.batch?.data?.name,
 	}
 
@@ -241,8 +239,27 @@ watch(searchFilter, () => {
 		filters.member_name = ['like', `%${searchFilter.value}%`]
 	}
 
-	students.update({ filters })
+	return filters
+}
+
+watch(searchFilter, () => {
+	students.update({ filters: studentFilters() })
 	students.reload()
+})
+
+// The cache key deliberately outlives this component so the student form can
+// reload the list after inserting — but the filters ride along with it, while
+// `searchFilter` is a component-local ref that starts empty on every mount. A
+// remount would otherwise show the previous visit's search results underneath
+// a blank search box. Only re-syncs when they actually disagree, so a first
+// mount does not fetch twice.
+onMounted(() => {
+	const desired = studentFilters()
+
+	if (JSON.stringify(students.filters) !== JSON.stringify(desired)) {
+		students.update({ filters: desired })
+		students.reload()
+	}
 })
 
 const studentColumns = computed<ListColumn[]>(() => {

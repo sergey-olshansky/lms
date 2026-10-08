@@ -41,7 +41,9 @@
 				:options="getActionOptions(row)"
 			>
 				<Button variant="ghost" :label="__('More actions')">
-					<span class="lucide-more-horizontal size-4" />
+					<template #icon>
+						<span class="lucide-more-horizontal size-4" />
+					</template>
 				</Button>
 			</Dropdown>
 			<div
@@ -57,44 +59,45 @@
 	</ListPage>
 
 	<Dialog
-		v-model="showEmailModal"
+		v-model:open="showEmailModal"
 		:title="__('Send Email to {0}').format(selectedApplicant?.full_name)"
 		size="lg"
 		:actions="[
 			{
 				label: __('Send'),
 				variant: 'solid',
-				onClick: (close) => sendEmail(close),
+				onClick: ({ close }) => sendEmail(close),
 			},
 		]"
 	>
-		<template #default>
-			<div class="space-y-4">
-				<FormControl
-					v-model="emailForm.subject"
-					:label="__('Subject')"
-					:placeholder="__('Enter email subject')"
-					required
+		<div class="space-y-4">
+			<FormControl
+				v-model="emailForm.subject"
+				:label="__('Subject')"
+				:placeholder="__('Enter email subject')"
+				required
+			/>
+			<FormControl
+				v-model="emailForm.replyTo"
+				:label="__('Reply To')"
+				:placeholder="__('Enter reply to email')"
+			/>
+			<div>
+				<InputLabel
+					:id="messageLabelId"
+					:label="__('Message')"
+					class="mb-1.5"
 				/>
-				<FormControl
-					v-model="emailForm.replyTo"
-					:label="__('Reply To')"
-					:placeholder="__('Enter reply to email')"
+				<RichTextEditor
+					:ariaLabelledby="messageLabelId"
+					:content="emailForm.message"
+					@change="(val) => (emailForm.message = val)"
+					:editable="true"
+					:fixedMenu="true"
+					minHeight="7rem"
 				/>
-				<div>
-					<div class="text-sm text-ink-gray-5 mb-1">
-						{{ __('Message') }}
-					</div>
-					<RichTextEditor
-						:content="emailForm.message"
-						@change="(val) => (emailForm.message = val)"
-						:editable="true"
-						:fixedMenu="true"
-						editorClass="prose-sm max-w-none border-b border-x border-outline-elevation-2 bg-surface-gray-2 rounded-b-md py-1 px-2 min-h-[7rem]"
-					/>
-				</div>
 			</div>
-		</template>
+		</div>
 	</Dialog>
 </template>
 
@@ -102,7 +105,6 @@
 import {
 	Avatar,
 	Button,
-	call,
 	Dialog,
 	Dropdown,
 	FormControl,
@@ -111,14 +113,17 @@ import {
 	usePageMeta,
 	toast,
 } from 'frappe-ui'
-import { computed, inject, ref, reactive, watch } from 'vue'
+import { computed, inject, ref, reactive, useId, watch } from 'vue'
+import { InputLabel } from 'frappe-ui/experimental'
 import { sessionStore } from '../stores/session'
-import ListPage from '@/components/Layouts/ListPage.vue'
+import ListPage from '@/components/Layouts/pages/ListPage.vue'
 import RichTextEditor from '@/components/RichTextEditor.vue'
+import { openExternal } from '@/utils/openExternal'
 
 const dayjs = inject('$dayjs')
 const { brand } = sessionStore()
 const showEmailModal = ref(false)
+const messageLabelId = useId()
 const selectedApplicant = ref(null)
 const search = ref('')
 const pageLength = ref(24)
@@ -243,7 +248,7 @@ const sendEmail = (close) => {
 }
 
 const downloadResume = (resumeUrl) => {
-	window.open(resumeUrl, '_blank')
+	openExternal(resumeUrl)
 }
 
 const getActionOptions = (row) => {

@@ -21,6 +21,12 @@ vi.mock('frappe-ui', () => ({
 	FormControl: { template: '<input />' },
 	Badge: { template: '<div />' },
 	Button: { template: '<button />' },
+	Breadcrumbs: { template: '<nav />' },
+	Popover: { template: '<div><slot /></div>' },
+	Avatar: {
+		props: ['label'],
+		template: '<span data-testid="avatar">{{ label }}</span>',
+	},
 	usePageMeta: vi.fn(),
 	toast: { error: vi.fn() },
 }))
@@ -44,6 +50,16 @@ vi.mock('@/components/ShortcutTooltip.vue', () => ({
 }))
 
 vi.stubGlobal('__', (s: string) => s)
+// translation.js installs String.prototype.format at app boot; the page
+// calls __('Q{0}:').format(index + 1) and never reaches Vue without it.
+if (!('format' in String.prototype)) {
+	// eslint-disable-next-line no-extend-native
+	Object.defineProperty(String.prototype, 'format', {
+		value: function (...args: string[]) {
+			return this.replace(/\{(\d+)\}/g, (_: string, i: number) => args[i] ?? '')
+		},
+	})
+}
 const render = () =>
 	mount(QuizSubmission, {
 		props: { submission: 'submission' },
@@ -63,7 +79,7 @@ beforeEach(() => {
 describe('Quiz submission review', () => {
 	it('shows student and accepted answers separately for a system manager', () => {
 		const wrapper = render()
-		expect(wrapper.text()).toMatch(/Answered\s*:\s*21/)
+		expect(wrapper.text()).toMatch(/Answer\s*:\s*21/)
 		expect(wrapper.text()).toMatch(/Correct Answer\s*:\s*12, 21/)
 		expect(state.push).not.toHaveBeenCalled()
 		wrapper.unmount()

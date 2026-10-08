@@ -86,8 +86,6 @@ vi.mock('frappe-ui', async () => {
 		createListResource,
 		Avatar: passthrough,
 		Dialog: { props: ['open'], template: '<div><slot /></div>' },
-		FormControl: passthrough,
-		NumberChart: passthrough,
 		TabButtons: passthrough,
 	}
 })
@@ -105,10 +103,20 @@ vi.mock('@/utils', () => ({
 
 vi.stubGlobal('__', (s: string) => s)
 
+// At runtime `__('Video {0}')` returns a formatter object, not a string
+// (translation.js), and the tab labels call `.format` on it. The stub above
+// returns the string itself, so give String the same method — the same shim
+// assignmentsCount.test.ts and settingsList.test.ts use.
+;(String.prototype as any).format ??= function (...args: unknown[]) {
+	return String(this).replace(/{(\d+)}/g, (match, index) =>
+		args[Number(index)] === undefined ? match : String(args[Number(index)])
+	)
+}
+
 const mountDialog = () =>
 	mount(VideoStatistics, {
 		props: { modelValue: true, lessonName: 'lesson-1', lessonTitle: 'L1' },
-		global: { mocks: { __: (s: string) => s }, stubs: { teleport: true } },
+		global: { mocks: { __: (s: string) => s } },
 	})
 
 describe('VideoStatistics.vue across a remount', () => {
@@ -163,8 +171,8 @@ describe('resources that write component state declare no cache', () => {
 			"doctype: 'LMS Video Watch Duration'",
 		],
 		['pages/Lesson.vue', "doctype: 'LMS Lesson Note'"],
-		['pages/Programs/ProgramForm.vue', "doctype: 'LMS Program Course'"],
-		['pages/Programs/ProgramForm.vue', "doctype: 'LMS Program Member'"],
+		['pages/Forms/ProgramForm.vue', "doctype: 'LMS Program Course'"],
+		['pages/Forms/ProgramForm.vue', "doctype: 'LMS Program Member'"],
 	]
 
 	/** The createResource/createListResource call enclosing `marker`. */

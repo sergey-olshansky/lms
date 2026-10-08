@@ -29,7 +29,8 @@ class TestQuizReviewAnswers(unittest.TestCase):
 		)
 		self.frappe.db.get_value.return_value = Row(owner="teacher", course=None)
 		self.doc = SimpleNamespace(
-			quiz="quiz", result=[Row(question_name="q1"), Row(question_name="q2")],
+			quiz="quiz",
+			result=[Row(question_name="q1"), Row(question_name="q2")],
 			check_permission=Mock(),
 		)
 		self.frappe.get_doc.return_value = self.doc
@@ -37,14 +38,20 @@ class TestQuizReviewAnswers(unittest.TestCase):
 		self.batch_access = Mock(return_value=False)
 		path = Path(__file__).parents[1] / "lms/doctype/lms_quiz/lms_quiz.py"
 		tree = ast.parse(path.read_text())
-		functions = [node for node in tree.body if isinstance(node, ast.FunctionDef)
-			and node.name in {"_can_review_submission", "get_submission_correct_answers"}]
+		functions = [
+			node
+			for node in tree.body
+			if isinstance(node, ast.FunctionDef)
+			and node.name in {"_can_review_submission", "get_submission_correct_answers"}
+		]
 		self.assertEqual(len(functions), 2)
 		for function in functions:
 			function.decorator_list = []
 		self.ns = {
-			"frappe": self.frappe, "_": lambda text: text,
-			"can_modify_course": self.course_access, "can_modify_batch": self.batch_access,
+			"frappe": self.frappe,
+			"_": lambda text: text,
+			"can_modify_course": self.course_access,
+			"can_modify_batch": self.batch_access,
 			"QUESTION_OPTION_FIELDS": [f"option_{i}" for i in range(1, 11)],
 			"QUESTION_CORRECTNESS_FIELDS": [f"is_correct_{i}" for i in range(1, 11)],
 			"QUESTION_POSSIBILITY_FIELDS": [f"possibility_{i}" for i in range(1, 11)],
@@ -61,8 +68,7 @@ class TestQuizReviewAnswers(unittest.TestCase):
 	def test_student_cannot_read_keys_even_for_own_submission(self):
 		with self.assertRaises(PermissionError):
 			self.review()
-		self.assertFalse(any(call.args[0] == "LMS Question"
-			for call in self.frappe.get_all.call_args_list))
+		self.assertFalse(any(call.args[0] == "LMS Question" for call in self.frappe.get_all.call_args_list))
 
 	def test_guest_and_unrelated_instructor_are_denied(self):
 		for user, roles in [("Guest", []), ("other-teacher", ["Course Creator"])]:
@@ -85,11 +91,15 @@ class TestQuizReviewAnswers(unittest.TestCase):
 		self.course_access.return_value = True
 		self.assertTrue(self.ns["_can_review_submission"]("quiz"))
 		self.frappe.db.get_value.return_value = Row(owner="teacher", course=None)
-		self.frappe.get_all.side_effect = lambda doctype, **kw: ["course"] if doctype == "Course Lesson" else []
+		self.frappe.get_all.side_effect = (
+			lambda doctype, **kw: ["course"] if doctype == "Course Lesson" else []
+		)
 		self.assertTrue(self.ns["_can_review_submission"]("quiz"))
 		self.course_access.return_value = False
 		self.batch_access.return_value = True
-		self.frappe.get_all.side_effect = lambda doctype, **kw: ["batch"] if doctype == "LMS Assessment" else []
+		self.frappe.get_all.side_effect = (
+			lambda doctype, **kw: ["batch"] if doctype == "LMS Assessment" else []
+		)
 		self.assertTrue(self.ns["_can_review_submission"]("quiz"))
 
 	def test_document_permission_denial_stops_answer_lookup(self):
@@ -104,12 +114,22 @@ class TestQuizReviewAnswers(unittest.TestCase):
 		self.doc.result.append(Row(question_name="q3"))
 		self.frappe.get_all.return_value = [
 			Row(name="q1", type="User Input", possibility_1="12", possibility_10="21"),
-			Row(name="q2", type="Choices", option_1="wrong", is_correct_1=0,
-				option_2="right", is_correct_2=1, option_10="also right", is_correct_10=1),
+			Row(
+				name="q2",
+				type="Choices",
+				option_1="wrong",
+				is_correct_1=0,
+				option_2="right",
+				is_correct_2=1,
+				option_10="also right",
+				is_correct_10=1,
+			),
 			Row(name="q3", type="Open Ended"),
 		]
 		self.assertEqual(self.review(), {"q1": ["12", "21"], "q2": ["right", "also right"], "q3": []})
-		self.assertEqual(self.frappe.get_all.call_args.kwargs["filters"], [["name", "in", ["q1", "q2", "q3"]]])
+		self.assertEqual(
+			self.frappe.get_all.call_args.kwargs["filters"], [["name", "in", ["q1", "q2", "q3"]]]
+		)
 
 
 if __name__ == "__main__":
