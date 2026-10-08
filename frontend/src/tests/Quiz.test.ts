@@ -373,6 +373,136 @@ describe('Quiz choices', () => {
 	})
 })
 
+// Guards the tutor customisations lost in the upstream sync (PR #3): early
+// quiz completion from any question, and checked answers staying locked after
+// a page reload instead of being answerable again.
+describe('Quiz completion and checked-answer persistence', () => {
+	beforeEach(() => {
+		const response = choicesQuizResponse(2)
+		response.quiz.show_answers = 1
+		resourceState.response = response
+	})
+
+	it('shows Finish Quiz on the first question and submits directly on quizzes with live checking', async () => {
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await startQuiz(wrapper)
+
+		expect(wrapper.text()).toContain('Question 1 of 2')
+		const finish = wrapper
+			.findAll('button')
+			.find((button) => button.text() === 'Finish Quiz')
+		expect(finish).toBeDefined()
+		await finish!.trigger('click')
+		await flushPromises()
+
+		expect(resourceState.submits).toContain(
+			'lms.lms.doctype.lms_quiz.lms_quiz.submit_quiz'
+		)
+		wrapper.unmount()
+	})
+
+	it('shows Finish Quiz on the first question and asks for confirmation on quizzes without live checking', async () => {
+		const response = choicesQuizResponse(2)
+		response.quiz.show_answers = 0
+		resourceState.response = response
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await startQuiz(wrapper)
+
+		const finish = wrapper
+			.findAll('button')
+			.find((button) => button.text() === 'Finish Quiz')
+		expect(finish).toBeDefined()
+		await finish!.trigger('click')
+		await flushPromises()
+
+		// The Dialog stub renders the slot, not its title prop; the body text
+		// only exists inside the confirmation dialog.
+		expect(wrapper.text()).toContain('You have 2 unattempted questions')
+		expect(resourceState.submits).not.toContain(
+			'lms.lms.doctype.lms_quiz.lms_quiz.submit_quiz'
+		)
+		wrapper.unmount()
+	})
+
+	it('keeps a checked answer locked after the page is reloaded', async () => {
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await startQuiz(wrapper)
+
+		resourceState.checkAnswer = [1, 0]
+		await wrapper.findAll('input[type="radio"]')[0].trigger('change')
+		const check = wrapper.findAll('button').find((b) => b.text() === 'Check')
+		expect(check).toBeDefined()
+		await check!.trigger('click')
+		await flushPromises()
+
+		// The verdict is part of the persisted draft, ready for a reload.
+		const draft = JSON.parse(
+			localStorage.getItem('lms-quiz-draft:learner@example.com:QUIZ-1')!
+		)
+		expect(draft.version).toBe(2)
+		// Undefined slots round-trip through JSON as null; the array always
+		// covers all ten option slots.
+		expect(draft.verdicts.Q1.slice(0, 2)).toEqual([1, null])
+		expect(draft.verdicts.Q1).toHaveLength(10)
+		wrapper.unmount()
+
+		const restored = mountQuiz()
+		await flushPromises()
+
+		// The checked question is back: verdict shown, answer picked...
+		const feedback = restored.find('[data-testid="quiz-feedback"]')
+		expect(feedback.exists()).toBe(true)
+		expect(feedback.text()).toBe('Correct')
+		const radios = restored.findAll('input[type="radio"]')
+		expect((radios[0].element as HTMLInputElement).checked).toBe(true)
+
+		// ...the inputs are locked and Check cannot be pressed again.
+		expect(radios[0].attributes('disabled')).toBeDefined()
+		expect(
+			restored.findAll('button').find((b) => b.text() === 'Check')
+		).toBeUndefined()
+		restored.unmount()
+	})
+
+	it('re-locks the verdict when jumping back to a checked question', async () => {
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await startQuiz(wrapper)
+
+		resourceState.checkAnswer = [1, 0]
+		await wrapper.findAll('input[type="radio"]')[0].trigger('change')
+		const check = wrapper.findAll('button').find((b) => b.text() === 'Check')
+		await check!.trigger('click')
+		await flushPromises()
+
+		const next = wrapper.findAll('button').find((b) => b.text() === 'Next')
+		await next!.trigger('click')
+		await flushPromises()
+		// On the unchecked question the inputs are open and Check is back.
+		expect(
+			wrapper.findAll('input[type="radio"]')[0].attributes('disabled')
+		).toBeUndefined()
+		expect(
+			wrapper.findAll('button').find((b) => b.text() === 'Check')
+		).toBeDefined()
+
+		// Live-checking quizzes have no Previous button; the question is
+		// revisited through the component's navigation itself.
+		;(wrapper.vm as any).switchQuestion(1)
+		await flushPromises()
+
+		// Returning to the checked question restores its verdict and lock.
+		expect(
+			wrapper.findAll('input[type="radio"]')[0].attributes('disabled')
+		).toBeDefined()
+		expect(wrapper.find('[data-testid="quiz-feedback"]').text()).toBe('Correct')
+		wrapper.unmount()
+	})
+})
+
 // Guards the quiz card's skeleton, header summary, option rows and verdict.
 // Came with this branch's restyle of the quiz block as an assessment card.
 // Added on feat/assessment-visual-redesign to pin the new card's states.

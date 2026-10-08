@@ -467,6 +467,15 @@
 											<span>{{ __('Finish Quiz') }}</span>
 										</Button>
 									</div>
+									<!-- Tutor customization: the quiz can be finished early from any
+									     question, not only from the last one. -->
+									<Button
+										v-if="!preview && activeQuestion != questions.length"
+										variant="solid"
+										@click="handleSubmitClick()"
+									>
+										<span>{{ __('Finish Quiz') }}</span>
+									</Button>
 								</div>
 							</div>
 						</div>
@@ -845,6 +854,10 @@ const showSubmissionConfirmation = ref(false)
 const possibleAnswer = ref<string | null>(null)
 const timer = ref(0)
 const savedAnswers = ref<SavedAnswer[]>([])
+// Per-question answer-check verdicts, keyed by question name. Persisted in the
+// draft so a checked answer stays locked (and its verdict visible) after a page
+// reload, instead of letting the learner re-answer and re-check.
+const checkedVerdicts = ref<Record<string, AnswerVerdict[]>>({})
 const deadline = ref<number | null>(null)
 let restoringAnswer = false
 let timerInterval: ReturnType<typeof setInterval> | undefined
@@ -1267,6 +1280,12 @@ const loadSavedAnswers = (): void => {
 			}
 		}
 	}
+	// Re-apply the checked verdict for this question (or clear a verdict that
+	// belongs to the question we just left). Without this, a checked answer
+	// unlocks after a reload or a Previous jump and can be answered again.
+	showAnswers.length = 0
+	const verdict = checkedVerdicts.value[currentQuestion.value]
+	if (verdict?.length) showAnswers.push(...verdict)
 	restoringAnswer = false
 }
 
@@ -1299,6 +1318,7 @@ const startQuiz = () => {
 	if (!quiz.data) return
 	if (quizSubmission.data) quizSubmission.reset()
 	savedAnswers.value = []
+	checkedVerdicts.value = {}
 	attemptedQuestions.value = []
 	reviewQuestions.value = []
 	deadline.value = quiz.data.duration
@@ -1462,6 +1482,7 @@ const checkAnswer = (): void => {
 			} else if (!Array.isArray(data)) {
 				showAnswers.push(data)
 			}
+			checkedVerdicts.value[currentQuestion.value] = [...showAnswers]
 			saveCurrentAnswer()
 			if (!quiz.data?.show_answers) {
 				resetQuestion()
@@ -1484,13 +1505,16 @@ const saveDraft = () => {
 		localStorage.setItem(
 			draftKey(),
 			JSON.stringify({
-				version: 1,
+				version: 2,
 				questions: questions.value.map((q) => q.question),
 				answers: savedAnswers.value,
 				activeQuestion: currentQuestion.value,
 				reviewQuestions: reviewQuestions.value.map(
 					(index) => questions.value[index - 1]?.question
 				),
+				// undefined verdict slots survive JSON as null; restoreDraft
+				// normalises them back.
+				verdicts: checkedVerdicts.value,
 				deadline: deadline.value,
 			})
 		)
@@ -1531,7 +1555,11 @@ const restoreDraft = () => {
 	} catch {
 		return
 	}
-	if (draft?.version !== 1 || !Array.isArray(draft.questions)) return
+	if (
+		(draft?.version !== 1 && draft?.version !== 2) ||
+		!Array.isArray(draft.questions)
+	)
+		return
 	const byName = new Map(questions.value.map((row) => [row.question, row]))
 	if (
 		draft.questions.length === questions.value.length &&
@@ -1559,6 +1587,15 @@ const restoreDraft = () => {
 				return index < 0 ? [] : [index + 1]
 		  })
 		: []
+	checkedVerdicts.value = Object.fromEntries(
+		Object.entries(draft.verdicts ?? {}).flatMap(([name, verdict]) => {
+			if (!validNames.has(name) || !Array.isArray(verdict)) return []
+			const normalised = verdict.map((value) =>
+				value === 0 || value === 1 || value === 2 ? value : undefined
+			)
+			return [[name, normalised]]
+		})
+	)
 	deadline.value =
 		quiz.data.duration && Number.isFinite(draft.deadline)
 			? draft.deadline
@@ -1680,6 +1717,7 @@ const resetQuiz = () => {
 	attemptedQuestions.value = []
 	reviewQuestions.value = []
 	savedAnswers.value = []
+	checkedVerdicts.value = {}
 	deadline.value = null
 	quizSubmission.reset()
 	violationCount.value = 0
