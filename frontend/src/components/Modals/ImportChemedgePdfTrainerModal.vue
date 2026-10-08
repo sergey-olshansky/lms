@@ -81,7 +81,7 @@
 				<div
 					v-for="file in files"
 					:key="file.id"
-					class="flex items-center gap-2 rounded border p-2"
+					class="flex flex-wrap items-center gap-2 rounded border p-2"
 				>
 					<span class="lucide-file-text size-5 text-ink-gray-6" />
 					<span class="min-w-0 flex-1 truncate">{{ file.file_name }}</span>
@@ -96,6 +96,43 @@
 					>
 						Remove
 					</Button>
+					<div class="flex w-full flex-wrap items-center gap-2">
+						<label
+							class="text-xs text-ink-gray-6"
+							:for="`first-task-${file.id}`"
+						>
+							First task №
+						</label>
+						<input
+							:id="`first-task-${file.id}`"
+							v-model="file.first_task_number"
+							type="number"
+							min="1"
+							max="9999"
+							step="1"
+							:disabled="isProcessing"
+							class="w-24 rounded border border-outline-gray-2 px-2 py-1 text-sm"
+						/>
+						<label
+							class="text-xs text-ink-gray-6"
+							:for="`last-task-${file.id}`"
+						>
+							Last task №
+						</label>
+						<input
+							:id="`last-task-${file.id}`"
+							v-model="file.last_task_number"
+							type="number"
+							min="1"
+							max="9999"
+							step="1"
+							:disabled="isProcessing"
+							class="w-24 rounded border border-outline-gray-2 px-2 py-1 text-sm"
+						/>
+						<span class="text-xs text-ink-gray-5">
+							Empty = import the full PDF
+						</span>
+					</div>
 				</div>
 			</div>
 			<p v-if="uploadError" class="text-sm text-ink-red-5">{{ uploadError }}</p>
@@ -127,6 +164,9 @@ type ImportFile = UploadedFile & {
 	id: number
 	status: ImportStatus
 	source_folder: string
+	// Vue casts <input type="number"> values to numbers, so both shapes occur.
+	first_task_number: string | number
+	last_task_number: string | number
 	result?: ImportResult
 	error?: string
 }
@@ -283,6 +323,8 @@ function onUpload(file: UploadedFile, source_folder: string) {
 		id: nextFileId++,
 		status: 'uploaded',
 		source_folder,
+		first_task_number: '',
+		last_task_number: '',
 	})
 }
 
@@ -297,11 +339,19 @@ async function importPdfs() {
 	uploadError.value = ''
 	for (const file of files.value) {
 		if (file.status !== 'uploaded') continue
+		const rangeError = validateTaskRange(file)
+		if (rangeError) {
+			file.status = 'error'
+			file.error = rangeError
+			toast.error(`${file.file_name}: ${rangeError}`)
+			continue
+		}
 		file.status = 'processing'
 		try {
 			file.result = await importer.submit({
 				pdf_file: file.name,
 				source_folder: file.source_folder,
+				...taskRangeParams(file),
 			})
 			file.status = 'success'
 		} catch (error) {
@@ -311,6 +361,39 @@ async function importPdfs() {
 		}
 	}
 	isProcessing.value = false
+}
+
+function validateTaskRange(file: ImportFile) {
+	const first = String(file.first_task_number ?? '').trim()
+	const last = String(file.last_task_number ?? '').trim()
+	if (!first && !last) return ''
+	if (!first || !last) {
+		return 'Fill in both the first and the last task number, or leave both empty'
+	}
+	const firstNumber = Number(first)
+	const lastNumber = Number(last)
+	if (!Number.isInteger(firstNumber) || !Number.isInteger(lastNumber)) {
+		return 'Task numbers must be whole numbers'
+	}
+	if (
+		firstNumber < 1 ||
+		lastNumber < 1 ||
+		firstNumber > 9999 ||
+		lastNumber > 9999
+	) {
+		return 'Task numbers must be between 1 and 9999'
+	}
+	if (firstNumber > lastNumber) {
+		return 'The first task number must not be greater than the last task number'
+	}
+	return ''
+}
+
+function taskRangeParams(file: ImportFile) {
+	const first = String(file.first_task_number ?? '').trim()
+	const last = String(file.last_task_number ?? '').trim()
+	if (!first || !last) return {}
+	return { first_task_number: first, last_task_number: last }
 }
 
 function removeFile(id: number) {
