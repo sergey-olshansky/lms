@@ -1,26 +1,31 @@
 <template>
-	<FileUploader
-		:fileTypes="['image/*', 'video/*', 'audio/*', '.pdf']"
-		:private="true"
-		v-bind="attachArgs"
-		:validateFile="validateFile"
-		@success="(data) => addFile(data)"
-		v-slot="{ openFileSelector, uploading, progress, error }"
-	>
-		<div>
-			<AutoOpen :open="openFileSelector" />
-			<Button :loading="uploading" @click="openFileSelector">
-				{{
-					uploading ? __('Uploading {0}%').format(progress) : __('Upload File')
-				}}
-			</Button>
-			<ErrorMessage :message="error ?? undefined" class="mt-1" />
-		</div>
-	</FileUploader>
+	<div ref="uploaderRoot">
+		<FileUploader
+			:fileTypes="['image/*', 'video/*', 'audio/*', '.pdf']"
+			:private="true"
+			v-bind="attachArgs"
+			:validateFile="validateFile"
+			@success="(data) => addFile(data)"
+			v-slot="{ openFileSelector, uploading, progress, error }"
+		>
+			<div>
+				<AutoOpen :open="openFileSelector" />
+				<Button :loading="uploading" @click="openFileSelector">
+					{{
+						uploading
+							? __('Uploading {0}%').format(progress)
+							: __('Upload File')
+					}}
+				</Button>
+				<ErrorMessage :message="error ?? undefined" class="mt-1" />
+			</div>
+		</FileUploader>
+	</div>
 </template>
 <script setup>
 import { Button, ErrorMessage, FileUploader } from 'frappe-ui'
-import { nextTick, computed } from 'vue'
+import { nextTick, computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { transliterateFileName } from '@/utils/transliterateFileName'
 
 const AutoOpen = {
 	props: { open: { type: Function, required: true } },
@@ -30,6 +35,56 @@ const AutoOpen = {
 	},
 	render: () => null,
 }
+
+const uploaderRoot = ref(null)
+
+// frappe-ui FileUploader uploads `file.name` as-is (fileUploadHandler.ts) and
+// the backend does not transliterate names, so cyrillic attachments land with
+// unusable URLs. The hidden <input type="file"> sits next to the slot (not
+// inside it), so a capture-phase `change` on the wrapper fires before
+// FileUploader's onFileAdd reads event.target.files; swap the files for
+// transliterated copies there.
+const onCapturedChange = (event) => {
+	const input = event.target
+	if (!(input instanceof HTMLInputElement) || input.type !== 'file') return
+	const files = input.files
+	if (!files || !files.length) return
+	const renamed = []
+	let changed = false
+	for (const file of files) {
+		if (/[А-яЁёІіЇїЄєҐґ]/.test(file.name)) {
+			renamed.push(
+				new File([file], transliterateFileName(file.name), {
+					type: file.type,
+					lastModified: file.lastModified,
+				})
+			)
+			changed = true
+		} else {
+			renamed.push(file)
+		}
+	}
+	if (!changed) return
+	try {
+		const dt = new DataTransfer()
+		for (const file of renamed) dt.items.add(file)
+		input.files = dt.files
+	} catch {
+		// jsdom has no DataTransfer; replace the getter for tests.
+		Object.defineProperty(input, 'files', {
+			value: renamed,
+			configurable: true,
+		})
+	}
+}
+
+onMounted(() => {
+	uploaderRoot.value?.addEventListener('change', onCapturedChange, true)
+})
+
+onBeforeUnmount(() => {
+	uploaderRoot.value?.removeEventListener('change', onCapturedChange, true)
+})
 
 const props = defineProps({
 	onFileUploaded: {
