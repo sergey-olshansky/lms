@@ -17,6 +17,8 @@ from lms.lms.utils import has_course_instructor_role, has_moderator_role
 
 SOURCE_PDF_FIELD = "chemedge_source_pdf"
 TASK_IMAGE_FIELD = "chemedge_task_image"
+TASK_NUMBER_MIN = 1
+TASK_NUMBER_MAX = 9999
 
 
 def _is_system_manager(member: str | None = None) -> bool:
@@ -81,11 +83,18 @@ def _source_folder_label(source_folder: str | None) -> str:
 	return " / ".join(folder_parts)
 
 
-def _quiz_title(meta: dict, source_folder: str | None) -> str:
+def _quiz_title(
+	meta: dict,
+	source_folder: str | None,
+	task_number_range: tuple[int, int] | None = None,
+) -> str:
 	"""Prefix the PDF's quiz title with its selected directory path."""
 	header = str(meta["header"]).strip()
 	folder = _source_folder_label(source_folder)
-	return f"{folder} · {header}" if folder else header
+	parts = [part for part in (folder, header) if part]
+	if task_number_range:
+		parts.append(f"tasks {task_number_range[0]}–{task_number_range[1]}")
+	return " · ".join(parts)
 
 
 def _unique_quiz_title(title: str) -> str:
@@ -100,11 +109,15 @@ def _unique_quiz_title(title: str) -> str:
 	return candidate
 
 
-def _create_quiz(meta: dict, source_folder: str | None = None):
+def _create_quiz(
+	meta: dict,
+	source_folder: str | None = None,
+	task_number_range: tuple[int, int] | None = None,
+):
 	quiz = frappe.get_doc(
 		{
 			"doctype": "LMS Quiz",
-			"title": _unique_quiz_title(_quiz_title(meta, source_folder)),
+			"title": _unique_quiz_title(_quiz_title(meta, source_folder, task_number_range)),
 			"passing_percentage": 85,
 			"max_attempts": 2,
 			"show_answers": 0,
@@ -143,12 +156,96 @@ def _delete_questions(question_names: list[str]):
 			frappe.delete_doc("LMS Question", name, ignore_permissions=True)
 
 
-@frappe.whitelist()
-def import_pdf_trainer(pdf_file: str, source_folder: str | None = None):
+def _parse_task_number(value, field_label: str) -> int | None:
+	"""Return an int task number for a whitelisted argument, or None when empty."""
+	if value is None or (isinstance(value, str) and not value.strip()):
+		return None
+	try:
+		number = int(str(value).strip())
+	except (TypeError, ValueError):
+		number = None
+	if number is None or not TASK_NUMBER_MIN <= number <= TASK_NUMBER_MAX:
+		frappe.throw(
+			_("{0} must be a whole number between {1} and {2}.").format(
+				field_label, TASK_NUMBER_MIN, TASK_NUMBER_MAX
+			),
+			frappe.ValidationError,
+		)
+	return number
+
+
+def apply_task_number_range(
+	first_task_number,
+	last_task_number,
+	tasks: list[dict],
+) -> tuple[tuple[int, int] | None, list[dict]]:
+	"""Validate an optional printed task-number range and filter tasks by it.
+
+	Both bounds empty keeps the given task list untouched (full import). Any
+	other combination must select an inclusive, existing range of the printed
+	numbers; duplicates (compiled PDFs) reject selection because a repeated
+	number is ambiguous. Returns ``(range, filtered_tasks)`` for the caller to
+	suffix the quiz title with.
+	"""
+	first = _parse_task_number(first_task_number, _("First task number"))
+	last = _parse_task_number(last_task_number, _("Last task number"))
+	if (first is None) != (last is None):
+		frappe.throw(
+			_("Fill in both the first and the last task number, or leave both empty."),
+			frappe.ValidationError,
+		)
+	if first is None or last is None:
+		return None, tasks
+
+	if first > last:
+		frappe.throw(
+			_("The first task number must not be greater than the last task number."),
+			frappe.ValidationError,
+		)
+
+	numbers = [int(task["number"]) for task in tasks]
+	duplicates = sorted({number for number in numbers if numbers.count(number) > 1})
+	if duplicates:
+		frappe.throw(
+			_(
+				"This PDF repeats task numbers ({0}), so a task-number range cannot be"
+				" selected. Import it without a range instead."
+			).format(", ".join(str(number) for number in duplicates)),
+			frappe.ValidationError,
+		)
+
+	filtered = [task for task in tasks if first <= int(task["number"]) <= last]
+	if not filtered:
+		frappe.throw(
+			_(
+				"No tasks with numbers {0}–{1} were found in this PDF: it has {2} task(s)"
+				" numbered {3}–{4}."
+			).format(first, last, len(numbers), min(numbers), max(numbers)),
+			frappe.ValidationError,
+		)
+	if first not in numbers or last not in numbers:
+		frappe.throw(
+			_(
+				"Task numbers {0}–{1} must both exist in this PDF: it has {2} task(s)" " numbered {3}–{4}."
+			).format(first, last, len(numbers), min(numbers), max(numbers)),
+			frappe.ValidationError,
+		)
+	return (first, last), filtered
+
+
+@frappe.whitelist(methods=["POST"])
+def import_pdf_trainer(
+	pdf_file: str,
+	source_folder: str | None = None,
+	first_task_number: str | int | None = None,
+	last_task_number: str | int | None = None,
+):
 	"""Create one native LMS Quiz from one strict-format Chemedge PDF.
 
 	The upload is attached to the created quiz only after every question and image
 	has been created.  Any error deletes created LMS objects/files and the upload.
+	An optional inclusive first/last printed task-number range filters the tasks
+	that reach the quiz; answers stay unfiltered (they are keyed per task).
 	"""
 	_require_import_permission()
 	source_file = _uploaded_pdf(pdf_file)
@@ -165,6 +262,8 @@ def import_pdf_trainer(pdf_file: str, source_folder: str | None = None):
 			page_count = len(pdf.pages)
 			first_page_size = (float(pdf.pages[0].width), float(pdf.pages[0].height))
 
+		task_number_range, tasks = apply_task_number_range(first_task_number, last_task_number, tasks)
+
 		bundle_dir = build_bundle(
 			pdf_path=pdf_path,
 			output_root=work_dir,
@@ -179,7 +278,7 @@ def import_pdf_trainer(pdf_file: str, source_folder: str | None = None):
 			first_page_size=first_page_size,
 		)
 		meta = json.loads((bundle_dir / "meta.json").read_text(encoding="utf-8"))
-		quiz = _create_quiz(meta, source_folder)
+		quiz = _create_quiz(meta, source_folder, task_number_range)
 		quiz_name = quiz.name
 
 		for task in meta["tasks"]:
