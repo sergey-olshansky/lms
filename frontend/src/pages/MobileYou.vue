@@ -50,21 +50,6 @@
 			<SettingsRowList :groups="groups" @action="activate" />
 		</template>
 
-		<BottomSheet
-			:model-value="showColourMode"
-			:title="colourModeSheetTitle"
-			@update:model-value="showColourMode = false"
-		>
-			<div data-testid="colour-mode-sheet" class="px-3">
-				<p class="pb-2 text-p-sm leading-normal text-ink-gray-6">
-					{{ colourModeSheetDescription }}
-				</p>
-				<SettingsRowList
-					:groups="buildAppearanceRows(themePreference)"
-					@action="chooseColourMode"
-				/>
-			</div>
-		</BottomSheet>
 	</MobilePageLayout>
 </template>
 
@@ -81,8 +66,6 @@ import { storeToRefs } from 'pinia'
 import { sessionStore } from '@/stores/session'
 import { usersStore } from '@/stores/user'
 import { safeUrl } from '@/utils/safeUrl'
-import { setThemePreference, themePreference } from '@/utils/theme'
-import type { ThemePreference } from '@/utils/theme'
 import {
 	ensureMobileNavLinks,
 	otherLinks,
@@ -95,14 +78,9 @@ import {
 } from '@/stores/notifications'
 import { pickPrimaryTabs } from '@/utils/mobileNav'
 import MobilePageLayout from '@/components/Layouts/pages/mobile/MobilePageLayout.vue'
-import BottomSheet from '@/components/BottomSheet.vue'
 import SettingsRowList from '@/components/Layouts/settings/mobile/SettingsRowList.vue'
 import { buildYouRows } from '@/components/Settings/Mobile/mobileRows'
-import {
-	buildAppearanceRows,
-	COLOUR_MODE_ACTION,
-	type SettingsUser,
-} from '@/components/Settings/Mobile/mobileRows'
+import type { SettingsUser } from '@/components/Settings/Mobile/mobileRows'
 
 const router = useRouter()
 const { logout, brand } = sessionStore()
@@ -172,7 +150,6 @@ const groups = computed(() =>
 		sidebarLinks: sidebarLinks.value,
 		otherLinks: otherLinks.value,
 		primaryLabels: primaryLabels.value,
-		themePreference: themePreference.value,
 		unreadCount: unreadCount.value,
 		hasRoute: (name: string) => router.hasRoute(name),
 	})
@@ -202,13 +179,8 @@ watch(
 // page is where it is read; nothing else on a phone asks for it.
 onMounted(() => loadUnreadCount())
 
-const showColourMode = ref(false)
-
 // Called from script rather than inline in the template: a `<script setup>`
 // template resolves only what the component exposes.
-const colourModeSheetTitle = __('Colour mode')
-const colourModeSheetDescription = __('Applies to this device only.')
-
 // The block's one control, and why the avatar and name above it are inert: a
 // single link carrying its own visible text has the accessible name "View
 // profile", so nothing about the picture can leak into it. The <img> takes
@@ -233,14 +205,8 @@ const viewProfileLabel = __('View profile')
 const signedOutPrompt = __('Log in to see your account.')
 const logInLabel = __('Log in')
 
-const chooseColourMode = (mode: string): void => {
-	setThemePreference(mode as ThemePreference)
-	showColourMode.value = false
-}
-
 const activate = (action: string): void => {
 	if (action === 'notifications') toggleNotifications()
-	else if (action === COLOUR_MODE_ACTION) showColourMode.value = true
 	else if (action === 'logout') logout.submit()
 }
 

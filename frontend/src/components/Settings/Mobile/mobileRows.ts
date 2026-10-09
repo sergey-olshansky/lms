@@ -1,5 +1,4 @@
 import type { RouteLocationRaw } from 'vue-router'
-import type { ThemePreference } from '@/utils/theme'
 import { overflowLinks, sectionFor, type NavLink } from '@/utils/mobileNav'
 import type { FieldsSection } from '@/types/settingsSchema'
 
@@ -56,31 +55,6 @@ export const seedCheckboxDefaults = (
 	}
 }
 
-const COLOUR_MODES: { value: ThemePreference; label: string }[] = [
-	{ value: 'system', label: 'System' },
-	{ value: 'light', label: 'Light' },
-	{ value: 'dark', label: 'Dark' },
-]
-
-const COLOUR_MODE_LABELS: Record<string, string> = {
-	system: 'System',
-	light: 'Light',
-	dark: 'Dark',
-}
-
-export const COLOUR_MODE_ACTION = 'colour-mode'
-
-// Exported because the You page lists this row. It reports being picked
-// rather than routing somewhere: the picker is a sheet, not a page that
-// exists only to hold three options.
-export const colourModeRow = (themePreference: ThemePreference): MobileRow => ({
-	key: 'colour-mode',
-	label: 'Colour mode',
-	icon: 'lucide-sun-moon',
-	value: COLOUR_MODE_LABELS[themePreference] || 'System',
-	action: COLOUR_MODE_ACTION,
-})
-
 // What a phone screen needs of `get_user_info`, a subset of its payload,
 // named field for field so a screen reading it is type-checked against the
 // endpoint's actual return rather than `any`.
@@ -93,21 +67,6 @@ export interface SettingsUser {
 	/** The one-line "what I do". `bio` is long-form prose and is not this. */
 	headline?: string
 }
-
-/** The colour-mode picker, as data: one selectable row per mode. */
-export const buildAppearanceRows = (
-	themePreference: ThemePreference
-): MobileRowGroup[] => [
-	{
-		key: 'colour-mode',
-		rows: COLOUR_MODES.map((mode) => ({
-			key: mode.value,
-			label: mode.label,
-			action: mode.value,
-			selected: themePreference === mode.value,
-		})),
-	},
-]
 
 // The You page, as data. The bar is five fixed routes with no More sheet, so
 // this page is the only way to reach anything else.
@@ -172,7 +131,6 @@ export const buildYouRows = (options: {
 	sidebarLinks: readonly NavLink[]
 	otherLinks: readonly NavLink[]
 	primaryLabels: readonly string[]
-	themePreference: ThemePreference
 	unreadCount?: number
 	/**
 	 * `router.hasRoute`. Required rather than defaulted: a default of "yes,
@@ -184,7 +142,6 @@ export const buildYouRows = (options: {
 		sidebarLinks,
 		otherLinks,
 		primaryLabels,
-		themePreference,
 		unreadCount,
 		hasRoute,
 	} = options

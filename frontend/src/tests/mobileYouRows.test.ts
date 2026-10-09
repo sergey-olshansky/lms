@@ -15,10 +15,9 @@ import {
 	buildYouRows,
 	iconClass,
 } from '@/components/Settings/Mobile/mobileRows'
-import {
-	colourModeRow,
-	type MobileRow,
-	type MobileRowGroup,
+import type {
+	MobileRow,
+	MobileRowGroup,
 } from '@/components/Settings/Mobile/mobileRows'
 import type { NavLink } from '@/utils/mobileNav'
 
@@ -56,7 +55,6 @@ const build = (overrides: Partial<Parameters<typeof buildYouRows>[0]> = {}) =>
 		sidebarLinks: SIDEBAR,
 		otherLinks: OTHER,
 		primaryLabels: PRIMARY,
-		themePreference: 'system',
 		hasRoute: () => true,
 		...overrides,
 	})
@@ -196,7 +194,7 @@ describe('the last group', () => {
 	})
 
 	it('does not expose a colour-mode control in the learner app', () => {
-		expect(allRows(build({ themePreference: 'dark' })).map((row) => row.label))
+		expect(allRows(build()).map((row) => row.label))
 			.not.toContain('Colour mode')
 	})
 
