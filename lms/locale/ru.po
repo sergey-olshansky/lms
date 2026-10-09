@@ -342,6 +342,9 @@ msgstr "Присвоено за"
 #: lms/locale/main.pot
 msgid "Back to editing"
 msgstr "Вернуться к редактированию"
+#: frappe/www/login.html
+msgid "Back to sign in"
+msgstr "Вернуться к входу"
 #: frontend/src lms
 msgid "Badge Assignment"
 msgstr "Присвоение достижения"
@@ -570,6 +573,9 @@ msgstr "Для сертификата"
 #: frontend/src lms
 msgid "For Course"
 msgstr "Для курса"
+#: frappe/www/login.html
+msgid "Forgot password?"
+msgstr "Забыли пароль?"
 #: frontend/src lms
 msgid "Frappe Mail site"
 msgstr "Сайт Frappe Mail"
@@ -636,6 +642,9 @@ msgstr "Последний номер задания"
 #: frontend/src lms
 msgid "Learn courses and track progress"
 msgstr "Проходите курсы и следите за прогрессом"
+#: frappe/www/login.html
+msgid "Let's setup your account."
+msgstr "Создайте свой аккаунт."
 #: lms/locale/main.pot
 msgid "Lesson and course must be strings."
 msgstr "Lesson и course должны быть строками."
@@ -816,6 +825,9 @@ msgstr "Удалить строку {0}"
 #: lms/locale/main.pot
 msgid "Reset"
 msgstr "Сбросить"
+#: frappe/www/login.html
+msgid "Resend"
+msgstr "Отправить снова"
 #: lms/locale/main.pot
 msgid "Run code"
 msgstr "Запустить код"
@@ -852,6 +864,9 @@ msgstr "Отправка через ваш аккаунт SendGrid"
 #: frontend/src lms
 msgid "Send through your SparkPost account"
 msgstr "Отправка через ваш аккаунт SparkPost"
+#: frappe/www/login.html
+msgid "Send Link"
+msgstr "Отправить ссылку"
 #: frontend/src lms
 msgid "Sending"
 msgstr "Отправка"
@@ -3678,6 +3693,9 @@ msgstr "Поле с подробностями не может быть пуст
 #: frontend/src/pages/Forms/CourseImportForm.vue:32
 msgid "Device"
 msgstr "Устройство"
+#: frappe/www/login.html
+msgid "Didn't receive the link?"
+msgstr "Не получили ссылку?"
 
 #. Label of the disable_pwa (Check) field in DocType 'LMS Settings'
 #: lms/lms/doctype/lms_settings/lms_settings.json
@@ -6392,6 +6410,9 @@ msgstr "Войти в Frappe Cloud?"
 #: frontend/src/pages/JobDetail.vue:57
 msgid "Login to apply"
 msgstr "Войти для подачи заявки"
+#: frappe/www/login.html
+msgid "Login with password"
+msgstr "Вход с паролем"
 
 #: frontend/src/pages/Home/Streak.vue:37
 msgid "Longest Streak"
@@ -8095,6 +8116,12 @@ msgstr "Введите действительный URL-адрес."
 #: lms/templates/signup-form.html:186
 msgid "Please enter a valid email."
 msgstr "Введите корректный email."
+#: frappe/www/login.html
+msgid "Please check your email."
+msgstr "Проверьте свою почту."
+#: frappe/www/login.html
+msgid "Please enter your email, we'll send you password reset link"
+msgstr "Укажите свой email — мы отправим вам ссылку для сброса пароля"
 
 #: frontend/src/pages/Forms/LiveClassForm.vue:284
 msgid "Please enter a valid time in the format HH:mm."
@@ -9825,13 +9852,19 @@ msgstr "Строка {0} боковой панели: {1} — не встрое�
 msgid "Sidebar rows must be a list."
 msgstr "Строки боковой панели должны быть списком."
 
+#: frappe/www/login.html
+msgid "Sign In"
+msgstr "Войти"
+#: frappe/www/login.html
+msgid "Sign Up"
+msgstr "Регистрация"
 #: lms/lms/user.py:31
 msgid "Sign Up is disabled"
 msgstr "Регистрация отключена"
 
 #: lms/templates/signup-form.html:70
 msgid "Sign up"
-msgstr "Войти"
+msgstr "Регистрация"
 
 #. Label of the signup_settings_tab (Tab Break) field in DocType 'LMS Settings'
 #: lms/lms/doctype/lms_settings/lms_settings.json
@@ -11647,6 +11680,9 @@ msgstr "Среда"
 #: lms/templates/emails/lms_invite_request_approved.html:4
 msgid "Welcome to {0}!"
 msgstr "Добро пожаловать в {0}!"
+#: frappe/www/login.html
+msgid "Welcome! Please sign in to continue."
+msgstr "Добро пожаловать! Войдите, чтобы продолжить."
 
 #: frontend/src/pages/Forms/PersonaForm.vue:105
 msgid "What are you using today to manage learning?"
