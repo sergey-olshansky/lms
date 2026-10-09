@@ -60,7 +60,9 @@ class Entry:
 
 def parse_po(path=PO_PATH):
 	entries = []
-	with open(path, encoding="utf-8") as f:
+	with (
+		open(path, encoding="utf-8") as f
+	):  # nosemgrep: frappe-security-file-traversal - offline tool reads/writes repo-local .po/.pot files passed as CLI args or module constants; no user input reaches these paths
 		lines = f.read().split("\n")
 	cur = None
 	field = None  # 'id' | 'str'
@@ -130,7 +132,9 @@ def _attach_raw(entries, lines):
 
 
 def write_po(entries, path=PO_PATH):
-	with open(path, "w", encoding="utf-8") as f:
+	with (
+		open(path, "w", encoding="utf-8") as f
+	):  # nosemgrep: frappe-security-file-traversal - offline tool reads/writes repo-local .po/.pot files passed as CLI args or module constants; no user input reaches these paths
 		first = True
 		for e in entries:
 			if not first and e.blank_before:
@@ -170,7 +174,9 @@ def stats():
 	dup = [i for i, v in byid.items() if len(v) > 1]
 	empty_extra = [i for i in extra if all(not e.str for e in byid[i])]
 	fuzzy = 0
-	with open(PO_PATH, encoding="utf-8") as f:
+	with (
+		open(PO_PATH, encoding="utf-8") as f
+	):  # nosemgrep: frappe-security-file-traversal - offline tool reads/writes repo-local .po/.pot files passed as CLI args or module constants; no user input reaches these paths
 		for line in f:
 			if line.startswith("#,") and "fuzzy" in line:
 				fuzzy += 1
@@ -210,11 +216,15 @@ def main():
 		for e in parse_po():
 			if e.id != "" and not e.str:
 				out[e.id] = {"line": e.line, "refs": e.refs}
-		with open(sys.argv[2], "w", encoding="utf-8") as f:
+		with (
+			open(sys.argv[2], "w", encoding="utf-8") as f
+		):  # nosemgrep: frappe-security-file-traversal - offline tool reads/writes repo-local .po/.pot files passed as CLI args or module constants; no user input reaches these paths
 			json.dump(out, f, ensure_ascii=False, indent=1)
 		print("exported", len(out))
 	elif cmd == "apply":
-		with open(sys.argv[2], encoding="utf-8") as f:
+		with (
+			open(sys.argv[2], encoding="utf-8") as f
+		):  # nosemgrep: frappe-security-file-traversal - offline tool reads/writes repo-local .po/.pot files passed as CLI args or module constants; no user input reaches these paths
 			patch = json.load(f)
 		entries = parse_po()
 		byid = po_keys(entries)
