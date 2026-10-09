@@ -58,6 +58,25 @@ def q(s, n=90):
 	return json.dumps(s if len(s) <= n else s[: n - 3] + "...", ensure_ascii=False)
 
 
+def mojibake_cp1251_utf8(s):
+	"""True when s looks like UTF-8 bytes mis-decoded as cp1251 (mojibake):
+	re-encoding the string to cp1251 yields bytes that are valid UTF-8 of
+	mostly-Cyrillic text different from the original."""
+	try:
+		raw = s.encode("cp1251")
+	except UnicodeEncodeError:
+		return False  # contains chars outside cp1251 -> not pure mojibake
+	try:
+		dec = raw.decode("utf-8")
+	except UnicodeDecodeError:
+		return False
+	if dec == s:
+		return False
+	# require the roundtrip to yield recognizable Cyrillic text
+	cyr = sum(1 for ch in dec if "\u0400" <= ch <= "\u04ff")
+	return cyr >= 2 and cyr >= len(dec.replace(" ", "")) // 2
+
+
 def esc_ok(s):
 	i = 0
 	while i < len(s):
@@ -128,6 +147,10 @@ def check():
 			failures.append(
 				f"L{e.line} {q(e.id)}: newline count id={e.id.count(chr(10))} str={e.str.count(chr(10))}"
 			)
+
+		# mojibake (utf-8 read as cp1251 and saved back)
+		if mojibake_cp1251_utf8(e.str):
+			failures.append(f"L{e.line} {q(e.id)} -> {q(e.str)}: cp1251/utf-8 mojibake")
 
 		# glossary bans (contextual: msgid regex gates the msgstr regex)
 		for id_rx, str_rx, why in BANNED:

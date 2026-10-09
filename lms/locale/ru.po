@@ -1375,7 +1375,7 @@ msgstr "Ссылка на форму заявки"
 #: frontend/src/pages/JobApplications.vue:273
 #: frontend/src/pages/JobApplications.vue:278
 msgid "Applications"
-msgstr "Приложения"
+msgstr "Отклики"
 
 #: frontend/src/pages/JobApplications.vue:296
 msgid "Applied On"
@@ -5682,7 +5682,7 @@ msgstr "Задание LMS"
 #. Name of a DocType
 #: lms/lms/doctype/lms_assignment_submission/lms_assignment_submission.json
 msgid "LMS Assignment Submission"
-msgstr "Подача задания LMS"
+msgstr "Отправленное задание LMS"
 
 #. Name of a DocType
 #: lms/lms/doctype/lms_badge/lms_badge.json
@@ -6243,7 +6243,7 @@ msgstr "Уроков завершено"
 
 #: frontend/src/pages/Courses/CoursePublishSettings.vue:23
 msgid "Let users enroll themselves."
-msgstr "Позвольте пользователям регистрироваться самостоятельно."
+msgstr "Разрешить пользователям записываться самостоятельно."
 
 #: lms/templates/onboarding_header.html:11
 msgid "Lets start setting up your content on the LMS so that you can reclaim time and focus on growth."
@@ -6781,7 +6781,7 @@ msgstr "Шаблон обновления статуса запроса наст
 #: frontend/src/components/ContactUsEmail.vue:14
 #: frontend/src/pages/JobApplications.vue:87
 msgid "Message"
-msgstr "РЎРѕРѕР±С‰РµРЅРёРµ"
+msgstr "Сообщение"
 
 #: frontend/src/pages/JobApplications.vue:232
 msgid "Message is required"
@@ -8127,7 +8127,7 @@ msgstr "Пожалуйста, войдите для просмотра прог�
 
 #: frontend/src/components/UpcomingEvaluations.vue:16
 msgid "Please make sure to schedule your evaluation before this date."
-msgstr "Пожалуйста, запишитесь на обследование до указанной даты."
+msgstr "Убедитесь, что запланировали оценивание до этой даты."
 
 #: lms/lms/notification/certificate_request_reminder/certificate_request_reminder.html:7
 #: lms/templates/emails/certificate_request_notification.html:7
@@ -8716,7 +8716,7 @@ msgstr "Вопрос успешно обновлен"
 
 #: frontend/src/components/Quiz.vue:434 frontend/src/components/Quiz.vue:667
 msgid "Question {0}"
-msgstr "Вопрос {0}:"
+msgstr "Вопрос {0}"
 
 #. Label of the questions (Table) field in DocType 'LMS Quiz'
 #: frontend/src/components/Quiz.vue:657 frontend/src/pages/Questions.vue:4
@@ -8756,7 +8756,7 @@ msgstr "Прогресс по тестам"
 #: lms/lms/doctype/lms_quiz_violation_log/lms_quiz_violation_log.json
 #: lms/lms/workspace/learning/learning.json
 msgid "Quiz Submission"
-msgstr "Подача теста"
+msgstr "Попытка прохождения теста"
 
 #: frontend/src/pages/QuizSubmissions.vue:229
 msgid "Quiz Submissions"
@@ -10147,11 +10147,11 @@ msgstr "Тип отправки"
 #: frontend/src/components/Assignment.vue:13
 #: frontend/src/components/Assignment.vue:16
 msgid "Submission by"
-msgstr "Представлено"
+msgstr "Отправил"
 
 #: frontend/src/pages/ProgrammingExercises/ProgrammingExerciseSubmission.vue:372
 msgid "Submission saved!"
-msgstr "Заявка сохранена!"
+msgstr "Решение сохранено!"
 
 #: frontend/src/pages/AssignmentSubmission.vue:69
 #: frontend/src/pages/AssignmentSubmissionList.vue:185
@@ -10845,7 +10845,7 @@ msgstr "Время должно быть в 24-часовом формате (Ч
 
 #: lms/templates/emails/published_batch_notification.html:29
 msgid "Time: "
-msgstr "Р’СЂРµРјСЏ: "
+msgstr "Время: "
 
 #: frontend/src/pages/ProfileEvaluator.vue:11
 msgid "Times are in {0}"
@@ -12094,7 +12094,7 @@ msgstr "Вы зачислены в эту группу"
 
 #: frontend/src/components/CourseCardOverlay.vue:196
 msgid "You have been enrolled in this course"
-msgstr "Вы зарегистрированы на этот курс"
+msgstr "Вы записаны на этот курс"
 
 #: lms/lms/doctype/lms_quiz_submission/lms_quiz_submission.py:30
 msgid "You have exceeded the maximum number of attempts ({0}) for this quiz"
@@ -12588,7 +12588,7 @@ msgstr "search должен быть строкой"
 
 #: frontend/src/pages/Courses/CourseOverview.vue:212
 msgid "section"
-msgstr "Р Р°Р·РґРµР»"
+msgstr "Раздел"
 
 #: frontend/src/pages/Courses/CourseOverview.vue:212
 msgid "sections"
@@ -12919,7 +12919,7 @@ msgstr "Записано: {}"
 #. Count format of shortcut in the Learning Workspace
 #: lms/lms/workspace/learning/learning.json
 msgid "{} Granted"
-msgstr "{} Предоставленный"
+msgstr "Предоставлено: {}"
 
 #. Count format of shortcut in the Learning Workspace
 #: lms/lms/workspace/learning/learning.json
