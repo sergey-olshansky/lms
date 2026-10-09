@@ -3,11 +3,11 @@
 		:collapsed="false"
 		width="14rem"
 		:ariaLabel="__('Main')"
-		class="border-e"
+		class="lms-sidebar"
 	>
 		<UserDropdown />
-		<div class="min-h-0 flex-1 overflow-y-auto px-2 pt-2">
-			<div v-if="sidebarSettings.data" class="flex flex-col gap-0.5">
+		<div class="min-h-0 flex-1 overflow-y-auto px-3 pt-2">
+			<div v-if="sidebarSettings.data" class="flex flex-col gap-1">
 				<template v-for="row in sidebarRows" :key="row.key">
 					<div v-if="row.kind === 'gap'" class="h-2.5" aria-hidden="true" />
 					<SidebarSection

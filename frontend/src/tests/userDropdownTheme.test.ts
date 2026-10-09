@@ -11,20 +11,30 @@ vi.mock('frappe-ui', async () => {
 		toast: { success: vi.fn(), error: vi.fn() },
 		SidebarHeader: {
 			name: 'SidebarHeader',
-			props: ['title', 'subtitle', 'menuItems'],
+			props: ['title', 'subtitle', 'menuItems', 'showLogo'],
 			template: '<div><slot name="prefix" /></div>',
 		},
 	}
 })
 vi.mock('@/stores/session', () => ({
-	sessionStore: () => ({ logout: { submit: vi.fn() }, branding: { data: null }, isLoggedIn: true }),
+	sessionStore: () => ({
+		logout: { submit: vi.fn() },
+		branding: { data: null },
+		isLoggedIn: true,
+	}),
 }))
-vi.mock('@/stores/user', () => ({ usersStore: () => ({ userResource: { data: { full_name: 'Ada Lovelace' } } }) }))
-vi.mock('@/stores/settings', () => ({ useSettings: () => ({ settings: { data: null } }) }))
+vi.mock('@/stores/user', () => ({
+	usersStore: () => ({ userResource: { data: { full_name: 'Ada Lovelace' } } }),
+}))
+vi.mock('@/stores/settings', () => ({
+	useSettings: () => ({ settings: { data: null } }),
+}))
 vi.mock('@/composables/useSettingsHash', () => ({ pushSettingsHash: vi.fn() }))
 vi.mock('@/utils/openExternal', () => ({ openExternal: vi.fn() }))
 vi.mock('@/utils/dialogs', () => ({ createDialog: vi.fn() }))
-vi.mock('@/components/Settings/Settings.vue', () => ({ default: { template: '<div />' } }))
+vi.mock('@/components/Settings/Settings.vue', () => ({
+	default: { template: '<div />' },
+}))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.stubGlobal('__', (text: string) => text)
 
@@ -39,6 +49,7 @@ describe('UserDropdown', () => {
 	it('shows the real user identity and has no theme selector', () => {
 		const header = build().findComponent({ name: 'SidebarHeader' })
 		expect(header.props('title')).toBe('Ada Lovelace')
+		expect(header.props('showLogo')).toBe(false)
 		const options = (header.props('menuItems') as any[])[0].options
 		expect(options.map((option: any) => option.label)).not.toContain('Theme')
 		expect(options.map((option: any) => option.label)).toContain('My Profile')

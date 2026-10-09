@@ -97,6 +97,7 @@
 			</div>
 
 			<ProgressBar
+				class="lms-course-progress"
 				v-if="user && course.membership"
 				:progress="course.membership.progress"
 			/>

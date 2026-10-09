@@ -3,6 +3,7 @@
 		<SidebarHeader
 			:title="userResource.data?.full_name || ''"
 			:subtitle="''"
+			:showLogo="false"
 			:menuItems="userDropdownOptions"
 		>
 		</SidebarHeader>

@@ -38,6 +38,7 @@
 					}}
 				</h2>
 				<router-link
+					class="lms-see-all"
 					:to="{
 						name: 'Courses',
 					}"
@@ -62,7 +63,7 @@
 		</div>
 
 		<div v-if="myBatches.data?.length" class="mt-10">
-			<div class="flex items-center justify-between mb-3">
+			<div class="flex flex-wrap items-center justify-between gap-2 mb-3">
 				<h2 class="font-semibold text-md text-ink-gray-9">
 					{{
 						myBatches.data?.[0].students?.includes(user.data?.name)
@@ -71,6 +72,7 @@
 					}}
 				</h2>
 				<router-link
+					class="lms-see-all"
 					:to="{
 						name: 'Batches',
 					}"

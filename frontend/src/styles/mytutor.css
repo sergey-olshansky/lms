@@ -1,3 +1,4 @@
+@import '../../../lms/public/css/mytutor-common.css';
 /* MyTutor's cool, light learner palette is deliberately scoped to the LMS SPA. */
 .lms-tutor-theme {
 	/* token-exempt-start: exact palette mandated by the MyTutor product spec; no matching Frappe semantic tokens */
@@ -17,18 +18,37 @@
 	--lms-ai-cycle: 24s;
 	--lms-radius-card: 16px;
 	--lms-radius-control: 12px;
+	--lms-hover: #dde9ee;
+	--lms-pressed: #cde3e8;
+	--lms-secondary: #d8eff1;
+	--lms-secondary-hover: #c9e7ea;
+	--lms-field-border: #8197a4;
+	--lms-action-hover: #066a75;
+	--lms-action-pressed: #055c66;
+	--lms-verdict-correct: #167447;
+	--lms-verdict-wrong: #b42318;
 	/* token-exempt-end */
 	color-scheme: light;
 	color: var(--lms-text);
 	background: var(--lms-background);
 }
 
-.lms-tutor-theme [class*='bg-surface-base'] { background-color: var(--lms-background); }
-.lms-tutor-theme [class*='bg-surface-sidebar'] { background-color: var(--lms-sidebar); }
-.lms-tutor-theme [class*='text-ink-gray-9'] { color: var(--lms-text); }
+.lms-tutor-theme [class*='bg-surface-base'] {
+	background-color: var(--lms-background);
+}
+.lms-tutor-theme [class*='bg-surface-sidebar'] {
+	background-color: var(--lms-sidebar);
+}
+.lms-tutor-theme [class*='text-ink-gray-9'] {
+	color: var(--lms-text);
+}
 .lms-tutor-theme [class*='text-ink-gray-6'],
-.lms-tutor-theme [class*='text-ink-gray-5'] { color: var(--lms-text-secondary); }
-.lms-tutor-theme [class*='border-outline-gray-1'] { border-color: var(--lms-border-decorative); }
+.lms-tutor-theme [class*='text-ink-gray-5'] {
+	color: var(--lms-text-secondary);
+}
+.lms-tutor-theme [class*='border-outline-gray-1'] {
+	border-color: var(--lms-border-decorative);
+}
 
 .lms-tutor-theme .lms-home-title {
 	font-size: clamp(1.5rem, 2.4vw, 2rem);
@@ -38,56 +58,294 @@
 }
 
 .lms-tutor-theme [data-theme='dark'],
-.lms-tutor-theme[data-theme='dark'] { color-scheme: light; }
+.lms-tutor-theme[data-theme='dark'] {
+	color-scheme: light;
+}
 
-/* Paint remains within the left sidebar edge; it cannot clip overlays or focus rings. */
-.lms-tutor-theme .lms-ai-edge {
+/* The panel paints its own opaque background. Put the small clipped decoration
+   ABOVE that surface, not at z-index:0 behind it. Never clip the sidebar itself. */
+.lms-tutor-theme .lms-sidebar-edge {
 	position: relative;
 	isolation: isolate;
+	overflow: visible;
 }
-.lms-tutor-theme .lms-ai-edge::after {
-	content: '';
-	position: absolute;
-	z-index: 0;
-	pointer-events: none;
-	top: 0;
-	bottom: 0;
-	right: 0;
-	width: var(--lms-ai-edge-width);
-	background: linear-gradient(180deg, var(--lms-ai-teal), var(--lms-ai-blue), var(--lms-ai-lavender));
-	opacity: var(--lms-ai-opacity);
-	/* token-exempt: mask endpoint black is required to make the left-only fade transparent */
-	mask-image: linear-gradient(to left, #000 0%, transparent 100%);
-	transform-origin: center;
-	animation: lms-ai-drift var(--lms-ai-cycle) ease-in-out infinite alternate;
-}
-@keyframes lms-ai-drift { to { transform: translateY(3%); } }
-@media (prefers-reduced-motion: reduce) {
-	.lms-tutor-theme .lms-ai-edge::after { animation: none; }
+.lms-tutor-theme .lms-sidebar-edge > .lms-ai-divider {
+	z-index: 2;
 }
 @media (max-width: 639.98px) {
-	.lms-tutor-theme .lms-ai-edge::after { display: none; }
-	.lms-tutor-theme .lms-home-title { font-size: 1.5rem; }
+	.lms-tutor-theme .lms-ai-divider {
+		display: none;
+	}
+	.lms-tutor-theme .lms-home-title {
+		font-size: 1.5rem;
+	}
 }
-.lms-tutor-theme .lms-sidebar-edge { overflow: visible; }
-.lms-tutor-theme .lms-sidebar-edge::after { right: 0; }
-.lms-tutor-theme .lms-course-grid { grid-template-columns: minmax(0, 1fr); }
-.lms-tutor-theme .lms-course-grid > a { min-width: 0; width: 100%; max-width: 440px; }
+.lms-tutor-theme .lms-course-grid {
+	grid-template-columns: minmax(0, 1fr);
+}
+.lms-tutor-theme .lms-course-grid > a {
+	min-width: 0;
+	width: 100%;
+	max-width: 440px;
+}
 .lms-tutor-theme .lms-course-card {
-	min-height: 0; border: 1px solid var(--lms-border-decorative); border-radius: var(--lms-radius-card);
+	min-height: 0;
+	border: 1px solid var(--lms-border-decorative);
+	border-radius: var(--lms-radius-card);
 	/* token-exempt: subtle shadow is the exact accessible card elevation in the spec */
 	box-shadow: 0 4px 16px rgb(37 48 57 / 4%);
 }
-.lms-tutor-theme .lms-course-card .short-introduction { -webkit-line-clamp: 3; margin-bottom: 1rem; }
+.lms-tutor-theme .lms-course-card .short-introduction {
+	-webkit-line-clamp: 3;
+	margin-bottom: 1rem;
+}
 @media (min-width: 900px) {
-	.lms-tutor-theme .lms-course-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	.lms-tutor-theme .lms-course-grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
 }
 @media (min-width: 1280px) {
-	.lms-tutor-theme .lms-course-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+	.lms-tutor-theme .lms-course-grid {
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+	}
 }
 @media (max-width: 899.98px) {
-	.lms-tutor-theme .lms-home-activity { margin-top: 1.5rem; }
-	.lms-tutor-theme .lms-home-courses { margin-top: 2rem; }
-	.lms-tutor-theme .lms-course-grid { gap: 1rem; }
-	.lms-tutor-theme .lms-course-grid > a { max-width: none; }
+	.lms-tutor-theme .lms-home-activity {
+		margin-top: 1.5rem;
+	}
+	.lms-tutor-theme .lms-home-courses {
+		margin-top: 2rem;
+	}
+	.lms-tutor-theme .lms-course-grid {
+		gap: 1rem;
+	}
+	.lms-tutor-theme .lms-course-grid > a {
+		max-width: none;
+	}
+}
+
+/* SidebarItem uses an outer stateful div and an inner actual control. Override
+   both its active elevation/shadow and icon utility, without deleting focus. */
+.lms-tutor-theme .lms-sidebar [data-slot='sidebar-item'] {
+	min-height: 44px;
+	height: auto;
+	border-radius: 10px;
+	background: transparent;
+	color: var(--lms-text-secondary);
+	box-shadow: none;
+}
+.lms-tutor-theme .lms-sidebar [data-slot='sidebar-item'] > :is(a, button) {
+	min-height: 44px;
+	padding-inline-start: 12px;
+	border-radius: inherit;
+	font-size: 16px;
+}
+.lms-tutor-theme .lms-sidebar [data-slot='sidebar-item'] svg {
+	width: 20px;
+	height: 20px;
+	color: inherit;
+}
+.lms-tutor-theme .lms-sidebar [data-slot='sidebar-item']:hover {
+	background: var(--lms-hover);
+	color: var(--lms-text);
+}
+.lms-tutor-theme .lms-sidebar [data-slot='sidebar-item'][data-state='active'] {
+	background: var(--lms-surface);
+	color: var(--lms-action);
+	font-weight: 600;
+}
+.lms-tutor-theme
+	.lms-sidebar
+	[data-slot='sidebar-item'][data-state='inactive']:has(> :active) {
+	background: var(--lms-pressed);
+}
+.lms-tutor-theme .lms-sidebar [data-slot='keyboard-shortcut'] kbd {
+	background: var(--lms-surface);
+}
+.lms-tutor-theme .lms-sidebar [data-slot='sidebar-item']:has(> :disabled) {
+	opacity: 0.55;
+	background: transparent;
+	cursor: not-allowed;
+}
+.lms-tutor-theme
+	.lms-sidebar
+	:is([data-slot='sidebar-item'] > a, [data-slot='sidebar-item']
+		> button, [data-slot='sidebar-header'] button):focus-visible {
+	outline: 2px solid var(--lms-action);
+	outline-offset: 2px;
+	box-shadow: none;
+}
+.lms-tutor-theme .lms-sidebar [data-slot='sidebar-header'] {
+	height: 56px;
+	padding-inline: 16px;
+}
+.lms-tutor-theme .lms-sidebar [data-slot='sidebar-header'] button {
+	min-height: 44px;
+	min-width: 0;
+}
+.lms-tutor-theme .lms-sidebar [data-slot='sidebar-header'] button:hover {
+	background: var(--lms-hover);
+}
+.lms-tutor-theme .lms-home {
+	min-width: 0;
+	padding: 16px;
+}
+@media (min-width: 640px) {
+	.lms-tutor-theme .lms-home {
+		padding: 24px;
+	}
+}
+@media (min-width: 1024px) {
+	.lms-tutor-theme .lms-home {
+		padding: 32px;
+	}
+}
+.lms-tutor-theme .lms-see-all,
+.lms-tutor-theme .lms-see-all span {
+	color: var(--lms-action);
+	font-size: 14px;
+}
+.lms-tutor-theme .lms-see-all {
+	flex-shrink: 0;
+}
+.lms-tutor-theme .lms-see-all:hover {
+	text-decoration: underline;
+}
+.lms-tutor-theme .lms-see-all:focus-visible {
+	outline: 2px solid var(--lms-action);
+	outline-offset: 2px;
+	border-radius: 4px;
+}
+.lms-tutor-theme .lms-course-card {
+	overflow-wrap: anywhere;
+	background: var(--lms-surface);
+}
+.lms-tutor-theme .lms-course-card .avatar-group {
+	min-width: 0;
+	max-width: 100%;
+}
+.lms-tutor-theme .lms-course-card .lms-course-progress {
+	background: var(--lms-sidebar);
+	height: 6px;
+}
+.lms-tutor-theme .lms-course-card .lms-course-progress > div {
+	background: var(--lms-action);
+	height: 6px;
+}
+/* Only these quiz actions change palette. Verdicts and danger controls keep
+   their semantic colours; real Button loading/disabled props stay native. */
+.lms-tutor-theme .lms-quiz-secondary,
+.lms-tutor-theme .lms-quiz-primary {
+	min-height: 44px;
+	border-radius: 12px;
+	padding-inline: 12px;
+	font-weight: 600;
+}
+.lms-tutor-theme .lms-quiz-secondary {
+	background: var(--lms-secondary);
+	color: var(--lms-action);
+	border: 1px solid var(--lms-field-border);
+}
+.lms-tutor-theme .lms-quiz-secondary:hover:not(:disabled) {
+	background: var(--lms-secondary-hover);
+}
+.lms-tutor-theme .lms-quiz-secondary:active:not(:disabled) {
+	background: var(--lms-pressed);
+}
+.lms-tutor-theme .lms-quiz-primary {
+	background: var(--lms-action);
+	color: var(--lms-surface);
+}
+.lms-tutor-theme .lms-quiz-primary:hover:not(:disabled) {
+	background: var(--lms-action-hover);
+}
+.lms-tutor-theme .lms-quiz-primary:active:not(:disabled) {
+	background: var(--lms-action-pressed);
+}
+.lms-tutor-theme :is(.lms-quiz-primary, .lms-quiz-secondary):disabled {
+	opacity: 0.55;
+	cursor: not-allowed;
+}
+.lms-tutor-theme
+	:is(.lms-quiz-primary, .lms-quiz-secondary, .lms-question-dot):focus-visible {
+	outline: 2px solid var(--lms-action);
+	outline-offset: 2px;
+	box-shadow: none;
+}
+.lms-tutor-theme .lms-question-dot {
+	position: relative;
+	min-width: 44px;
+	min-height: 44px;
+	border: 1px solid var(--lms-field-border);
+}
+.lms-tutor-theme .lms-dot-untouched {
+	background: var(--lms-surface);
+	color: var(--lms-text);
+}
+.lms-tutor-theme .lms-dot-attempted {
+	background: var(--lms-secondary);
+	color: var(--lms-action);
+}
+.lms-tutor-theme .lms-question-dot[aria-current='page'],
+.lms-tutor-theme .lms-dot-active {
+	background: var(--lms-action);
+	color: var(--lms-surface);
+	border-color: var(--lms-action);
+	font-weight: 600;
+}
+.lms-tutor-theme .lms-question-dot[data-flagged='true'] {
+	border: 2px dashed var(--lms-text-secondary);
+}
+.lms-tutor-theme .lms-question-dot[data-flagged='true']::after {
+	content: '!';
+	position: absolute;
+	right: -3px;
+	top: -5px;
+	border-radius: 50%;
+	background: var(--lms-surface);
+	color: var(--lms-text);
+	font-size: 12px;
+	width: 16px;
+	height: 16px;
+	line-height: 16px;
+}
+.lms-tutor-theme .lms-question-dot:disabled {
+	opacity: 0.55;
+	cursor: not-allowed;
+}
+.lms-tutor-theme :is(textarea.lms-quiz-answer, .lms-quiz-answer textarea) {
+	background: var(--lms-surface);
+	border: 1px solid var(--lms-field-border);
+	color: var(--lms-text);
+	border-radius: 12px;
+	font-size: 16px;
+}
+.lms-tutor-theme
+	:is(textarea.lms-quiz-answer, .lms-quiz-answer textarea):focus {
+	outline: 2px solid var(--lms-action);
+	outline-offset: 2px;
+	box-shadow: none;
+}
+.lms-tutor-theme
+	:is(textarea.lms-quiz-answer, .lms-quiz-answer textarea):disabled {
+	opacity: 0.65;
+}
+
+.lms-tutor-theme .lms-dot-verdict {
+	position: absolute;
+	left: -3px;
+	top: -5px;
+	background: var(--lms-surface);
+	border: 1px solid currentColor;
+	border-radius: 50%;
+	width: 18px;
+	height: 18px;
+	font-size: 12px;
+	line-height: 16px;
+}
+.lms-tutor-theme .lms-dot-verdict[data-verdict='correct'] {
+	color: var(--lms-verdict-correct);
+}
+.lms-tutor-theme .lms-dot-verdict[data-verdict='wrong'] {
+	color: var(--lms-verdict-wrong);
 }

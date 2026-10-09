@@ -8,10 +8,11 @@
 			{{ __('Skip to main content') }}
 		</a>
 		<div
-			class="h-full border-e bg-surface-sidebar lms-ai-edge lms-sidebar-edge"
+			class="h-full border-e bg-surface-sidebar lms-sidebar-edge"
 			aria-hidden="false"
 		>
 			<AppSidebar />
+			<span class="lms-ai-divider" aria-hidden="true" />
 		</div>
 		<main
 			id="main-content"
