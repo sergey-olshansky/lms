@@ -4254,7 +4254,7 @@ msgstr "Не удалось создать прямое занятие. Попр
 
 #: frontend/src/pages/Quizzes.vue:245
 msgid "Error creating quiz: {0}"
-msgstr "Ошибка создания {0}"
+msgstr "Ошибка создания теста: {0}"
 #: frontend/src/pages/Forms/QuizForm.vue:864
 msgid "Error creating quiz"
 msgstr "Ошибка создания теста"
@@ -8511,7 +8511,7 @@ msgstr "Отправка упражнения по программирован�
 
 #: frontend/src/pages/ProgrammingExercises/ProgrammingExerciseSubmission.vue:431
 msgid "Programming Exercise Submissions"
-msgstr "Отправка упражнения по программированию"
+msgstr "Отправленные решения"
 
 #: frontend/src/pages/Forms/ProgrammingExerciseForm.vue:359
 msgid "Programming Exercise created successfully"
@@ -10394,7 +10394,7 @@ msgstr "Пробный тест"
 
 #: frontend/src/pages/Forms/ProgrammingExerciseForm.vue:81
 msgid "Test this Exercise"
-msgstr "Испытать это упражнение"
+msgstr "Проверить упражнение"
 
 #: frontend/src/pages/ProgrammingExercises/ProgrammingExerciseSubmission.vue:90
 msgid "Test {0}"
@@ -11993,7 +11993,7 @@ msgstr "У вас нет разрешения на отмену этой оце�
 
 #: lms/lms/doctype/lms_batch/lms_batch.py:247
 msgid "You do not have permission to create a live class."
-msgstr "У вас нет права создавать онлайн-занятие."
+msgstr "У вас нет прав создавать прямые занятия."
 
 #: frontend/src/pages/Forms/EmailTemplateForm.vue:115
 msgid "You do not have permission to create email templates."
