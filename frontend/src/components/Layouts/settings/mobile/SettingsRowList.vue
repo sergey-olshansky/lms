@@ -10,7 +10,7 @@
 			:label="__(row.label)"
 			:icon="row.icon"
 			:description="row.description"
-			:value="row.value"
+			:value="row.value ? __(row.value) : undefined"
 			:href="safeUrl(row.href)"
 			:navigates="Boolean(row.to || row.action)"
 			:chevron="Boolean(row.to || row.href)"

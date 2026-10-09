@@ -402,6 +402,9 @@ msgstr "Глава {0} не существует."
 #: lms/locale/main.pot
 msgid "Chapter {0} not found"
 msgstr "Глава {0} не найдена"
+#: frontend/src/components/Sidebar/UserDropdown.vue frontend/src/components/Settings/Mobile/mobileRows.ts
+msgid "Clear Demo Data"
+msgstr "Очистить демо-данные"
 #: frontend/src lms
 msgid "Condition is required"
 msgstr "Укажите условие"
@@ -519,6 +522,9 @@ msgstr "Включить исходящую почту"
 #: frontend/src lms
 msgid "Enable {0}"
 msgstr "Включить {0}"
+#: frontend/src/components/Sidebar/UserDropdown.vue frontend/src/components/Settings/Mobile/mobileRows.ts
+msgid "Error clearing demo data"
+msgstr "Ошибка удаления демо-данных"
 #: frontend/src lms
 msgid "Error deleting channel mapping"
 msgstr "Ошибка удаления связи канала"
@@ -642,6 +648,12 @@ msgstr "Автор материалов LMS"
 #: lms/locale/main.pot
 msgid "LMS Lesson Assessment"
 msgstr "Проверка урока LMS"
+#: frontend/src/components/Sidebar/UserDropdown.vue frontend/src/components/Settings/Mobile/mobileRows.ts
+msgid "Log out"
+msgstr "Выйти"
+#: frontend/src/components/Sidebar/UserDropdown.vue frontend/src/components/Settings/Mobile/mobileRows.ts
+msgid "Login to Frappe Cloud"
+msgstr "Войти в Frappe Cloud"
 #: lms/locale/main.pot
 msgid "Main"
 msgstr "Основное"
@@ -717,6 +729,9 @@ msgstr "Укажите сервер исходящей почты"
 #: lms/locale/main.pot
 msgid "outputs must be a list"
 msgstr "outputs должен быть списком"
+#: frontend/src/components/Sidebar/UserDropdown.vue frontend/src/components/Settings/Mobile/mobileRows.ts
+msgid "Pages"
+msgstr "Страницы"
 #: frontend/src lms
 msgid "Paid"
 msgstr "Оплачено"
