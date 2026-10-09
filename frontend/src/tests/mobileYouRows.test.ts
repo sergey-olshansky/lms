@@ -180,7 +180,7 @@ describe('notifications', () => {
 		const groups = build({
 			otherLinks: OTHER.filter((l) => l.to !== 'Notifications'),
 		})
-		expect(labelsIn(groups, 'Settings')).toEqual(['Colour mode', 'Log out'])
+		expect(labelsIn(groups, 'Settings')).toEqual(['Log out'])
 	})
 })
 
@@ -190,21 +190,14 @@ describe('the last group', () => {
 		// screen and no moderator gate here to hide one behind.
 		expect(labelsIn(build(), 'Settings')).toEqual([
 			'Notifications',
-			'Colour mode',
 			'Log out',
 		])
 		expect(allRows(build()).map((row) => row.label)).not.toContain('Settings')
 	})
 
-	it('draws the row the shared colourModeRow builder builds', () => {
-		// One theme control, not a second one that can disagree about the
-		// current mode.
-		const fromYou = group(
-			build({ themePreference: 'dark' }),
-			'Settings'
-		)?.rows.find((row) => row.key === 'colour-mode')
-		expect(fromYou).toEqual(colourModeRow('dark'))
-		expect(fromYou?.value).toBe('Dark')
+	it('does not expose a colour-mode control in the learner app', () => {
+		expect(allRows(build({ themePreference: 'dark' })).map((row) => row.label))
+			.not.toContain('Colour mode')
 	})
 
 	it('logs out in place rather than routing somewhere', () => {
@@ -287,7 +280,6 @@ describe('every icon the page can draw', () => {
 			'lucide-trending-up',
 			'lucide-mail',
 			'lucide-bell',
-			'lucide-sun-moon',
 			'lucide-log-out',
 		])
 	})

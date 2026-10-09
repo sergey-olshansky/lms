@@ -1,6 +1,6 @@
 <template>
 	<div>
-		<div class="mt-10 space-y-10">
+		<div class="mt-10 space-y-10 lms-home-activity">
 			<UpcomingEvaluations :forHome="true" />
 			<div v-if="myLiveClasses.data?.length">
 				<h2 class="font-semibold text-md mb-3 text-ink-gray-9">
@@ -28,9 +28,9 @@
 			</div>
 		</div>
 
-		<div v-if="myCourses.data?.length" class="mt-10">
-			<div class="flex items-center justify-between mb-3">
-				<h2 class="font-semibold text-md text-ink-gray-9">
+		<div v-if="myCourses.data?.length" class="mt-8 lms-home-courses">
+			<div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+				<h2 class="font-semibold text-xl text-ink-gray-9">
 					{{
 						myCourses.data[0].membership
 							? __('My Courses')
@@ -50,7 +50,7 @@
 					</span>
 				</router-link>
 			</div>
-			<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+			<div class="grid grid-cols-1 gap-6 lms-course-grid">
 				<router-link
 					v-for="course in myCourses.data"
 					:key="course.name"

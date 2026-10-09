@@ -1,10 +1,9 @@
 <template>
 	<Sidebar
-		:collapsed="sidebarStore.isSidebarCollapsed"
+		:collapsed="false"
 		width="14rem"
 		:ariaLabel="__('Main')"
 		class="border-e"
-		@update:collapsed="setCollapsed"
 	>
 		<UserDropdown />
 		<div class="min-h-0 flex-1 overflow-y-auto px-2 pt-2">
@@ -39,28 +38,6 @@
 					)
 				}}
 			</div>
-			<template v-if="isStudent && !profileIsComplete">
-				<SidebarItem
-					v-if="sidebarStore.isSidebarCollapsed"
-					:label="__('Complete your profile')"
-					icon="lucide-user"
-					:route="profileRoute"
-					:active="false"
-				/>
-				<SidebarCard
-					v-else
-					:title="__('Complete your profile')"
-					:description="
-						__('Highlight what makes you unique and show your skills.')
-					"
-					icon="lucide-user"
-					:action="{
-						label: __('My Profile'),
-						route: profileRoute,
-						iconLeft: 'lucide-chevrons-right',
-					}"
-				/>
-			</template>
 			<TrialBanner
 				v-if="
 					userResource.data?.is_system_manager && userResource.data?.is_fc_site
@@ -115,12 +92,6 @@
 					/>
 				</Tooltip>
 			</div>
-			<SidebarCollapseToggle
-				class="mt-1"
-				:aria-label="
-					sidebarStore.isSidebarCollapsed ? __('Expand') : __('Collapse')
-				"
-			/>
 		</div>
 		<HelpModal
 			data-testid="onboarding-help-modal"
@@ -153,7 +124,6 @@ import {
 	call,
 	Sidebar,
 	SidebarCard,
-	SidebarCollapseToggle,
 	SidebarItem,
 	SidebarSection,
 	Tooltip,
@@ -275,11 +245,6 @@ const updateUnreadCount = () => {
 			}
 		})
 	})
-}
-
-const setCollapsed = (collapsed) => {
-	sidebarStore.isSidebarCollapsed = collapsed
-	localStorage.setItem('isSidebarCollapsed', JSON.stringify(collapsed))
 }
 
 const getFirstCourse = async () => {

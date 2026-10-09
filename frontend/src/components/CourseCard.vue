@@ -1,11 +1,10 @@
 <template>
 	<div
 		v-if="course.title"
-		class="flex flex-col h-full rounded-5 overflow-auto text-ink-gray-9 bg-surface-elevation-1"
-		style="min-height: 350px"
+		class="flex flex-col h-full rounded-5 overflow-hidden text-ink-gray-9 bg-surface-elevation-1 lms-course-card"
 	>
 		<div
-			class="w-[100%] h-[168px] bg-cover bg-center bg-no-repeat border-t border-x rounded-t-5"
+			class="w-full h-[168px] shrink-0 bg-cover bg-center bg-no-repeat border-t border-x rounded-t-5"
 			:style="
 				course.image
 					? { backgroundImage: `url('${encodeURI(course.image)}')` }
@@ -47,7 +46,7 @@
 				{{ course.title }}
 			</div>
 		</div>
-		<div class="flex flex-col flex-auto p-4 border-x-2 border-b-2 rounded-b-5">
+		<div class="flex min-w-0 flex-col flex-auto p-4 border-x border-b rounded-b-5">
 			<div class="flex items-center justify-between mb-2">
 				<div v-if="course.lessons">
 					<Tooltip :text="__('Lessons')">
@@ -104,7 +103,7 @@
 				{{ Math.ceil(course.membership.progress) }}% {{ __('completed') }}
 			</div>
 
-			<div class="flex items-center justify-between mt-auto">
+			<div class="flex flex-wrap items-center justify-between gap-2 mt-auto">
 				<div class="flex avatar-group overlap">
 					<div
 						class="h-6 me-1"

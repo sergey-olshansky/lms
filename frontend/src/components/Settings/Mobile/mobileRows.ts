@@ -219,7 +219,6 @@ export const buildYouRows = (options: {
 		})
 	}
 
-	settingsRows.push(colourModeRow(themePreference))
 	settingsRows.push({
 		key: 'Log out',
 		label: 'Log out',

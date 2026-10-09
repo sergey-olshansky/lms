@@ -1,5 +1,6 @@
 @import 'frappe-ui/style.css';
 @import './styles/blockEditor.css';
+@import './styles/mytutor.css';
 
 /* frappe-ui paints no document background, so dark mode showed the UA's white
    wherever no element covers the canvas. Precedent: helpdesk/desk/src/index.css. */

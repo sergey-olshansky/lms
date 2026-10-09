@@ -31,7 +31,9 @@ def get_lms_path():
 
 # include js, css files in header of web template
 # web_include_css = "/assets/lms/css/lms.css"
-web_include_js = []
+web_include_js = ["/assets/lms/js/mytutor-login.js"]
+# Login-only CSS selectors (body[data-path=login]); no auth markup or handlers overridden.
+web_include_css = "/assets/lms/css/mytutor-login.css"
 
 # include custom scss in every website theme (without file extension ".scss")
 # website_theme_scss = "lms/public/scss/website"
