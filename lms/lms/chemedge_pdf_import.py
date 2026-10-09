@@ -113,6 +113,7 @@ def _create_quiz(
 	meta: dict,
 	source_folder: str | None = None,
 	task_number_range: tuple[int, int] | None = None,
+	show_answers: bool = False,
 ):
 	quiz = frappe.get_doc(
 		{
@@ -120,7 +121,7 @@ def _create_quiz(
 			"title": _unique_quiz_title(_quiz_title(meta, source_folder, task_number_range)),
 			"passing_percentage": 85,
 			"max_attempts": 2,
-			"show_answers": 0,
+			"show_answers": 1 if show_answers else 0,
 			"show_submission_history": 1,
 			"duration": None,
 			"enable_negative_marking": 0,
@@ -172,6 +173,18 @@ def _parse_task_number(value, field_label: str) -> int | None:
 			frappe.ValidationError,
 		)
 	return number
+
+
+def _parse_show_answers(value) -> bool:
+	"""Coerce a whitelisted show_answers argument to a bool.
+
+	Clients send 0/1 or the strings "0"/"1" depending on the transport, and
+	treating every non-empty string as true would let "0" silently switch the
+	flag on.
+	"""
+	if isinstance(value, str):
+		return value.strip().lower() in {"1", "true", "on", "yes"}
+	return bool(value)
 
 
 def apply_task_number_range(
@@ -239,6 +252,7 @@ def import_pdf_trainer(
 	source_folder: str | None = None,
 	first_task_number: str | int | None = None,
 	last_task_number: str | int | None = None,
+	show_answers: bool | int | str = False,
 ):
 	"""Create one native LMS Quiz from one strict-format Chemedge PDF.
 
@@ -246,6 +260,8 @@ def import_pdf_trainer(
 	has been created.  Any error deletes created LMS objects/files and the upload.
 	An optional inclusive first/last printed task-number range filters the tasks
 	that reach the quiz; answers stay unfiltered (they are keyed per task).
+	An optional show_answers flag enables the quiz's correct-answer feedback
+	(and the live question-dot highlighting that comes with it).
 	"""
 	_require_import_permission()
 	source_file = _uploaded_pdf(pdf_file)
@@ -278,7 +294,12 @@ def import_pdf_trainer(
 			first_page_size=first_page_size,
 		)
 		meta = json.loads((bundle_dir / "meta.json").read_text(encoding="utf-8"))
-		quiz = _create_quiz(meta, source_folder, task_number_range)
+		quiz = _create_quiz(
+			meta,
+			source_folder,
+			task_number_range,
+			_parse_show_answers(show_answers),
+		)
 		quiz_name = quiz.name
 
 		for task in meta["tasks"]:

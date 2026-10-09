@@ -69,6 +69,16 @@ export interface QuizSubmissionResult {
 	score_out_of: number
 }
 
+/** A child row of a submission's result table, the shape `frappe.client.get`
+ * returns it in. `is_correct` is binary: 1 marks a fully correct answer. */
+export interface QuizResultRow {
+	name: string
+	parent: string
+	question_name: string | null
+	question_type?: QuizQuestionType
+	is_correct?: 0 | 1
+}
+
 /** 1 correct, 2 partially correct, 0 wrong; undefined for an untouched option. */
 export type AnswerVerdict = 0 | 1 | 2 | undefined
 

@@ -38,6 +38,12 @@
 				Upload one or more supported Chemedge PDFs. The imported quizzes will
 				have two attempts, an 85% passing score, and one mark per question.
 			</p>
+			<Checkbox
+				label="Show correct answers"
+				:model-value="showAnswers"
+				:disabled="isProcessing"
+				@update:model-value="(checked) => (showAnswers = !!checked)"
+			/>
 			<div
 				class="rounded border border-dashed border-outline-gray-3 p-4 text-center"
 				@dragover.prevent
@@ -149,6 +155,7 @@
 <script setup lang="ts">
 import {
 	Button,
+	Checkbox,
 	createResource,
 	Dialog,
 	FileUploadHandler,
@@ -176,6 +183,7 @@ const router = useRouter()
 const files = ref<ImportFile[]>([])
 const uploadError = ref('')
 const isProcessing = ref(false)
+const showAnswers = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 const directoryInput = ref<HTMLInputElement | null>(null)
 const uploading = ref(false)
@@ -351,6 +359,7 @@ async function importPdfs() {
 			file.result = await importer.submit({
 				pdf_file: file.name,
 				source_folder: file.source_folder,
+				show_answers: showAnswers.value ? 1 : 0,
 				...taskRangeParams(file),
 			})
 			file.status = 'success'
