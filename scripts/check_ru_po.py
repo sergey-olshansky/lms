@@ -37,7 +37,7 @@ BANNED = [
     (r"[Bb]atch", r"парти", "Batch must be Группа, not партия"),
     (r"[Bb]atch", r"пакет", "Batch must be Группа, not пакет"),
     (r"[Qq]uiz", r"викторин", "Quiz must be Тест"),
-    (r"[Qq]uiz", r"опрос", "Quiz must be Тест, not опрос"),
+    (r"[Qq]uiz", r"\bопрос", "Quiz must be Тест, not опрос"),
     (r"[Bb]adge", r"бейдж", "Badge must be Достижение"),
     (r"[Bb]adge", r"значок", "Badge must be Достижение"),
     (r"[Aa]ssignment", r"назначени", "Assignment must be Задание"),
@@ -70,7 +70,7 @@ def esc_ok(s):
 
 
 FMT_BRACE_RE = re.compile(r"\{\d+\}")
-FMT_PCT_RE = re.compile(r"%(?:\d+\$)?[-+ #0]*\d*(?:\.\d+)?[hlL]*[diouxXeEfgGcspn]")
+FMT_PCT_RE = re.compile(r"%(?:\d+\$)?[-+#0']*\d*(?:\.\d+)?[hlL]*[diouxXeEfgGcspn]")
 TAG_RE = re.compile(r"</?[A-Za-z][A-Za-z0-9]*(?:\s[^<>]*?)?/?>")
 
 

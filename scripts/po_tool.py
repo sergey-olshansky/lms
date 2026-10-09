@@ -218,6 +218,7 @@ def main():
                 found = False
                 for e in byid.get(op["id"], []):
                     e.str = op["str"]
+                    e.raw = None
                     found = True
                 if not found:
                     raise SystemExit("set: id not found: %r" % op["id"])
@@ -245,6 +246,7 @@ def main():
                         continue
                     seen_id = True
                     e.str = chosen.str
+                    e.raw = None
                     e.refs = sorted(set(e.refs + chosen.refs))
                     keep.append(e)
                 entries = keep
