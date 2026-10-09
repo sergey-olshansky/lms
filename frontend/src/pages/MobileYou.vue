@@ -49,7 +49,6 @@
 
 			<SettingsRowList :groups="groups" @action="activate" />
 		</template>
-
 	</MobilePageLayout>
 </template>
 

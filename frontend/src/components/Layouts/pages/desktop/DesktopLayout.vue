@@ -7,7 +7,10 @@
 		>
 			{{ __('Skip to main content') }}
 		</a>
-		<div class="h-full border-e bg-surface-sidebar lms-ai-edge lms-sidebar-edge" aria-hidden="false">
+		<div
+			class="h-full border-e bg-surface-sidebar lms-ai-edge lms-sidebar-edge"
+			aria-hidden="false"
+		>
 			<AppSidebar />
 		</div>
 		<main

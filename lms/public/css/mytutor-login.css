@@ -1,7 +1,11 @@
 /* Server-rendered Frappe /login restyle. Selectors are confined to login only;
    native markup, forms, IDs, hash states and login.js handlers stay untouched. */
 html:has(body[data-path='login']) { color-scheme: light; }
-body[data-path='login'] { background: #f2f6f8; color: #253039; }
+body[data-path='login'] {
+	--lms-ai-opacity: .06; --lms-ai-edge-width: 12px; --lms-ai-cycle: 24s;
+	--lms-radius-card: 16px; --lms-radius-control: 12px;
+	background: #f2f6f8; color: #253039;
+}
 body[data-path='login'] #page-login { min-height: 100dvh; background: #f2f6f8; }
 body[data-path='login'] #page-login .page-content-wrapper { min-height: 100dvh; }
 body[data-path='login'] #page-login main.container {
@@ -19,10 +23,10 @@ body[data-path='login'] #page-login .page_content::before {
 }
 body[data-path='login'] #page-login .page_content::after {
 	content: ''; position: absolute; z-index: 0; top: 0; bottom: 0; right: 34%;
-	width: 12px; pointer-events: none;
+	width: var(--lms-ai-edge-width); pointer-events: none;
 	background: linear-gradient(180deg, #71c7cc, #99bbd8, #b7b0d5, #99bbd8, #71c7cc);
-	opacity: .06; mask-image: linear-gradient(to left, #000, transparent);
-	animation: lms-login-edge 24s ease-in-out infinite alternate;
+	opacity: var(--lms-ai-opacity); mask-image: linear-gradient(to left, #000, transparent);
+	animation: lms-login-edge var(--lms-ai-cycle) ease-in-out infinite alternate;
 }
 @keyframes lms-login-edge { to { transform: translateY(3%); } }
 body[data-path='login'] #page-login .lms-login-placeholder {
@@ -33,20 +37,17 @@ body[data-path='login'] #page-login .lms-login-placeholder {
 body[data-path='login'] #page-login .lms-login-placeholder p { margin: 0 0 24px; font-size: 20px; line-height: 28px; font-weight: 600; }
 body[data-path='login'] #page-login .lms-login-placeholder-lines { display: flex; flex-direction: column; gap: 16px; }
 body[data-path='login'] #page-login .lms-login-placeholder-lines span { height: 16px; border-radius: 8px; background: #cddee6; opacity: .65; }
-body[data-path='login'] #page-login .for-login { width: 35%; min-width: 360px; display: flex; justify-content: center; }
+body[data-path='login'] #page-login .for-login { width: 34%; min-width: 360px; display: flex; justify-content: center; }
 body[data-path='login'] #page-login .login-content.page-card {
 	width: 100%; max-width: 440px; padding: clamp(24px, 3vw, 48px);
-	background: #fff; border: 1px solid #d6e2e8; border-radius: 16px;
+	background: #fff; border: 1px solid #d6e2e8; border-radius: var(--lms-radius-card);
 	box-shadow: 0 4px 16px rgb(37 48 57 / 4%);
 }
 body[data-path='login'] #page-login .for-login .app-logo,
 body[data-path='login'] #page-login .for-login .page-card-subtitle,
 body[data-path='login'] #page-login .for-login .text-right:has(a[href='#forgot']),
 body[data-path='login'] #page-login .for-login .btn-login-with-email-link { display: none !important; }
-body[data-path='login'] #page-login .for-login .page-card-head h4 { font-size: 0; margin-bottom: 8px; }
-body[data-path='login'] #page-login .for-login .page-card-head h4::after {
-	content: 'С возвращением'; font-size: 28px; line-height: 1.25; color: #253039;
-}
+body[data-path='login'] #page-login .for-login .page-card-head h4 { font-size: 28px; line-height: 1.25; margin-bottom: 8px; color: #253039; }
 body[data-path='login'] #page-login input.form-control {
 	min-height: 48px; padding: 12px; font-size: 16px; color: #253039;
 	background: #fff; border: 1px solid #8197a4; border-radius: 10px;
@@ -55,6 +56,10 @@ body[data-path='login'] #page-login input.form-control:focus { outline: 2px soli
 body[data-path='login'] #page-login .es-button[data-variant='solid'] {
 	min-height: 48px; background: #087985; color: #fff; border-radius: 10px;
 }
+body[data-path='login'] #page-login .es-button[data-variant='solid']:hover { background: #066a75; }
+body[data-path='login'] #page-login .es-button[data-variant='solid']:active { background: #055c66; }
+body[data-path='login'] #page-login .alert-danger,
+body[data-path='login'] #page-login .text-danger { color: #b42318; }
 body[data-path='login'] #page-login .password-field .toggle-password {
 	width: 44px; height: 44px; cursor: pointer;
 }

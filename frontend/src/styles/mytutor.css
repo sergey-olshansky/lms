@@ -1,5 +1,6 @@
 /* MyTutor's cool, light learner palette is deliberately scoped to the LMS SPA. */
 .lms-tutor-theme {
+	/* token-exempt-start: exact palette mandated by the MyTutor product spec; no matching Frappe semantic tokens */
 	--lms-background: #f2f6f8;
 	--lms-sidebar: #e5eef2;
 	--lms-surface: #fff;
@@ -7,10 +8,16 @@
 	--lms-text-secondary: #556975;
 	--lms-accent: #16acb5;
 	--lms-action: #087985;
-	--lms-border: #d6e2e8;
+	--lms-border-decorative: #d6e2e8;
 	--lms-ai-teal: #71c7cc;
 	--lms-ai-blue: #99bbd8;
 	--lms-ai-lavender: #b7b0d5;
+	--lms-ai-opacity: 0.06;
+	--lms-ai-edge-width: 12px;
+	--lms-ai-cycle: 24s;
+	--lms-radius-card: 16px;
+	--lms-radius-control: 12px;
+	/* token-exempt-end */
 	color-scheme: light;
 	color: var(--lms-text);
 	background: var(--lms-background);
@@ -21,7 +28,7 @@
 .lms-tutor-theme [class*='text-ink-gray-9'] { color: var(--lms-text); }
 .lms-tutor-theme [class*='text-ink-gray-6'],
 .lms-tutor-theme [class*='text-ink-gray-5'] { color: var(--lms-text-secondary); }
-.lms-tutor-theme [class*='border-outline-gray-1'] { border-color: var(--lms-border); }
+.lms-tutor-theme [class*='border-outline-gray-1'] { border-color: var(--lms-border-decorative); }
 
 .lms-tutor-theme .lms-home-title {
 	font-size: clamp(1.5rem, 2.4vw, 2rem);
@@ -46,12 +53,13 @@
 	top: 0;
 	bottom: 0;
 	right: 0;
-	width: 12px;
+	width: var(--lms-ai-edge-width);
 	background: linear-gradient(180deg, var(--lms-ai-teal), var(--lms-ai-blue), var(--lms-ai-lavender));
-	opacity: .06;
+	opacity: var(--lms-ai-opacity);
+	/* token-exempt: mask endpoint black is required to make the left-only fade transparent */
 	mask-image: linear-gradient(to left, #000 0%, transparent 100%);
 	transform-origin: center;
-	animation: lms-ai-drift 24s ease-in-out infinite alternate;
+	animation: lms-ai-drift var(--lms-ai-cycle) ease-in-out infinite alternate;
 }
 @keyframes lms-ai-drift { to { transform: translateY(3%); } }
 @media (prefers-reduced-motion: reduce) {
@@ -66,7 +74,8 @@
 .lms-tutor-theme .lms-course-grid { grid-template-columns: minmax(0, 1fr); }
 .lms-tutor-theme .lms-course-grid > a { min-width: 0; width: 100%; max-width: 440px; }
 .lms-tutor-theme .lms-course-card {
-	min-height: 0; border: 1px solid var(--lms-border); border-radius: 16px;
+	min-height: 0; border: 1px solid var(--lms-border-decorative); border-radius: var(--lms-radius-card);
+	/* token-exempt: subtle shadow is the exact accessible card elevation in the spec */
 	box-shadow: 0 4px 16px rgb(37 48 57 / 4%);
 }
 .lms-tutor-theme .lms-course-card .short-introduction { -webkit-line-clamp: 3; margin-bottom: 1rem; }

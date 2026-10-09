@@ -46,7 +46,9 @@
 				{{ course.title }}
 			</div>
 		</div>
-		<div class="flex min-w-0 flex-col flex-auto p-4 border-x border-b rounded-b-5">
+		<div
+			class="flex min-w-0 flex-col flex-auto p-4 border-x border-b rounded-b-5"
+		>
 			<div class="flex items-center justify-between mb-2">
 				<div v-if="course.lessons">
 					<Tooltip :text="__('Lessons')">
