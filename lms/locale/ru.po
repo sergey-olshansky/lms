@@ -150,9 +150,21 @@ msgstr "Работа от {1} для {0} уже существует."
 #: lms/lms/api.py:650
 msgid "A time is required."
 msgstr "Укажите время."
+#: frontend/src lms
+msgid "Account name"
+msgstr "Название аккаунта"
+#: frontend/src lms
+msgid "Account name is required"
+msgstr "Укажите название аккаунта"
 #: lms/locale/main.pot
 msgid "Actions"
 msgstr "Действия"
+#: frontend/src lms
+msgid "Add a {0} before saving."
+msgstr "Добавьте {0} перед сохранением."
+#: frontend/src lms
+msgid "Add at least one {0} before saving."
+msgstr "Добавьте хотя бы один элемент {0} перед сохранением."
 
 #: frontend/src/pages/Forms/PersonaForm.vue:71
 msgid "AI assistant (ChatGPT, etc.)"
@@ -266,28 +278,118 @@ msgstr "Добавить урок"
 #: frontend/src/pages/Forms/MemberForm.vue:3
 msgid "Add New Member"
 msgstr "Добавить нового участника"
+#: frontend/src lms
+msgid "Align center"
+msgstr "Выравнивание по центру"
+#: frontend/src lms
+msgid "Align left"
+msgstr "Выравнивание по левому краю"
+#: frontend/src lms
+msgid "Align right"
+msgstr "Выравнивание по правому краю"
+#: frontend/src lms
+msgid "All Payments"
+msgstr "Все платежи"
+#: frontend/src lms
+msgid "Amount must be a positive number for {0}."
+msgstr "Сумма для {0} должна быть положительным числом."
 
 #: frontend/src/pages/QuizSubmission.vue
 msgid "Answered"
 msgstr "Ответил"
+#: frontend/src lms
+msgid "API Key"
+msgstr "API-ключ"
+#: frontend/src lms
+msgid "API Key is required"
+msgstr "Укажите API-ключ"
+#: frontend/src lms
+msgid "API Secret"
+msgstr "API-секрет"
+#: frontend/src lms
+msgid "API Secret is required"
+msgstr "Укажите API-секрет"
+#: frontend/src lms
+msgid "Assign a Badge"
+msgstr "Присвоить достижение"
+#: frontend/src lms
+msgid "Assign For is required"
+msgstr "Укажите, кому назначается"
+#: frontend/src lms
+msgid "Assign To is required"
+msgstr "Укажите получателя"
+#: frontend/src lms
+msgid "Assignment Submission"
+msgstr "Отправленное задание"
 #: lms/locale/main.pot
 msgid "Attempts"
 msgstr "Попытки"
+#: frontend/src lms
+msgid "Authorization"
+msgstr "Авторизация"
+#: frontend/src lms
+msgid "Authorized"
+msgstr "Авторизовано"
 #: lms/locale/main.pot
 msgid "Authors"
 msgstr "Авторы"
 #: lms/locale/main.pot
 msgid "autosaved"
 msgstr "автосохранено"
+#: frontend/src lms
+msgid "Awarded For"
+msgstr "Присвоено за"
 #: lms/locale/main.pot
 msgid "Back to editing"
 msgstr "Вернуться к редактированию"
+#: frontend/src lms
+msgid "Badge Assignment"
+msgstr "Присвоение достижения"
+#: frontend/src lms
+msgid "Badge assignment updated successfully"
+msgstr "Присвоение достижения успешно обновлено"
+#: frontend/src lms
+msgid "Badge created successfully"
+msgstr "Достижение успешно создано"
+#: frontend/src lms
+msgid "Badge Image is required"
+msgstr "Загрузите изображение достижения"
+#: frontend/src lms
+msgid "Badge is required"
+msgstr "Укажите достижение"
+#: frontend/src lms
+msgid "Badge updated successfully"
+msgstr "Достижение успешно обновлено"
+#: frontend/src lms
+msgid "Batch Enrollment"
+msgstr "Зачисление в группу"
 #: lms/locale/main.pot
 msgid "Before you start"
 msgstr "Перед началом"
+#: frontend/src lms
+msgid "Bold"
+msgstr "Полужирный"
 #: lms/locale/main.pot
 msgid "Brief"
 msgstr "Условие"
+#: frontend/src lms
+msgid "Calendar"
+msgstr "Календарь"
+#: frontend/src lms
+msgid "Categories"
+msgstr "Категории"
+#: frontend/src lms
+msgid "Certifications"
+msgstr "Сертификации"
+#: frontend/src lms
+msgid "Channel created"
+msgstr "Канал создан"
+#: frontend/src lms
+msgid "Channel mapping deleted"
+msgstr "Связь канала удалена"
+#: frontend/src lms
+msgid "Channel saved"
+msgstr "Канал сохранён"
 #: lms/locale/main.pot
 msgid "chapter must be a non-empty string"
 msgstr "chapter должен быть непустой строкой"
@@ -300,30 +402,138 @@ msgstr "Глава {0} не существует."
 #: lms/locale/main.pot
 msgid "Chapter {0} not found"
 msgstr "Глава {0} не найдена"
+#: frontend/src lms
+msgid "Condition is required"
+msgstr "Укажите условие"
+#: frontend/src lms
+msgid "Connect any IMAP/POP3 and SMTP server"
+msgstr "Подключите любой сервер IMAP/POP3 и SMTP"
 #: lms/locale/main.pot
 msgid "Console"
 msgstr "Консоль"
+#: frontend/src lms
+msgid "Copy"
+msgstr "Копировать"
+#: frontend/src lms
+msgid "Correct Answer:"
+msgstr "Правильный ответ:"
+#: frontend/src lms
+msgid "Could not change the visibility"
+msgstr "Не удалось изменить видимость"
+#: frontend/src lms
+msgid "Could not check who this change affects"
+msgstr "Не удалось проверить, на кого повлияет изменение"
+#: frontend/src lms
+msgid "Could not create the channel"
+msgstr "Не удалось создать канал"
+#: frontend/src lms
+msgid "Could not create the workspace"
+msgstr "Не удалось создать рабочее пространство"
+#: frontend/src lms
+msgid "Could not link channel"
+msgstr "Не удалось связать канал"
+#: frontend/src lms
+msgid "Could not link workspace"
+msgstr "Не удалось связать рабочее пространство"
 #: frontend/src/pages/QuizSubmission.vue
 msgid "Could not load correct answers"
 msgstr "Не удалось загрузить правильные ответы"
+#: frontend/src lms
+msgid "Could not load this channel"
+msgstr "Не удалось загрузить этот канал"
 #: lms/locale/main.pot
 msgid "Could not load your saved progress"
 msgstr "Не удалось загрузить сохранённый прогресс"
+#: frontend/src lms
+msgid "Could not recreate the Raven channel"
+msgstr "Не удалось пересоздать канал Raven"
+#: frontend/src lms
+msgid "Could not recreate the Raven workspace"
+msgstr "Не удалось пересоздать рабочее пространство Raven"
+#: frontend/src lms
+msgid "Could not rename the workspace"
+msgstr "Не удалось переименовать рабочее пространство"
+#: frontend/src lms
+msgid "Could not save the channel"
+msgstr "Не удалось сохранить канал"
+#: frontend/src lms
+msgid "Could not update channel"
+msgstr "Не удалось обновить канал"
+#: frontend/src lms
+msgid "Could not update workspace"
+msgstr "Не удалось обновить рабочее пространство"
 #: lms/locale/main.pot
 msgid "Course asset {0} is not a supported image, video, audio or PDF file."
 msgstr "Файл курса {0} не является поддерживаемым изображением, видео, аудио или PDF."
+#: frontend/src lms
+msgid "Course Enrollment"
+msgstr "Зачисление на курс"
 #: lms/locale/main.pot
 msgid "Course must be a string."
 msgstr "Course должен быть строкой."
+#: frontend/src lms
+msgid "Currency is required for {0}."
+msgstr "Укажите валюту для {0}."
+#: frontend/src lms
+msgid "Cut"
+msgstr "Вырезать"
+#: frontend/src lms
+msgid "Default Inbox"
+msgstr "Входящие по умолчанию"
+#: frontend/src lms
+msgid "Default Sending"
+msgstr "Отправка по умолчанию"
+#: frontend/src lms
+msgid "Default Sending & Inbox"
+msgstr "Отправка и входящие по умолчанию"
+#: frontend/src lms
+msgid "Delete this transaction?"
+msgstr "Удалить эту транзакцию?"
+#: frontend/src lms
+msgid "Delete user"
+msgstr "Удалить пользователя"
 #: lms/locale/main.pot
 msgid "Deleting submissions…"
 msgstr "Отправленные работы удаляются…"
 #: lms/locale/main.pot
 msgid "Derived from the lesson content on save. Not hand-edited."
 msgstr "Формируется из содержимого урока при сохранении. Вручную не редактируется."
+#: frontend/src lms
+msgid "Description is required"
+msgstr "Укажите описание"
+#: frontend/src lms
+msgid "Email Account deleted successfully"
+msgstr "Аккаунт электронной почты успешно удалён"
+#: frontend/src lms
+msgid "Email ID is required"
+msgstr "Укажите email"
+#: frontend/src lms
+msgid "Email Template"
+msgstr "Шаблон письма"
+#: frontend/src lms
+msgid "Enable Incoming"
+msgstr "Включить входящую почту"
+#: frontend/src lms
+msgid "Enable Outgoing"
+msgstr "Включить исходящую почту"
+#: frontend/src lms
+msgid "Enable {0}"
+msgstr "Включить {0}"
+#: frontend/src lms
+msgid "Error deleting channel mapping"
+msgstr "Ошибка удаления связи канала"
+#: frontend/src lms
+msgid "Error deleting email account"
+msgstr "Ошибка удаления аккаунта электронной почты"
+#: frontend/src lms
+msgid "Error deleting workspace mapping"
+msgstr "Ошибка удаления связи рабочего пространства"
 #: lms/locale/main.pot
 msgid "Evaluation must be a string."
 msgstr "Evaluation должен быть строкой."
+#: frontend/src lms
+msgid "Event is required"
+msgstr "Укажите событие"
 #: lms/locale/main.pot
 msgid "exercise must be a string"
 msgstr "exercise должен быть строкой"
@@ -333,21 +543,99 @@ msgstr "Ожидается"
 #: lms/locale/main.pot
 msgid "Expected {0} outputs, got {1}"
 msgstr "Ожидалось выходных значений: {0}, получено: {1}"
+#: frontend/src lms
+msgid "Export failed"
+msgstr "Не удалось экспортировать"
+#: frontend/src lms
+msgid "External link"
+msgstr "Внешняя ссылка"
+#: frontend/src lms
+msgid "Fill in both the first and the last task number, or leave both empty."
+msgstr "Заполните и первый, и последний номер задания либо оставьте оба пустыми."
+#: frontend/src lms
+msgid "First task number"
+msgstr "Первый номер задания"
+#: frontend/src lms
+msgid "Fix the problems listed under the conditions first"
+msgstr "Сначала исправьте проблемы, перечисленные в условиях"
+#: frontend/src lms
+msgid "For Certificate"
+msgstr "Для сертификата"
+#: frontend/src lms
+msgid "For Course"
+msgstr "Для курса"
+#: frontend/src lms
+msgid "Frappe Mail site"
+msgstr "Сайт Frappe Mail"
+#: frontend/src lms
+msgid "Gateway"
+msgstr "Шлюз"
+#: frontend/src lms
+msgid "Give this channel a name before saving"
+msgstr "Дайте каналу название перед сохранением"
+#: frontend/src lms
+msgid "Go to Profile"
+msgstr "Перейти в профиль"
+#: frontend/src lms
+msgid "Google Meet account created successfully"
+msgstr "Аккаунт Google Meet успешно создан"
+#: frontend/src lms
+msgid "Google Meet account updated successfully"
+msgstr "Аккаунт Google Meet успешно обновлён"
 #: lms/locale/main.pot
 msgid "Hidden cases count toward the score but are not shown to the learner."
 msgstr "Скрытые примеры влияют на баллы, но ученику не показываются."
+#: frontend/src lms
+msgid "If enabled, emails will be pulled from this account."
+msgstr "Если включено, письма будут загружаться с этого аккаунта."
+#: frontend/src lms
+msgid "Implicit SSL, which is what port 993 expects."
+msgstr "Неявный SSL — именно его ожидает порт 993."
+#: frontend/src lms
+msgid "Import Chemedge PDF Trainer"
+msgstr "Импорт PDF-тренажёра Chemedge"
+#: frontend/src lms
+msgid "Imported Quiz"
+msgstr "Импортированный тест"
+#: frontend/src lms
+msgid "Inbox"
+msgstr "Входящие"
+#: frontend/src lms
+msgid "Incoming over SSL"
+msgstr "Входящая почта по SSL"
+#: frontend/src lms
+msgid "Incoming port"
+msgstr "Порт входящей почты"
+#: frontend/src lms
+msgid "Incoming server"
+msgstr "Сервер входящей почты"
 #: lms/locale/main.pot
 msgid "Instructor Only"
 msgstr "Только для преподавателя"
+#: frontend/src lms
+msgid "Invalid email ID"
+msgstr "Некорректный email"
 #: lms/locale/main.pot
 msgid "Invalid lesson."
 msgstr "Некорректный урок."
 #: lms/lms/doctype/lms_quiz/lms_quiz.py
 msgid "Invalid quiz submission."
 msgstr "Некорректная попытка теста."
+#: frontend/src lms
+msgid "Issued On is required"
+msgstr "Укажите дату выдачи"
+#: frontend/src lms
+msgid "Last task number"
+msgstr "Последний номер задания"
+#: frontend/src lms
+msgid "Learn courses and track progress"
+msgstr "Проходите курсы и следите за прогрессом"
 #: lms/locale/main.pot
 msgid "Lesson and course must be strings."
 msgstr "Lesson и course должны быть строками."
+#: frontend/src lms
+msgid "Link within this site"
+msgstr "Ссылка внутри сайта"
 #: lms/locale/main.pot
 msgid "LMS Content Author"
 msgstr "Автор материалов LMS"
@@ -360,36 +648,105 @@ msgstr "Основное"
 #: lms/locale/main.pot
 msgid "Marked by your instructor"
 msgstr "Оценивается преподавателем"
+#: frontend/src lms
+msgid "Member is required"
+msgstr "Укажите участника"
 #: lms/locale/main.pot
 msgid "Meta type and route must be strings."
 msgstr "Тип meta и route должны быть строками."
 #: lms/locale/main.pot
 msgid "More than {0} lessons still need assessment placement rows. Rewriting them inside the migrate transaction would exceed its budget. Run lms.patches.v2_0.backfill_lesson_assessment_placements.backfill_all as a background job, then re-run bench migrate."
 msgstr "Более чем в {0} уроках ещё нужно создать строки размещения проверок. Их перезапись внутри транзакции миграции превысит её бюджет. Запустите lms.patches.v2_0.backfill_lesson_assessment_placements.backfill_all как фоновую задачу, затем повторите bench migrate."
+#: frontend/src lms
+msgid "New Badge"
+msgstr "Новое достижение"
+#: frontend/src lms
+msgid "New Google Meet Account"
+msgstr "Новый аккаунт Google Meet"
 #: lms/locale/main.pot
 msgid "New Programming Exercise"
 msgstr "Новое упражнение по программированию"
+#: frontend/src lms
+msgid "New Zoom Account"
+msgstr "Новый аккаунт Zoom"
+#: frontend/src lms
+msgid "Next question"
+msgstr "Следующий вопрос"
 #: lms/locale/main.pot
 msgid "No conferencing account"
 msgstr "Нет аккаунта для видеосвязи"
+#: frontend/src lms
+msgid "No."
+msgstr "№"
 #: lms/locale/main.pot
 msgid "None"
 msgstr "Нет"
+#: frontend/src lms
+msgid "Not authorized"
+msgstr "Нет доступа"
 #: lms/locale/main.pot
 msgid "Nothing to show yet — run your code"
 msgstr "Пока нечего показать — запустите код"
+#: frontend/src lms
+msgid "Only if it differs from the email ID"
+msgstr "Только если отличается от email"
 #: lms/locale/main.pot
 msgid "Only image and video files are allowed."
 msgstr "Разрешены только изображения и видео."
+#: frontend/src lms
+msgid "Open in Raven"
+msgstr "Открыть в Raven"
+#: frontend/src lms
+msgid "Open the Batch"
+msgstr "Открыть группу"
+#: frontend/src lms
+msgid "Open the Course"
+msgstr "Открыть курс"
+#: frontend/src lms
+msgid "Outgoing over SSL"
+msgstr "Исходящая почта по SSL"
+#: frontend/src lms
+msgid "Outgoing port"
+msgstr "Порт исходящей почты"
+#: frontend/src lms
+msgid "Outgoing server"
+msgstr "Сервер исходящей почты"
+#: frontend/src lms
+msgid "Outgoing server is required"
+msgstr "Укажите сервер исходящей почты"
 #: lms/locale/main.pot
 msgid "outputs must be a list"
 msgstr "outputs должен быть списком"
+#: frontend/src lms
+msgid "Paid"
+msgstr "Оплачено"
+#: frontend/src lms
+msgid "paid batches"
+msgstr "платных группах"
+#: frontend/src lms
+msgid "paid certificates"
+msgstr "платных сертификатах"
+#: frontend/src lms
+msgid "paid courses"
+msgstr "платных курсах"
+#: frontend/src lms
+msgid "pass at {0}%"
+msgstr "проходной балл {0}%"
 #: lms/locale/main.pot
 msgid "Pass mark"
 msgstr "Проходной балл"
+#: frontend/src lms
+msgid "Password is required"
+msgstr "Укажите пароль"
+#: frontend/src lms
+msgid "Paste"
+msgstr "Вставить"
 #: lms/locale/main.pot
 msgid "Please login to continue."
 msgstr "Войдите в систему, чтобы продолжить."
+#: frontend/src lms
+msgid "Please upload a PDF file."
+msgstr "Загрузите файл PDF."
 #: lms/locale/main.pot
 msgid "Please upload the file for {0} again. Only a file you uploaded can be attached."
 msgstr "Загрузите файл для {0} заново. Прикрепить можно только файл, загруженный вами."
@@ -405,18 +762,39 @@ msgstr "Предзаполняет редактор ученика. Оставь
 #: lms/locale/main.pot
 msgid "Preview only"
 msgstr "Только предпросмотр"
+#: frontend/src lms
+msgid "Price must be a positive number for {0}."
+msgstr "Цена для {0} должна быть положительным числом."
 #: lms/locale/main.pot
 msgid "Problem"
 msgstr "Задача"
+#: frontend/src lms
+msgid "Question results"
+msgstr "Результаты вопроса"
 #: lms/locale/main.pot
 msgid "Question {0} of {1}"
 msgstr "Вопрос {0} из {1}"
+#: frontend/src lms
+msgid "Question {0}: {1}"
+msgstr "Вопрос {0}: {1}"
 #: lms/locale/main.pot
 msgid "Ran in {0}s"
 msgstr "Выполнено за {0} с"
+#: frontend/src lms
+msgid "Raven channel recreated"
+msgstr "Канал Raven пересоздан"
+#: frontend/src lms
+msgid "Raven workspace recreated"
+msgstr "Рабочее пространство Raven пересоздано"
 #: lms/locale/main.pot
 msgid "Readable only at permlevel 1, so a learner is scored against it server-side and never receives it."
 msgstr "Читается только на permlevel 1: сверка с эталоном идёт на сервере, ученик этот текст не получает."
+#: frontend/src lms
+msgid "Recreate channel"
+msgstr "Пересоздать канал"
+#: frontend/src lms
+msgid "Recreate workspace"
+msgstr "Пересоздать рабочее пространство"
 #: lms/locale/main.pot
 msgid "Remove row {0}"
 msgstr "Удалить строку {0}"
@@ -438,15 +816,51 @@ msgstr "Запись на оценивание закрыта"
 #: lms/locale/main.pot
 msgid "Select a category"
 msgstr "Выберите категорию"
+#: frontend/src lms
+msgid "Send and receive through Frappe Mail"
+msgstr "Отправка и приём через Frappe Mail"
+#: frontend/src lms
+msgid "Send and receive through your Gmail account"
+msgstr "Отправка и приём через ваш аккаунт Gmail"
+#: frontend/src lms
+msgid "Send and receive through your Outlook account"
+msgstr "Отправка и приём через ваш аккаунт Outlook"
+#: frontend/src lms
+msgid "Send and receive through your Yahoo Mail account"
+msgstr "Отправка и приём через ваш аккаунт Yahoo Mail"
+#: frontend/src lms
+msgid "Send and receive through your Yandex Mail account"
+msgstr "Отправка и приём через ваш аккаунт Яндекс Почты"
+#: frontend/src lms
+msgid "Send through your SendGrid account"
+msgstr "Отправка через ваш аккаунт SendGrid"
+#: frontend/src lms
+msgid "Send through your SparkPost account"
+msgstr "Отправка через ваш аккаунт SparkPost"
+#: frontend/src lms
+msgid "Sending"
+msgstr "Отправка"
+#: frontend/src lms
+msgid "Sending & Inbox"
+msgstr "Отправка и входящие"
+#: frontend/src lms
+msgid "Something went wrong. Please try again."
+msgstr "Что-то пошло не так. Попробуйте ещё раз."
 #: lms/locale/main.pot
 msgid "Start again?"
 msgstr "Начать заново?"
 #: lms/locale/main.pot
 msgid "Starter Code"
 msgstr "Стартовый код"
+#: frontend/src lms
+msgid "Strikethrough"
+msgstr "Зачёркнутый"
 #: lms/locale/main.pot
 msgid "Submitted"
 msgstr "Отправлено"
+#: frontend/src lms
+msgid "Support / Sales"
+msgstr "Поддержка / продажи"
 #: lms/locale/main.pot
 msgid "Tasks"
 msgstr "Задания"
@@ -465,12 +879,18 @@ msgstr "Не удалось загрузить среду запуска код�
 #: lms/locale/main.pot
 msgid "The course's assets exceed the maximum import size of {0} MB"
 msgstr "Материалы курса превышают максимальный размер импорта {0} МБ"
+#: frontend/src lms
+msgid "The first task number must not be greater than the last task number."
+msgstr "Первый номер задания не должен быть больше последнего."
 #: lms/locale/main.pot
 msgid "The run could not be scored. Please try again."
 msgstr "Не удалось оценить выполнение. Попробуйте ещё раз."
 #: lms/locale/main.pot
 msgid "The timer starts as soon as you begin."
 msgstr "Таймер запускается, как только вы начнёте."
+#: frontend/src lms
+msgid "The uploaded file must be a PDF."
+msgstr "Загруженный файл должен быть PDF."
 #: lms/locale/main.pot
 msgid "This chapter has no lesson to play yet."
 msgstr "В этой главе пока нет уроков для воспроизведения."
@@ -486,15 +906,51 @@ msgstr "В этом уроке пока нет содержимого для в�
 #: lms/locale/main.pot
 msgid "This lesson will start from the beginning. Reload the page to try resuming where you left off."
 msgstr "Урок начнётся с самого начала. Обновите страницу, чтобы попробовать продолжить с места остановки."
+#: frontend/src lms
+msgid "This PDF does not match the supported Chemedge trainer format: {0}"
+msgstr "Этот PDF не соответствует поддерживаемому формату тренажёра Chemedge: {0}"
 #: lms/locale/main.pot
 msgid "This replaces what is in the editor with the starting code. Your run results are cleared too."
 msgstr "Это заменит содержимое редактора стартовым кодом. Результаты запуска тоже будут очищены."
 #: lms/locale/main.pot
 msgid "Time limit"
 msgstr "Ограничение по времени"
+#: frontend/src lms
+msgid "Transaction deleted successfully"
+msgstr "Транзакция успешно удалена"
+#: frontend/src lms
+msgid "Turn off to collect mail over POP3 instead."
+msgstr "Выключите, чтобы собирать почту по POP3."
+#: frontend/src lms
+msgid "Unable to delete transaction"
+msgstr "Не удалось удалить транзакцию"
+#: frontend/src lms
+msgid "Unable to delete user"
+msgstr "Не удалось удалить пользователя"
+#: frontend/src lms
+msgid "Underline"
+msgstr "Подчёркнутый"
 #: lms/locale/main.pot
 msgid "Unknown error"
 msgstr "Неизвестная ошибка"
+#: frontend/src lms
+msgid "Unpaid"
+msgstr "Не оплачено"
+#: frontend/src lms
+msgid "Untitled"
+msgstr "Без названия"
+#: frontend/src lms
+msgid "Use IMAP"
+msgstr "Использовать IMAP"
+#: frontend/src lms
+msgid "User deleted"
+msgstr "Пользователь удалён"
+#: frontend/src lms
+msgid "Workspace created"
+msgstr "Рабочее пространство создано"
+#: frontend/src lms
+msgid "Workspace mapping deleted"
+msgstr "Связь рабочего пространства удалена"
 #: lms/locale/main.pot
 msgid "Written response"
 msgstr "Письменный ответ"
@@ -5589,6 +6045,12 @@ msgstr "Предыдущая страница"
 #: frontend/src/components/PdfBlock.vue
 msgid "Next page"
 msgstr "Следующая страница"
+#: frontend/src lms
+msgid "You are not permitted to import PDF trainers."
+msgstr "У вас нет прав импортировать PDF-тренажёры."
+#: frontend/src lms
+msgid "You are not permitted to use this file."
+msgstr "Вы не можете использовать этот файл."
 #: lms/locale/main.pot
 msgid "You are not the assigned evaluator for this evaluation."
 msgstr "Вы не назначенный проверяющий этого оценивания."
@@ -5604,6 +6066,12 @@ msgstr "Записывать пользователей могут только 
 #: lms/locale/main.pot
 msgid "Your Code"
 msgstr "Ваш код"
+#: frontend/src lms
+msgid "Zoom account created successfully"
+msgstr "Аккаунт Zoom успешно создан"
+#: frontend/src lms
+msgid "Zoom account updated successfully"
+msgstr "Аккаунт Zoom успешно обновлён"
 
 #: frontend/src/components/PdfBlock.vue
 msgid "Zoom out"
@@ -12213,6 +12681,9 @@ msgstr "вы можете"
 #: frontend/src/pages/Assignments.vue:4
 msgid "{0} Assignments"
 msgstr "{0} задания"
+#: frontend/src lms
+msgid "{0} Batches"
+msgstr "Группы: {0}"
 
 #: frontend/src/pages/ProgrammingExercises/ProgrammingExercises.vue:4
 msgid "{0} Exercises"
@@ -12226,6 +12697,9 @@ msgstr "{0} в архиве слишком велик для импорта"
 #: lms/locale/main.pot
 msgid "{0} left"
 msgstr "Осталось: {0}"
+#: frontend/src lms
+msgid "{0} must be a whole number between {1} and {2}."
+msgstr "{0} должно быть целым числом от {1} до {2}."
 #: lms/locale/main.pot
 msgid "{0} of {1} passed"
 msgstr "Пройдено {0} из {1}"
@@ -12403,6 +12877,9 @@ msgstr "{0} выбранные строки"
 #: frontend/src/components/Modals/EvaluationModal.vue:205
 msgid "{0} until {1} on {2}"
 msgstr "{0} до {1}, {2}"
+#: frontend/src lms
+msgid "{0} {1} allowed"
+msgstr "Допустимо: {0} {1}"
 #: lms/locale/main.pot
 msgid "{0} {1} could not be loaded."
 msgstr "Не удалось загрузить {0} {1}."
@@ -12410,6 +12887,9 @@ msgstr "Не удалось загрузить {0} {1}."
 #: frontend/src/pages/Jobs.vue:4
 msgid "{0} {1} Jobs"
 msgstr "{0} {1} Работа"
+#: frontend/src lms
+msgid "{0} {1} left"
+msgstr "Осталось: {0} {1}"
 #: lms/locale/main.pot
 msgid "{0}, row {1}"
 msgstr "{0}, строка {1}"
