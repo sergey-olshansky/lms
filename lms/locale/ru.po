@@ -150,6 +150,9 @@ msgstr ""
 #: lms/lms/api.py:650
 msgid "A time is required."
 msgstr ""
+#: lms/locale/main.pot
+msgid "Actions"
+msgstr "Действия"
 
 #: frontend/src/pages/Forms/PersonaForm.vue:71
 msgid "AI assistant (ChatGPT, etc.)"
@@ -267,12 +270,237 @@ msgstr "Добавить нового участника"
 #: frontend/src/pages/QuizSubmission.vue
 msgid "Answered"
 msgstr "Ответил"
+#: lms/locale/main.pot
+msgid "Attempts"
+msgstr "Попытки"
+#: lms/locale/main.pot
+msgid "Authors"
+msgstr "Авторы"
+#: lms/locale/main.pot
+msgid "autosaved"
+msgstr "автосохранено"
+#: lms/locale/main.pot
+msgid "Back to editing"
+msgstr "Вернуться к редактированию"
+#: lms/locale/main.pot
+msgid "Before you start"
+msgstr "Перед началом"
+#: lms/locale/main.pot
+msgid "Brief"
+msgstr "Условие"
+#: lms/locale/main.pot
+msgid "chapter must be a non-empty string"
+msgstr "chapter должен быть непустой строкой"
+#: lms/locale/main.pot
+msgid "chapter must be a string"
+msgstr "chapter должен быть строкой"
+#: lms/locale/main.pot
+msgid "Chapter {0} does not exist."
+msgstr "Глава {0} не существует."
+#: lms/locale/main.pot
+msgid "Chapter {0} not found"
+msgstr "Глава {0} не найдена"
+#: lms/locale/main.pot
+msgid "Console"
+msgstr "Консоль"
 #: frontend/src/pages/QuizSubmission.vue
 msgid "Could not load correct answers"
 msgstr "Не удалось загрузить правильные ответы"
+#: lms/locale/main.pot
+msgid "Could not load your saved progress"
+msgstr "Не удалось загрузить сохранённый прогресс"
+#: lms/locale/main.pot
+msgid "Course asset {0} is not a supported image, video, audio or PDF file."
+msgstr "Файл курса {0} не является поддерживаемым изображением, видео, аудио или PDF."
+#: lms/locale/main.pot
+msgid "Course must be a string."
+msgstr "Course должен быть строкой."
+#: lms/locale/main.pot
+msgid "Deleting submissions…"
+msgstr "Отправленные работы удаляются…"
+#: lms/locale/main.pot
+msgid "Derived from the lesson content on save. Not hand-edited."
+msgstr "Формируется из содержимого урока при сохранении. Вручную не редактируется."
+#: lms/locale/main.pot
+msgid "Evaluation must be a string."
+msgstr "Evaluation должен быть строкой."
+#: lms/locale/main.pot
+msgid "exercise must be a string"
+msgstr "exercise должен быть строкой"
+#: lms/locale/main.pot
+msgid "Expected"
+msgstr "Ожидается"
+#: lms/locale/main.pot
+msgid "Expected {0} outputs, got {1}"
+msgstr "Ожидалось выходных значений: {0}, получено: {1}"
+#: lms/locale/main.pot
+msgid "Hidden cases count toward the score but are not shown to the learner."
+msgstr "Скрытые примеры влияют на баллы, но ученику не показываются."
+#: lms/locale/main.pot
+msgid "Instructor Only"
+msgstr "Только для преподавателя"
+#: lms/locale/main.pot
+msgid "Invalid lesson."
+msgstr "Некорректный урок."
 #: lms/lms/doctype/lms_quiz/lms_quiz.py
 msgid "Invalid quiz submission."
 msgstr "Некорректная попытка теста."
+#: lms/locale/main.pot
+msgid "Lesson and course must be strings."
+msgstr "Lesson и course должны быть строками."
+#: lms/locale/main.pot
+msgid "LMS Content Author"
+msgstr "Автор материалов LMS"
+#: lms/locale/main.pot
+msgid "LMS Lesson Assessment"
+msgstr "Проверка урока LMS"
+#: lms/locale/main.pot
+msgid "Main"
+msgstr "Основное"
+#: lms/locale/main.pot
+msgid "Marked by your instructor"
+msgstr "Оценивается преподавателем"
+#: lms/locale/main.pot
+msgid "Meta type and route must be strings."
+msgstr "Тип meta и route должны быть строками."
+#: lms/locale/main.pot
+msgid "More than {0} lessons still need assessment placement rows. Rewriting them inside the migrate transaction would exceed its budget. Run lms.patches.v2_0.backfill_lesson_assessment_placements.backfill_all as a background job, then re-run bench migrate."
+msgstr "Более чем в {0} уроках ещё нужно создать строки размещения проверок. Их перезапись внутри транзакции миграции превысит её бюджет. Запустите lms.patches.v2_0.backfill_lesson_assessment_placements.backfill_all как фоновую задачу, затем повторите bench migrate."
+#: lms/locale/main.pot
+msgid "New Programming Exercise"
+msgstr "Новое упражнение по программированию"
+#: lms/locale/main.pot
+msgid "No conferencing account"
+msgstr "Нет аккаунта для видеосвязи"
+#: lms/locale/main.pot
+msgid "None"
+msgstr "Нет"
+#: lms/locale/main.pot
+msgid "Nothing to show yet — run your code"
+msgstr "Пока нечего показать — запустите код"
+#: lms/locale/main.pot
+msgid "Only image and video files are allowed."
+msgstr "Разрешены только изображения и видео."
+#: lms/locale/main.pot
+msgid "outputs must be a list"
+msgstr "outputs должен быть списком"
+#: lms/locale/main.pot
+msgid "Pass mark"
+msgstr "Проходной балл"
+#: lms/locale/main.pot
+msgid "Please login to continue."
+msgstr "Войдите в систему, чтобы продолжить."
+#: lms/locale/main.pot
+msgid "Please upload the file for {0} again. Only a file you uploaded can be attached."
+msgstr "Загрузите файл для {0} заново. Прикрепить можно только файл, загруженный вами."
+#: lms/locale/main.pot
+msgid "Please upload the resume again. The uploaded file could not be found."
+msgstr "Загрузите резюме заново. Загруженный файл не найден."
+#: lms/locale/main.pot
+msgid "Prefills the learner's editor. Falls back to the language boilerplate when empty."
+msgstr "Предзаполняет редактор ученика. Если пусто, используется шаблон для выбранного языка."
+#: lms/locale/main.pot
+msgid "Prefills the learner’s editor. Leave empty for the language default."
+msgstr "Предзаполняет редактор ученика. Оставьте пустым для стандартного шаблона языка."
+#: lms/locale/main.pot
+msgid "Preview only"
+msgstr "Только предпросмотр"
+#: lms/locale/main.pot
+msgid "Problem"
+msgstr "Задача"
+#: lms/locale/main.pot
+msgid "Question {0} of {1}"
+msgstr "Вопрос {0} из {1}"
+#: lms/locale/main.pot
+msgid "Ran in {0}s"
+msgstr "Выполнено за {0} с"
+#: lms/locale/main.pot
+msgid "Readable only at permlevel 1, so a learner is scored against it server-side and never receives it."
+msgstr "Читается только на permlevel 1: сверка с эталоном идёт на сервере, ученик этот текст не получает."
+#: lms/locale/main.pot
+msgid "Remove row {0}"
+msgstr "Удалить строку {0}"
+#: lms/locale/main.pot
+msgid "Reset"
+msgstr "Сбросить"
+#: lms/locale/main.pot
+msgid "Run code"
+msgstr "Запустить код"
+#: lms/locale/main.pot
+msgid "Run your code to check the test cases"
+msgstr "Запустите код, чтобы проверить тестовые примеры"
+#: lms/locale/main.pot
+msgid "Running your code…"
+msgstr "Код запускается…"
+#: lms/locale/main.pot
+msgid "Scheduling closed"
+msgstr "Запись на оценивание закрыта"
+#: lms/locale/main.pot
+msgid "Select a category"
+msgstr "Выберите категорию"
+#: lms/locale/main.pot
+msgid "Start again?"
+msgstr "Начать заново?"
+#: lms/locale/main.pot
+msgid "Starter Code"
+msgstr "Стартовый код"
+#: lms/locale/main.pot
+msgid "Submitted"
+msgstr "Отправлено"
+#: lms/locale/main.pot
+msgid "Tasks"
+msgstr "Задания"
+#: lms/locale/main.pot
+msgid "Test cases"
+msgstr "Тестовые примеры"
+#: lms/locale/main.pot
+msgid "The archive expands to more than {0} MB"
+msgstr "Архив распаковывается более чем в {0} МБ"
+#: lms/locale/main.pot
+msgid "The archive has more than {0} files"
+msgstr "В архиве более {0} файлов"
+#: lms/locale/main.pot
+msgid "The code runner could not be loaded, so this exercise cannot be run."
+msgstr "Не удалось загрузить среду запуска кода, поэтому упражнение нельзя выполнить."
+#: lms/locale/main.pot
+msgid "The course's assets exceed the maximum import size of {0} MB"
+msgstr "Материалы курса превышают максимальный размер импорта {0} МБ"
+#: lms/locale/main.pot
+msgid "The run could not be scored. Please try again."
+msgstr "Не удалось оценить выполнение. Попробуйте ещё раз."
+#: lms/locale/main.pot
+msgid "The timer starts as soon as you begin."
+msgstr "Таймер запускается, как только вы начнёте."
+#: lms/locale/main.pot
+msgid "This chapter has no lesson to play yet."
+msgstr "В этой главе пока нет уроков для воспроизведения."
+#: lms/locale/main.pot
+msgid "This chart is not available."
+msgstr "Этот график недоступен."
+#: lms/locale/main.pot
+msgid "This lesson does not belong to the course."
+msgstr "Этот урок не относится к курсу."
+#: lms/locale/main.pot
+msgid "This lesson has no content to play yet."
+msgstr "В этом уроке пока нет содержимого для воспроизведения."
+#: lms/locale/main.pot
+msgid "This lesson will start from the beginning. Reload the page to try resuming where you left off."
+msgstr "Урок начнётся с самого начала. Обновите страницу, чтобы попробовать продолжить с места остановки."
+#: lms/locale/main.pot
+msgid "This replaces what is in the editor with the starting code. Your run results are cleared too."
+msgstr "Это заменит содержимое редактора стартовым кодом. Результаты запуска тоже будут очищены."
+#: lms/locale/main.pot
+msgid "Time limit"
+msgstr "Ограничение по времени"
+#: lms/locale/main.pot
+msgid "Unknown error"
+msgstr "Неизвестная ошибка"
+#: lms/locale/main.pot
+msgid "Written response"
+msgstr "Письменный ответ"
+#: lms/locale/main.pot
+msgid "You are not authorized to add {0} to this batch."
+msgstr "Вы не можете добавлять {0} в эту группу."
 #: lms/lms/doctype/lms_quiz/lms_quiz.py
 msgid "You are not authorized to view correct quiz answers."
 msgstr "У вас нет доступа к правильным ответам теста."
@@ -5361,6 +5589,21 @@ msgstr "Предыдущая страница"
 #: frontend/src/components/PdfBlock.vue
 msgid "Next page"
 msgstr "Следующая страница"
+#: lms/locale/main.pot
+msgid "You are not the assigned evaluator for this evaluation."
+msgstr "Вы не назначенный проверяющий этого оценивания."
+#: lms/locale/main.pot
+msgid "You do not have permission to create a live class for this batch."
+msgstr "У вас нет прав создавать прямые занятия для этой группы."
+#: lms/locale/main.pot
+msgid "You do not have permission to move this row out of {0} {1}"
+msgstr "У вас нет прав перемещать эту строку из {0} {1}"
+#: lms/locale/main.pot
+msgid "You must be a Moderator, Batch Evaluator, or this batch's instructor to enroll users."
+msgstr "Записывать пользователей могут только модератор, проверяющий группы или преподаватель этой группы."
+#: lms/locale/main.pot
+msgid "Your Code"
+msgstr "Ваш код"
 
 #: frontend/src/components/PdfBlock.vue
 msgid "Zoom out"
@@ -11974,6 +12217,18 @@ msgstr "{0} задания"
 #: frontend/src/pages/ProgrammingExercises/ProgrammingExercises.vue:4
 msgid "{0} Exercises"
 msgstr "{0} Упражнений"
+#: lms/locale/main.pot
+msgid "{0} in the archive is compressed too heavily to extract safely"
+msgstr "{0} в архиве сжат слишком сильно для безопасного извлечения"
+#: lms/locale/main.pot
+msgid "{0} in the archive is too large to import"
+msgstr "{0} в архиве слишком велик для импорта"
+#: lms/locale/main.pot
+msgid "{0} left"
+msgstr "Осталось: {0}"
+#: lms/locale/main.pot
+msgid "{0} of {1} passed"
+msgstr "Пройдено {0} из {1}"
 
 #: frontend/src/pages/Quizzes.vue:17
 msgid "{0} Quizzes"
@@ -12148,10 +12403,19 @@ msgstr "{0} выбранные строки"
 #: frontend/src/components/Modals/EvaluationModal.vue:205
 msgid "{0} until {1} on {2}"
 msgstr ""
+#: lms/locale/main.pot
+msgid "{0} {1} could not be loaded."
+msgstr "Не удалось загрузить {0} {1}."
 
 #: frontend/src/pages/Jobs.vue:4
 msgid "{0} {1} Jobs"
 msgstr "{0} {1} Работа"
+#: lms/locale/main.pot
+msgid "{0}, row {1}"
+msgstr "{0}, строка {1}"
+#: lms/locale/main.pot
+msgid "{0}: {1} cannot be changed from {2} to {3} after enrollment."
+msgstr "{0}: {1} нельзя изменить с {2} на {3} после зачисления."
 
 #: frontend/src/components/LockedLessonNotice.vue:28
 msgid "{0}s"
