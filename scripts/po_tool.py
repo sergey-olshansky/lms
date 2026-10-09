@@ -33,16 +33,20 @@ def quote(s):
 
 
 class Entry:
-    __slots__ = ("comments", "refs", "id", "str", "line")
+    __slots__ = ("comments", "refs", "id", "str", "line", "raw", "blank_before")
 
     def __init__(self, line=0):
-        self.comments = []  # #. lines
-        self.refs = []      # #: lines
+        self.comments = []  # all comment lines (#., #:, #, ...) verbatim
+        self.refs = []      # #: sources parsed out
         self.id = ""
         self.str = ""
         self.line = line
+        self.raw = None         # original physical lines (None when modified)
+        self.blank_before = False
 
     def to_lines(self):
+        if self.raw is not None:
+            return list(self.raw)
         out = []
         for c in self.comments:
             out.append(c)
@@ -55,44 +59,37 @@ class Entry:
 
 def parse_po(path=PO_PATH):
     entries = []
-    header_lines = []
     with open(path, encoding="utf-8") as f:
         lines = f.read().split("\n")
     cur = None
     field = None  # 'id' | 'str'
     pending_comments = []
+    pending_blank = False
     for i, raw in enumerate(lines, 1):
         line = raw.rstrip("\r")
         if not line.strip():
+            pending_blank = True
             continue
         if line.startswith("#"):
-            if line.startswith("#:") or line.startswith("#."):
-                pending_comments.append(line)
-            else:
-                pending_comments.append(line)
+            if cur is not None and field == "str":
+                # comment belongs to the NEXT entry
+                pass
+            pending_comments.append(line)
             continue
         m = LINE_RE.match(line)
         if m:
             name, _idx, rest = m.group(1), m.group(2), m.group(3)
             val = unquote(rest)
-            if name == "msgid" and val == "":
-                # header or entry with empty id
-                cur = Entry(i)
-                cur.id = val
-                field = "id"
-                if not entries and not [e for e in entries]:
-                    pass
-                entries.append(cur)
-                cur.comments = pending_comments
-                pending_comments = []
-                continue
             if name == "msgid":
                 cur = Entry(i)
                 cur.id = val
                 field = "id"
-                entries.append(cur)
+                cur.comments = pending_comments
+                cur.blank_before = pending_blank or not entries
                 cur.comments = pending_comments
                 pending_comments = []
+                pending_blank = False
+                entries.append(cur)
             elif name == "msgstr":
                 cur.str = val
                 field = "str"
@@ -109,19 +106,37 @@ def parse_po(path=PO_PATH):
                 cur.str += val
             else:
                 raise ValueError("continuation before keyword at %s:%d" % (path, i))
+    # second pass: attach raw physical blocks
+    _attach_raw(entries, lines)
     return entries
 
 
-def write_po(entries, path=PO_PATH, header=None):
+def _attach_raw(entries, lines):
+    # entry block spans from its first comment (or msgid) to the line before
+    # the next entry's first comment (or msgid)
+    starts = []
+    for e in entries:
+        s = e.line - 1 - len([c for c in e.comments])
+        starts.append(s)
+    for idx, e in enumerate(entries):
+        s = starts[idx]
+        end = starts[idx + 1] if idx + 1 < len(entries) else len(lines)
+        # strip trailing blank lines and stray comments of the next entry
+        block = lines[s:end]
+        while block and (not block[-1].strip()):
+            block.pop()
+        e.raw = block
+
+
+def write_po(entries, path=PO_PATH):
     with open(path, "w", encoding="utf-8") as f:
         first = True
         for e in entries:
-            if not first:
+            if not first and e.blank_before:
                 f.write("\n")
             first = False
             for ln in e.to_lines():
                 f.write(ln + "\n")
-    # ensure trailing newline structure kept (single \n at end already)
 
 
 def pot_keys(path=POT_PATH):
@@ -213,6 +228,31 @@ def main():
                 entries = [e for e in entries if e.id != op["id"]]
                 byid = po_keys(entries)
                 n_rm += 1
+            elif op["op"] == "dedup":
+                # keep one entry per msgid: prefer a non-empty msgstr, else first;
+                # chosen translation is applied to the kept entry
+                group = [e for e in entries if e.id == op["id"]]
+                if not group:
+                    raise SystemExit("dedup: id not found: %r" % op["id"])
+                chosen = next((e for e in group if e.str), group[0])
+                seen_id = False
+                keep = []
+                for e in entries:
+                    if e.id != op["id"]:
+                        keep.append(e)
+                        continue
+                    if seen_id:
+                        continue
+                    seen_id = True
+                    e.str = chosen.str
+                    e.refs = sorted(set(e.refs + chosen.refs))
+                    keep.append(e)
+                entries = keep
+                byid = po_keys(entries)
+                if len(group) > 1:
+                    n_rm += len(group) - 1
+                else:
+                    n_set += 1
             elif op["op"] == "append":
                 if op["id"] in byid:
                     raise SystemExit("append: id already exists: %r" % op["id"])
@@ -221,7 +261,13 @@ def main():
                 e.str = op["str"]
                 e.refs = op.get("refs", [])
                 e.comments = op.get("comments", [])
-                entries.append(e)
+                # insert keeping case-insensitive alphabetical order
+                idx = len(entries)
+                for i, ex in enumerate(entries):
+                    if ex.id != "" and ex.id.lower() > e.id.lower():
+                        idx = i
+                        break
+                entries.insert(idx, e)
                 byid.setdefault(op["id"], []).append(e)
                 n_add += 1
             else:
