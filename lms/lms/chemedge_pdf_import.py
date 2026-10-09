@@ -121,7 +121,7 @@ def _create_quiz(
 			"title": _unique_quiz_title(_quiz_title(meta, source_folder, task_number_range)),
 			"passing_percentage": 85,
 			"max_attempts": 2,
-			"show_answers": 1 if show_answers else 0,
+			"show_answers": 1 if _parse_show_answers(show_answers) else 0,
 			"show_submission_history": 1,
 			"duration": None,
 			"enable_negative_marking": 0,
@@ -294,12 +294,7 @@ def import_pdf_trainer(
 			first_page_size=first_page_size,
 		)
 		meta = json.loads((bundle_dir / "meta.json").read_text(encoding="utf-8"))
-		quiz = _create_quiz(
-			meta,
-			source_folder,
-			task_number_range,
-			_parse_show_answers(show_answers),
-		)
+		quiz = _create_quiz(meta, source_folder, task_number_range, show_answers)
 		quiz_name = quiz.name
 
 		for task in meta["tasks"]:
