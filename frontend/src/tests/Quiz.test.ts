@@ -12,6 +12,13 @@ const resourceState = vi.hoisted(() => ({
 	response: null as any,
 	// Per-option verdict check_answer returns: 1 correct, 2 partial, 0 wrong.
 	checkAnswer: [] as unknown[],
+	// Attempts list rows for frappe.client.get_list, newest first.
+	attempts: [] as any[],
+	// Submission docs keyed by name for frappe.client.get, the shape
+	// frappe.client.get returns: the graded rows ride in `result`.
+	submissionDocs: {} as Record<string, any>,
+	// What submit_quiz resolves with; null falls back to a passing default.
+	submitResponse: null as any,
 }))
 
 vi.mock('frappe-ui', async () => {
@@ -46,6 +53,23 @@ vi.mock('frappe-ui', async () => {
 				options.onSuccess?.(resourceState.checkAnswer)
 			}
 
+			if (options.url === 'frappe.client.get') {
+				const params = options.makeParams?.()
+				const raw = structuredClone(
+					resourceState.submissionDocs[params?.name] ?? null
+				)
+				const transformed = options.transform?.(raw)
+				resource.data = transformed == null ? raw : transformed
+			}
+
+			if (options.url === 'frappe.client.get_list' && options.transform) {
+				// The attempts list: the real transform over the mocked rows. It
+				// mutates in place and returns nothing, so rows carry the result.
+				const rows = structuredClone(resourceState.attempts)
+				const transformed = options.transform(rows)
+				resource.data = transformed ?? rows
+			}
+
 			resource.loading = false
 			return resource.data
 		})
@@ -56,8 +80,20 @@ vi.mock('frappe-ui', async () => {
 			loading: false,
 			reload,
 			fetch: reload,
-			submit: vi.fn(() => {
+			submit: vi.fn((values?: any, handlers?: any) => {
 				resourceState.submits.push(options.url)
+				if (options.url === 'lms.lms.doctype.lms_quiz.lms_quiz.submit_quiz') {
+					const raw = structuredClone(
+						resourceState.submitResponse ?? {
+							percentage: 100,
+							score: 1,
+							score_out_of: 1,
+							submission: 'SUBM-1',
+						}
+					)
+					resource.data = raw
+					handlers?.onSuccess?.(raw)
+				}
 			}),
 			reset: vi.fn(() => {
 				resource.data = null
@@ -186,6 +222,9 @@ beforeEach(() => {
 	resourceState.submits.length = 0
 	resourceState.response = quizResponse()
 	resourceState.checkAnswer = []
+	resourceState.attempts = []
+	resourceState.submissionDocs = {}
+	resourceState.submitResponse = null
 	localStorage.clear()
 })
 
@@ -552,5 +591,286 @@ describe('Quiz card', () => {
 		expect(feedback.text()).toBe('Correct')
 		const firstOption = wrapper.findAll('label')[0]
 		expect(firstOption.find('.lucide-check-circle').exists()).toBe(true)
+	})
+})
+
+// Guards task #2: the show_answers flag highlights the question dots during
+// the attempt (after Check), on the result screen and on the exhausted-attempts
+// card, while show_answers=0 quizzes keep the plain navigation dots.
+describe('Quiz question dots', () => {
+	const dotsNav = () => 'nav[aria-label="Question navigation"]'
+	const gradedNav = () => 'nav[aria-label="Question results"]'
+
+	const showAnswersResponse = (count: number) => {
+		const response = choicesQuizResponse(count)
+		response.quiz.show_answers = 1
+		return response
+	}
+
+	const checkFirstOption = async (wrapper: VueWrapper<any>) => {
+		await startQuiz(wrapper)
+		await wrapper.findAll('input[type="radio"]')[0].trigger('change')
+		const check = wrapper.findAll('button').find((b) => b.text() === 'Check')
+		expect(check).toBeDefined()
+		await check!.trigger('click')
+		await flushPromises()
+	}
+
+	it('renders the navigation dots during the attempt with live checking on', async () => {
+		resourceState.response = showAnswersResponse(2)
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await startQuiz(wrapper)
+
+		const dots = wrapper.findAll(`${dotsNav()} button`)
+		expect(dots).toHaveLength(2)
+		expect(dots[0].classes()).toContain('bg-surface-gray-7')
+		expect(dots[1].classes()).toContain('bg-surface-gray-3')
+
+		// Navigation still works: the dots move between questions.
+		await dots[1].trigger('click')
+		await flushPromises()
+		expect(wrapper.text()).toContain('Question 2 of 2')
+		wrapper.unmount()
+	})
+
+	it('colours the checked dot green with a text label', async () => {
+		resourceState.response = showAnswersResponse(2)
+		resourceState.checkAnswer = [1, 0]
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await checkFirstOption(wrapper)
+
+		const dots = wrapper.findAll(`${dotsNav()} button`)
+		expect(dots[0].classes()).toContain('bg-surface-green-6')
+		expect(dots[0].attributes('aria-label')).toBe('Question 1: Correct')
+		expect(dots[0].attributes('title')).toBe('Question 1: Correct')
+		// The untouched question keeps its neutral dot.
+		expect(dots[1].classes()).not.toContain('bg-surface-green-6')
+		wrapper.unmount()
+	})
+
+	it('colours the checked dot red when the answer is wrong', async () => {
+		resourceState.response = showAnswersResponse(1)
+		resourceState.checkAnswer = [0, 1]
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await checkFirstOption(wrapper)
+
+		const dot = wrapper.find(`${dotsNav()} button`)
+		expect(dot.classes()).toContain('bg-surface-red-6')
+		expect(dot.attributes('aria-label')).toBe('Question 1: Incorrect')
+		wrapper.unmount()
+	})
+
+	it('colours the dot for a checked User Input answer (PDF trainer shape)', async () => {
+		const response = showAnswersResponse(1)
+		response.questions_by_name.Q1 = {
+			name: 'Q1',
+			question: 'Type the answer',
+			type: 'User Input',
+		}
+		resourceState.response = response
+		resourceState.checkAnswer = 0
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await startQuiz(wrapper)
+		;(wrapper.vm as any).possibleAnswer = 'wrong guess'
+		;(wrapper.vm as any).checkAnswer()
+		await flushPromises()
+
+		const dot = wrapper.find(`${dotsNav()} button`)
+		expect(dot.classes()).toContain('bg-surface-red-6')
+		expect(dot.attributes('aria-label')).toBe('Question 1: Incorrect')
+		wrapper.unmount()
+	})
+
+	it('locks the answer together with the dot colour', async () => {
+		resourceState.response = showAnswersResponse(1)
+		resourceState.checkAnswer = [1, 0]
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await checkFirstOption(wrapper)
+
+		const radio = wrapper.find('input[type="radio"]')
+		expect(radio.attributes('disabled')).toBeDefined()
+		expect(
+			wrapper.findAll('button').find((b) => b.text() === 'Check')
+		).toBeUndefined()
+		expect(wrapper.find(`${dotsNav()} button`).classes()).toContain(
+			'bg-surface-green-6'
+		)
+		wrapper.unmount()
+	})
+
+	it('keeps the dot colour across a reload', async () => {
+		resourceState.response = showAnswersResponse(1)
+		resourceState.checkAnswer = [1, 0]
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await checkFirstOption(wrapper)
+		wrapper.unmount()
+
+		const restored = mountQuiz()
+		await flushPromises()
+
+		// restoreDraft reopens the checked question with its verdict.
+		const dot = restored.find(`${dotsNav()} button`)
+		expect(dot.exists()).toBe(true)
+		expect(dot.classes()).toContain('bg-surface-green-6')
+		expect(dot.attributes('aria-label')).toBe('Question 1: Correct')
+		restored.unmount()
+	})
+
+	it('clears the colours on a new attempt', async () => {
+		resourceState.response = showAnswersResponse(1)
+		resourceState.checkAnswer = [1, 0]
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await checkFirstOption(wrapper)
+
+		const finish = wrapper
+			.findAll('button')
+			.find((button) => button.text() === 'Finish Quiz')
+		await finish!.trigger('click')
+		await flushPromises()
+		expect(wrapper.text()).toContain('Quiz Summary')
+
+		const tryAgain = wrapper
+			.findAll('button')
+			.find((button) => button.text() === 'Try Again')
+		expect(tryAgain).toBeDefined()
+		await tryAgain!.trigger('click')
+		await flushPromises()
+		await startQuiz(wrapper)
+
+		const dot = wrapper.find(`${dotsNav()} button`)
+		expect(dot.classes()).not.toContain('bg-surface-green-6')
+		expect(dot.attributes('aria-label')).toBe('Question 1')
+		wrapper.unmount()
+	})
+
+	it('keeps the dots plain without verdicts when show_answers is off', async () => {
+		resourceState.response = choicesQuizResponse(2)
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await startQuiz(wrapper)
+
+		const dots = wrapper.findAll(`${dotsNav()} button`)
+		expect(dots).toHaveLength(2)
+		await wrapper.findAll('input[type="radio"]')[0].trigger('change')
+		const next = wrapper.findAll('button').find((b) => b.text() === 'Next')
+		await next!.trigger('click')
+		await flushPromises()
+
+		// The legacy navigation colouring survives: attempted reads blue.
+		expect(dots[0].classes()).toContain('bg-surface-blue-2')
+		for (const dot of dots) {
+			expect(dot.classes()).not.toContain('bg-surface-green-6')
+			expect(dot.classes()).not.toContain('bg-surface-red-6')
+		}
+		expect(
+			wrapper.findAll('button').find((b) => b.text() === 'Check')
+		).toBeUndefined()
+		wrapper.unmount()
+	})
+})
+
+describe('Quiz result screen verdict dots', () => {
+	it('replays the submission verdicts, marking unattempted questions wrong', async () => {
+		const response = choicesQuizResponse(3)
+		response.quiz.show_answers = 1
+		resourceState.response = response
+		resourceState.submissionDocs['SUBM-1'] = {
+			name: 'SUBM-1',
+			result: [
+				{ question_name: 'Q1', is_correct: 1 },
+				{ question_name: 'Q2', is_correct: 0 },
+			],
+		}
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await startQuiz(wrapper)
+
+		const finish = wrapper
+			.findAll('button')
+			.find((button) => button.text() === 'Finish Quiz')
+		await finish!.trigger('click')
+		await flushPromises()
+
+		expect(wrapper.text()).toContain('Quiz Summary')
+		const graded = wrapper.findAll(`nav[aria-label="Question results"] span`)
+		expect(graded).toHaveLength(3)
+		expect(graded[0].classes()).toContain('bg-surface-green-6')
+		expect(graded[0].attributes('aria-label')).toBe('Question 1: Correct')
+		expect(graded[1].classes()).toContain('bg-surface-red-6')
+		expect(graded[1].attributes('aria-label')).toBe('Question 2: Incorrect')
+		// No row for Q3: it counts as wrong, not as a missing dot.
+		expect(graded[2].classes()).toContain('bg-surface-red-6')
+		wrapper.unmount()
+	})
+
+	it('shows no graded dots when show_answers is off', async () => {
+		vi.useFakeTimers()
+		try {
+			resourceState.response = choicesQuizResponse(1)
+			const wrapper = mountQuiz()
+			await flushPromises()
+			await startQuiz(wrapper)
+			;(wrapper.vm as any).submitQuiz()
+			await vi.advanceTimersByTimeAsync(1000)
+			await flushPromises()
+
+			expect(wrapper.text()).toContain('Quiz Summary')
+			expect(wrapper.find('nav[aria-label="Question results"]').exists()).toBe(
+				false
+			)
+			wrapper.unmount()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+})
+
+describe('Quiz exhausted attempts verdict dots', () => {
+	it('verdicts the latest attempt on the card that blocks new ones', async () => {
+		const response = choicesQuizResponse(2)
+		response.quiz.show_answers = 1
+		response.quiz.max_attempts = 2
+		resourceState.response = response
+		resourceState.attempts = [
+			{
+				name: 'SUBM-2',
+				creation: '2026-10-08 10:00:00',
+				score: 1,
+				score_out_of: 2,
+				percentage: 50,
+				passing_percentage: 85,
+			},
+			{
+				name: 'SUBM-1',
+				creation: '2026-10-07 10:00:00',
+				score: 0,
+				score_out_of: 2,
+				percentage: 0,
+				passing_percentage: 85,
+			},
+		]
+		resourceState.submissionDocs['SUBM-2'] = {
+			name: 'SUBM-2',
+			result: [
+				{ question_name: 'Q1', is_correct: 1 },
+				{ question_name: 'Q2', is_correct: 0 },
+			],
+		}
+		const wrapper = mountQuiz()
+		await flushPromises()
+
+		expect(wrapper.text()).toContain("You've used all 2 attempts")
+		const graded = wrapper.findAll('nav[aria-label="Question results"] span')
+		expect(graded).toHaveLength(2)
+		expect(graded[0].classes()).toContain('bg-surface-green-6')
+		expect(graded[1].classes()).toContain('bg-surface-red-6')
+		wrapper.unmount()
 	})
 })

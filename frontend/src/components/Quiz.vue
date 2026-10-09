@@ -150,6 +150,32 @@
 								)
 							}}
 						</FeedbackBanner>
+						<!-- Tutor customization: the same read-only verdict replay on
+						     the card the learner sees once every attempt is spent,
+						     verdicting the most recent attempt. -->
+						<div
+							v-if="quiz.data.show_answers"
+							class="rounded-6 border border-outline-gray-2 p-3.5"
+						>
+							<div class="text-sm-semibold text-ink-gray-9">
+								{{ __('Questions') }}
+							</div>
+							<nav
+								:aria-label="__('Question results')"
+								class="mt-2 flex flex-wrap items-center gap-2"
+							>
+								<span
+									v-for="dot in gradedDots"
+									:key="dot.number"
+									:aria-label="dot.label"
+									:title="dot.label"
+									class="flex h-6 w-6 items-center justify-center rounded-full text-sm"
+									:class="dotStateClass[dot.state]"
+								>
+									{{ dot.number }}
+								</span>
+							</nav>
+						</div>
 						<Button v-if="inVideo" @click="props.backToVideo()">{{
 							__('Resume Video')
 						}}</Button>
@@ -541,6 +567,32 @@
 							}}
 						</p>
 					</div>
+					<!-- Tutor customization: a read-only verdict replay of the
+					     questions in the attempt's order, only when the quiz
+					     was configured to show answers. -->
+					<div
+						v-if="quiz.data.show_answers"
+						class="rounded-6 border border-outline-gray-2 p-3.5"
+					>
+						<div class="text-sm-semibold text-ink-gray-9">
+							{{ __('Questions') }}
+						</div>
+						<nav
+							:aria-label="__('Question results')"
+							class="mt-2 flex flex-wrap items-center gap-2"
+						>
+							<span
+								v-for="dot in gradedDots"
+								:key="dot.number"
+								:aria-label="dot.label"
+								:title="dot.label"
+								class="flex h-6 w-6 items-center justify-center rounded-full text-sm"
+								:class="dotStateClass[dot.state]"
+							>
+								{{ dot.number }}
+							</span>
+						</nav>
+					</div>
 					<div
 						v-if="
 							!quiz.data.max_attempts ||
@@ -635,9 +687,7 @@
 		</div>
 
 		<div
-			v-if="
-				activeQuestion > 0 && !quizSubmission.data && !quiz.data.show_answers
-			"
+			v-if="activeQuestion > 0 && !quizSubmission.data"
 			class="rounded-6 border border-outline-gray-2 p-3.5"
 		>
 			<div class="text-sm-semibold text-ink-gray-9">
@@ -648,23 +698,17 @@
 				class="mt-2 flex flex-wrap items-center gap-2"
 			>
 				<button
-					v-for="index in questions.length"
-					:key="index"
+					v-for="dot in attemptDots"
+					:key="dot.number"
 					type="button"
-					:aria-label="__('Question {0}').format(index)"
-					:aria-current="activeQuestion == index ? 'page' : undefined"
-					@click="switchQuestion(index)"
+					:aria-label="dot.label"
+					:title="dot.label"
+					:aria-current="activeQuestion == dot.number ? 'page' : undefined"
+					@click="switchQuestion(dot.number)"
 					class="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full text-sm"
-					:class="{
-						'bg-surface-gray-7 text-ink-base font-medium':
-							activeQuestion == index,
-						'bg-surface-blue-2 text-ink-blue-5':
-							activeQuestion != index && attemptedQuestions.includes(index),
-						'bg-surface-gray-3':
-							activeQuestion != index && !attemptedQuestions.includes(index),
-					}"
+					:class="dotStateClass[dot.state]"
 				>
-					{{ index }}
+					{{ dot.number }}
 				</button>
 			</nav>
 		</div>
@@ -825,6 +869,7 @@ import type {
 	QuizDetails,
 	QuizQuestionDetails,
 	QuizQuestionRow,
+	QuizResultRow,
 	QuizSubmissionResult,
 	QuizWithQuestions,
 	SavedAnswer,
@@ -1160,6 +1205,8 @@ const attemptsExhausted = computed(
 		(attempts.data?.length ?? 0) >= quiz.data.max_attempts
 )
 
+const latestAttemptName = computed(() => attempts.data?.[0]?.name)
+
 const { scheduleBlockReason, scheduleBlocked, scheduleMessage } =
 	useAssessmentSchedule(() => quiz.data, {
 		opensOn: (date) => __('This quiz opens on {0}.').format(date),
@@ -1209,6 +1256,119 @@ const attempts = createResource<QuizAttempt[]>({
 		})
 	},
 })
+
+// Verdict rows of one of the learner's own submissions, for the read-only
+// question-dot rows after the quiz is over. Read the whole submission doc:
+// the graded rows are its child table, and the submission doctype's rules
+// already restrict `frappe.client.get` to the learner's own submissions (and
+// their instructors'), so unlike check_answer there is no gate to open here.
+const submissionResults = createResource<QuizResultRow[]>({
+	url: 'frappe.client.get',
+	makeParams() {
+		return {
+			doctype: 'LMS Quiz Submission',
+			name: quizSubmission.data?.submission ?? latestAttemptName.value,
+		}
+	},
+	transform(doc: { result?: QuizResultRow[] } | null) {
+		return doc?.result ?? []
+	},
+})
+
+// The exhausted-attempts card has no submission of its own; it verdicts the
+// most recent attempt, so the rows have to load before the card can colour.
+// No `immediate`: attempts land asynchronously after mount, which triggers
+// this watch on the component's normal paths.
+watch(latestAttemptName, (name) => {
+	if (
+		name &&
+		quiz.data?.show_answers &&
+		attemptsExhausted.value &&
+		!quizSubmission.data
+	) {
+		submissionResults.fetch()
+	}
+})
+
+// --- Question dot verdicts -------------------------------------------------
+// The same dot row means three different things across the card's states:
+// during an attempt it tracks the learner's own checked answers, and once the
+// quiz is over it replays the graded rows of the latest submission. With
+// show_answers off, the dots stay plain navigation and never colour.
+type DotState = 'active' | 'attempted' | 'untouched' | 'correct' | 'wrong'
+
+const dotStateClass: Record<DotState, string> = {
+	active: 'bg-surface-gray-7 text-ink-base font-medium',
+	attempted: 'bg-surface-blue-2 text-ink-blue-5',
+	untouched: 'bg-surface-gray-3',
+	correct: 'bg-surface-green-6 text-ink-green-1',
+	wrong: 'bg-surface-red-6 text-ink-red-1',
+}
+
+// A question the learner has checked is green only when every option it
+// touched came back correct; any wrong or partial slot marks it red. A
+// restored-draft array of only undefined slots counts as no verdict.
+const liveDotVerdict = (index: number): AnswerVerdict | undefined => {
+	if (!quiz.data?.show_answers) return undefined
+	const verdicts = checkedVerdicts.value[questions.value[index - 1]?.question]
+	if (!verdicts?.length) return undefined
+	if (
+		!verdicts.some((verdict) => verdict === 0 || verdict === 1 || verdict === 2)
+	)
+		return undefined
+	return verdicts.some((verdict) => verdict == 0 || verdict == 2) ? 0 : 1
+}
+
+// The stored verdict is binary (is_correct 1/0). No row means the question
+// was never attempted, which the submission marks incorrect in its place.
+const gradedVerdictByName = computed(() => {
+	const map = new Map<string, AnswerVerdict>()
+	for (const row of submissionResults.data ?? []) {
+		if (!row?.question_name) continue
+		map.set(row.question_name, row.is_correct ? 1 : 0)
+	}
+	return map
+})
+
+const gradedDotVerdict = (index: number): AnswerVerdict | undefined => {
+	// null data means the graded rows have not loaded yet; colouring every
+	// dot red in the meantime would flash a false verdict on the result screen.
+	if (!Array.isArray(submissionResults.data)) return undefined
+	const name = questions.value[index - 1]?.question
+	if (!name) return undefined
+	return gradedVerdictByName.value.get(name) ?? 0
+}
+
+const dotState = (
+	index: number,
+	verdict: AnswerVerdict | undefined
+): DotState => {
+	if (verdict !== undefined) return verdict === 1 ? 'correct' : 'wrong'
+	if (activeQuestion.value == index) return 'active'
+	return attemptedQuestions.value.includes(index) ? 'attempted' : 'untouched'
+}
+
+// The label carries the verdict in words, so the colour is never the only cue.
+const dotLabel = (index: number, verdict: AnswerVerdict | undefined): string =>
+	verdict === undefined
+		? __('Question {0}').format(index)
+		: __('Question {0}: {1}').format(
+				index,
+				verdict === 1 ? __('Correct') : __('Incorrect')
+		  )
+
+const buildDots = (verdictFor: (index: number) => AnswerVerdict | undefined) =>
+	questions.value.map((_row, index) => {
+		const verdict = verdictFor(index + 1)
+		return {
+			number: index + 1,
+			state: dotState(index + 1, verdict),
+			label: dotLabel(index + 1, verdict),
+		}
+	})
+
+const attemptDots = computed(() => buildDots(liveDotVerdict))
+const gradedDots = computed(() => buildDots(gradedDotVerdict))
 
 const quizSubmission = createResource<QuizSubmissionResult>({
 	url: 'lms.lms.doctype.lms_quiz.lms_quiz.submit_quiz',
@@ -1348,6 +1508,9 @@ watch(
 	() => quizSubmission.data?.submission,
 	(submission) => {
 		if (submission) storedViolationLog.fetch()
+		// The result screen replays the submission's graded verdicts in the
+		// read-only question dots, so they load with the rest of the result.
+		if (submission && quiz.data?.show_answers) submissionResults.fetch()
 	}
 )
 
@@ -1720,6 +1883,7 @@ const resetQuiz = () => {
 	checkedVerdicts.value = {}
 	deadline.value = null
 	quizSubmission.reset()
+	submissionResults.reset()
 	violationCount.value = 0
 	proctoringActive.value = false
 	cameraReady.value = false

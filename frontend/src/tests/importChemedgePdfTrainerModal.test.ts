@@ -27,6 +27,23 @@ vi.mock('frappe-ui', () => ({
 			<button :disabled="disabled || loading"><slot /></button>
 		`,
 	},
+	// Minimal but functional: a native control behind the label, so the
+	// show-answers tests can read and toggle it like the real component.
+	Checkbox: {
+		props: ['label', 'modelValue', 'disabled'],
+		emits: ['update:modelValue'],
+		template: `
+			<label>
+				<input
+					type="checkbox"
+					:checked="!!modelValue"
+					:disabled="disabled"
+					@change="$emit('update:modelValue', $event.target.checked)"
+				/>
+				{{ label }}
+			</label>
+		`,
+	},
 	createResource: () => ({ submit: submitMock }),
 	Dialog: {
 		// Mirrors Dialog: v-model:open, title/actions props, default slot.
@@ -120,6 +137,7 @@ describe('ImportChemedgePdfTrainerModal: task number range', () => {
 		expect(submitMock).toHaveBeenCalledWith({
 			pdf_file: 'uploaded-trainer.pdf',
 			source_folder: '',
+			show_answers: 0,
 		})
 		wrapper.unmount()
 	})
@@ -135,6 +153,7 @@ describe('ImportChemedgePdfTrainerModal: task number range', () => {
 		expect(submitMock).toHaveBeenCalledWith({
 			pdf_file: 'uploaded-trainer.pdf',
 			source_folder: '',
+			show_answers: 0,
 			first_task_number: '1',
 			last_task_number: '30',
 		})
@@ -218,14 +237,60 @@ describe('ImportChemedgePdfTrainerModal: task number range', () => {
 		expect(submitMock).toHaveBeenNthCalledWith(1, {
 			pdf_file: 'uploaded-a.pdf',
 			source_folder: '',
+			show_answers: 0,
 			first_task_number: '1',
 			last_task_number: '30',
 		})
 		expect(submitMock).toHaveBeenNthCalledWith(2, {
 			pdf_file: 'uploaded-b.pdf',
 			source_folder: '',
+			show_answers: 0,
 			first_task_number: '31',
 			last_task_number: '60',
+		})
+		wrapper.unmount()
+	})
+})
+
+describe('ImportChemedgePdfTrainerModal: show answers option', () => {
+	it('leaves the show-answers checkbox unchecked by default', () => {
+		const wrapper = mountModal()
+		const checkbox = wrapper.get('input[type="checkbox"]')
+		expect((checkbox.element as HTMLInputElement).checked).toBe(false)
+		expect(wrapper.text()).toContain('Show correct answers')
+		wrapper.unmount()
+	})
+
+	it('sends show_answers 1 for every import while checked', async () => {
+		const wrapper = mountModal()
+		await addFile(wrapper, 'a.pdf')
+		await addFile(wrapper, 'b.pdf')
+		await wrapper.get('input[type="checkbox"]').setValue(true)
+		await importAll(wrapper)
+		expect(submitMock).toHaveBeenCalledTimes(2)
+		expect(submitMock).toHaveBeenNthCalledWith(1, {
+			pdf_file: 'uploaded-a.pdf',
+			source_folder: '',
+			show_answers: 1,
+		})
+		expect(submitMock).toHaveBeenNthCalledWith(2, {
+			pdf_file: 'uploaded-b.pdf',
+			source_folder: '',
+			show_answers: 1,
+		})
+		wrapper.unmount()
+	})
+
+	it('sends show_answers 0 again after the checkbox is unchecked', async () => {
+		const wrapper = mountModal()
+		await addFile(wrapper)
+		await wrapper.get('input[type="checkbox"]').setValue(true)
+		await wrapper.get('input[type="checkbox"]').setValue(false)
+		await importAll(wrapper)
+		expect(submitMock).toHaveBeenCalledWith({
+			pdf_file: 'uploaded-trainer.pdf',
+			source_folder: '',
+			show_answers: 0,
 		})
 		wrapper.unmount()
 	})
