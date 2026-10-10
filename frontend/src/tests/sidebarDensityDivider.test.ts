@@ -16,8 +16,44 @@ describe('owner-corrected compact sidebar and visible divider', () => {
 		expect(sidebar).toContain('flex flex-col gap-0.5')
 	})
 	it('keeps solid quiz actions secondary/primary even under native disabled utilities', () => {
-		expect(css).toMatch(/\.lms-quiz-secondary:disabled \{\s*background: var\(--lms-secondary\);\s*color: var\(--lms-action\)/)
-		expect(css).toMatch(/\.lms-quiz-primary:disabled \{\s*background: var\(--lms-action\);\s*color: var\(--lms-surface\)/)
+		expect(css).toMatch(
+			/\.lms-quiz-secondary:disabled \{\s*background: var\(--lms-secondary\);\s*color: var\(--lms-secondary-text\)/
+		)
+		expect(css).toMatch(
+			/\.lms-quiz-primary:disabled \{\s*background: var\(--lms-action\);\s*color: var\(--lms-surface\)/
+		)
+	})
+	it('keeps secondary quiz text accessible without changing the primary palette', () => {
+		expect(css).toContain('--lms-secondary: #d8eff1')
+		expect(css).toContain('--lms-secondary-text: #077581')
+		expect(css).toContain('--lms-action: #087985')
+		expect(css).toMatch(
+			/\.lms-quiz-secondary \{\s*background: var\(--lms-secondary\);\s*color: var\(--lms-secondary-text\)/
+		)
+		const luminance = (hex: string) => {
+			const channels = hex.match(/[a-f\d]{2}/gi)!.map((channel) => {
+				const value = parseInt(channel, 16) / 255
+				return value <= 0.04045
+					? value / 12.92
+					: ((value + 0.055) / 1.055) ** 2.4
+			})
+			return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722
+		}
+		expect(css).toMatch(
+			/\.lms-quiz-secondary:hover:not\(:disabled\) \{\s*background: var\(--lms-secondary-hover\);\s*color: var\(--lms-action-hover\)/
+		)
+		expect(css).toMatch(
+			/\.lms-quiz-secondary:active:not\(:disabled\) \{\s*background: var\(--lms-pressed\);\s*color: var\(--lms-action-pressed\)/
+		)
+		for (const [background, foreground] of [
+			['d8eff1', '077581'],
+			['c9e7ea', '066a75'],
+			['cde3e8', '055c66'],
+		]) {
+			expect(
+				(luminance(background) + 0.05) / (luminance(foreground) + 0.05)
+			).toBeGreaterThanOrEqual(4.5)
+		}
 	})
 	it('uses one softly travelling, hue-changing R6 wave on both surfaces, with a seamless loop and reduced-motion equivalent', () => {
 		expect(common).toContain(':is(.lms-tutor-theme, body[data-path="login"])')

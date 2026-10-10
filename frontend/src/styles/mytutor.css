@@ -21,6 +21,7 @@
 	--lms-hover: #dde9ee;
 	--lms-pressed: #cde3e8;
 	--lms-secondary: #d8eff1;
+	--lms-secondary-text: #077581;
 	--lms-secondary-hover: #c9e7ea;
 	--lms-field-border: #8197a4;
 	--lms-action-hover: #066a75;
@@ -255,14 +256,16 @@
 }
 .lms-tutor-theme .lms-quiz-secondary {
 	background: var(--lms-secondary);
-	color: var(--lms-action);
+	color: var(--lms-secondary-text);
 	border: 1px solid var(--lms-field-border);
 }
 .lms-tutor-theme .lms-quiz-secondary:hover:not(:disabled) {
 	background: var(--lms-secondary-hover);
+	color: var(--lms-action-hover);
 }
 .lms-tutor-theme .lms-quiz-secondary:active:not(:disabled) {
 	background: var(--lms-pressed);
+	color: var(--lms-action-pressed);
 }
 .lms-tutor-theme .lms-quiz-primary {
 	background: var(--lms-action);
@@ -277,7 +280,7 @@
 /* Native solid Button disabled utilities otherwise win at equal specificity. */
 .lms-tutor-theme .lms-quiz-secondary:disabled {
 	background: var(--lms-secondary);
-	color: var(--lms-action);
+	color: var(--lms-secondary-text);
 	border-color: var(--lms-field-border);
 }
 .lms-tutor-theme .lms-quiz-primary:disabled {
