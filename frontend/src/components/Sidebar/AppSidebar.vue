@@ -6,8 +6,8 @@
 		class="lms-sidebar"
 	>
 		<UserDropdown />
-		<div class="min-h-0 flex-1 overflow-y-auto px-3 pt-2">
-			<div v-if="sidebarSettings.data" class="flex flex-col gap-1">
+		<div class="min-h-0 flex-1 overflow-y-auto px-2 pt-1">
+			<div v-if="sidebarSettings.data" class="flex flex-col gap-0.5">
 				<template v-for="row in sidebarRows" :key="row.key">
 					<div v-if="row.kind === 'gap'" class="h-2.5" aria-hidden="true" />
 					<SidebarSection
@@ -27,7 +27,7 @@
 				</template>
 			</div>
 		</div>
-		<div class="mt-auto flex flex-col gap-1 px-2 pb-2">
+		<div class="mt-auto flex flex-col gap-0.5 px-2 pb-2">
 			<div
 				v-if="readOnlyMode && !sidebarStore.isSidebarCollapsed"
 				class="z-10 m-2 bg-surface-elevation-2 py-2.5 px-3 text-p-xs text-ink-gray-7 rounded-5"

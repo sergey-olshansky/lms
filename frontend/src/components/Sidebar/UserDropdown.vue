@@ -1,5 +1,5 @@
 <template>
-	<div class="py-2">
+	<div class="py-1">
 		<SidebarHeader
 			:title="userResource.data?.full_name || ''"
 			:subtitle="''"

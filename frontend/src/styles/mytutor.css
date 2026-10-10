@@ -127,22 +127,22 @@
 /* SidebarItem uses an outer stateful div and an inner actual control. Override
    both its active elevation/shadow and icon utility, without deleting focus. */
 .lms-tutor-theme .lms-sidebar [data-slot='sidebar-item'] {
-	min-height: 44px;
+	min-height: 32px;
 	height: auto;
-	border-radius: 10px;
+	border-radius: 8px;
 	background: transparent;
 	color: var(--lms-text-secondary);
 	box-shadow: none;
 }
 .lms-tutor-theme .lms-sidebar [data-slot='sidebar-item'] > :is(a, button) {
-	min-height: 44px;
-	padding-inline-start: 12px;
+	min-height: 32px;
+	padding-inline-start: 8px;
 	border-radius: inherit;
-	font-size: 16px;
+	font-size: 14px;
 }
 .lms-tutor-theme .lms-sidebar [data-slot='sidebar-item'] svg {
-	width: 20px;
-	height: 20px;
+	width: 16px;
+	height: 16px;
 	color: inherit;
 }
 .lms-tutor-theme .lms-sidebar [data-slot='sidebar-item']:hover {
@@ -176,15 +176,27 @@
 	box-shadow: none;
 }
 .lms-tutor-theme .lms-sidebar [data-slot='sidebar-header'] {
-	height: 56px;
-	padding-inline: 16px;
+	height: 40px;
+	padding-inline: 12px;
 }
 .lms-tutor-theme .lms-sidebar [data-slot='sidebar-header'] button {
-	min-height: 44px;
+	min-height: 32px;
 	min-width: 0;
 }
 .lms-tutor-theme .lms-sidebar [data-slot='sidebar-header'] button:hover {
 	background: var(--lms-hover);
+}
+/* Compact desktop targets remain >= WCAG 2.2's 24px minimum. Coarse
+   pointers retain generous targets without enlarging the desktop density. */
+@media (pointer: coarse) {
+	.lms-tutor-theme .lms-sidebar [data-slot='sidebar-item'],
+	.lms-tutor-theme .lms-sidebar [data-slot='sidebar-item'] > :is(a, button),
+	.lms-tutor-theme .lms-sidebar [data-slot='sidebar-header'] button {
+		min-height: 44px;
+	}
+	.lms-tutor-theme .lms-sidebar [data-slot='sidebar-header'] {
+		height: 48px;
+	}
 }
 .lms-tutor-theme .lms-home {
 	min-width: 0;

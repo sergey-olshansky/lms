@@ -13,17 +13,19 @@
 	content: "";
 	position: absolute;
 	inset: 0 0 -100%;
-	opacity: 0.06;
+	/* Owner correction: .06 over #e5eef2 rendered only 5–6 RGB levels.
+    Muted deeper hues at .28 provide a visible, still soft left-only wave. */
+	opacity: 0.28;
 	/* Two identical tiles: translation by one tile is an exact seamless loop.
     The vertical alpha mask travels WITH the hues. Every height therefore
     brightens and dims at a different phase, never as a full-line pulse. */
 	background: linear-gradient(
 		180deg,
-		#71c7cc,
-		#99bbd8,
-		#b7b0d5,
-		#99bbd8,
-		#71c7cc
+		#368b96,
+		#6285ab,
+		#8c7aa9,
+		#6285ab,
+		#368b96
 	);
 	background-size: 100% 50%;
 	-webkit-mask-image: linear-gradient(180deg, #000, rgb(0 0 0 / 0.3), #000);
