@@ -19,12 +19,14 @@ describe('owner-corrected compact sidebar and visible divider', () => {
 		expect(common).toContain(':is(.lms-tutor-theme, body[data-path="login"])')
 		expect(common).toContain('width: 12px')
 		expect(common).toContain('pointer-events: none')
-		expect(common).toContain('opacity: 0.28')
-		for (const hue of ['#368b96', '#6285ab', '#8c7aa9']) {
+		expect(common).toContain('opacity: calc(')
+		expect(common).toContain(' * 1.15)')
+		expect(common).toContain('.lms-ai-divider::after')
+		expect(common).toContain('animation-name: lms-ai-wave-blue')
+		for (const hue of ['#71c7cc', '#99bbd8', '#b7b0d5']) {
 			expect(common).toContain(hue)
 		}
 		expect(common).toContain('background-size: 100% 50%')
-		expect(common).toContain('mask-size: 100% 50%')
 		expect(common).toContain('animation: lms-ai-wave 24s linear infinite')
 		expect(common).toContain('transform: translateY(-50%)')
 		expect(common).toMatch(

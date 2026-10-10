@@ -460,6 +460,7 @@
 										<span>{{ __('Previous') }}</span>
 									</Button>
 									<Button
+										class="lms-quiz-secondary"
 										v-if="
 											quiz.data.show_answers &&
 											!showAnswers.length &&
@@ -482,7 +483,10 @@
 									>
 										<span>{{ __('Next') }}</span>
 									</Button>
-									<div v-else-if="!preview" class="flex items-center gap-2">
+									<div
+										v-if="activeQuestion == questions.length && !preview"
+										class="flex items-center gap-2"
+									>
 										<Button
 											v-if="!quiz.data.show_answers"
 											class="lms-quiz-secondary"
