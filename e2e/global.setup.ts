@@ -26,5 +26,19 @@ setup("authenticate", async ({ request }) => {
 		);
 	}
 
+	// Frappe creates the CSRF cookie on the first authenticated page request.
+	// Capture it in the saved state so browser requests made by the e2e
+	// project do not start with an authenticated sid but no CSRF token.
+	const appResponse = await request.get("/lms/courses");
+	if (!appResponse.ok()) {
+		throw new Error(
+			`Authenticated app bootstrap failed: ${appResponse.status()} ${await appResponse.text()}`
+		);
+	}
+
+	const state = await request.storageState();
+	if (!state.cookies.some((cookie) => cookie.name === "csrf_token")) {
+		throw new Error("Authenticated app bootstrap did not set the Frappe CSRF cookie");
+	}
 	await request.storageState({ path: authFile });
 });
