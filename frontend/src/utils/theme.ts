@@ -13,22 +13,9 @@ export type ThemePreference = Theme | 'system'
 const PREFERENCE_KEY = 'themePreference'
 const RESOLVED_KEY = 'theme'
 
-const prefersDark = (): boolean =>
-	typeof window !== 'undefined' &&
-	typeof window.matchMedia === 'function' &&
-	window.matchMedia('(prefers-color-scheme: dark)').matches
+const prefersDark = (): boolean => false
 
-const storedPreference = (): ThemePreference => {
-	const stored = localStorage.getItem(PREFERENCE_KEY)
-	if (stored === 'light' || stored === 'dark' || stored === 'system') {
-		return stored
-	}
-	// No preference key yet: inherit whatever the old single-key setup resolved
-	// to, so an existing user's choice survives the upgrade rather than snapping
-	// to system on first load after deploy.
-	const legacy = localStorage.getItem(RESOLVED_KEY)
-	return legacy === 'dark' || legacy === 'light' ? legacy : 'system'
-}
+const storedPreference = (): ThemePreference => 'light'
 
 const resolve = (preference: ThemePreference): Theme =>
 	preference === 'system' ? (prefersDark() ? 'dark' : 'light') : preference
@@ -42,10 +29,10 @@ const paint = (resolved: Theme): void => {
 	theme.value = resolved
 }
 
-const setThemePreference = (preference: ThemePreference): void => {
-	themePreference.value = preference
-	localStorage.setItem(PREFERENCE_KEY, preference)
-	paint(resolve(preference))
+const setThemePreference = (_preference: ThemePreference): void => {
+	themePreference.value = 'light'
+	localStorage.setItem(PREFERENCE_KEY, 'light')
+	paint('light')
 }
 
 // Paint at module init rather than from a component's onMounted. The previous
@@ -57,23 +44,15 @@ if (typeof document !== 'undefined') {
 	// paint(), not a bare setAttribute: `theme` is the resolved key index.html
 	// falls back to, and on a load where the user never touches the theme control
 	// nothing else writes it.
-	paint(theme.value)
+	paint('light')
 	// Writing the resolved key needs the preference written beside it. Otherwise
 	// storedPreference()'s legacy fallback reads that value back on the next load
 	// as a concrete choice, pinning a 'system' user to whatever their OS happened
 	// to be at first paint. The fallback only has to serve the upgrade from the
 	// old single-key setup, and it already ran above.
-	localStorage.setItem(PREFERENCE_KEY, themePreference.value)
+	localStorage.setItem(PREFERENCE_KEY, 'light')
 }
 
-// While the preference is 'system', follow the OS live rather than only at
-// load. Registered once at module scope; there is exactly one theme.
-if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
-	window
-		.matchMedia('(prefers-color-scheme: dark)')
-		.addEventListener('change', () => {
-			if (themePreference.value === 'system') paint(resolve('system'))
-		})
-}
+// Learner LMS remains light irrespective of operating-system preference.
 
 export { setThemePreference, theme, themePreference }

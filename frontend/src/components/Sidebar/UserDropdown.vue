@@ -1,21 +1,11 @@
 <template>
-	<div class="py-2">
+	<div class="py-1">
 		<SidebarHeader
-			:title="appName"
-			:subtitle="
-				userResource.data ? convertToTitleCase(userResource.data.full_name) : ''
-			"
+			:title="userResource.data?.full_name || ''"
+			:subtitle="''"
+			:showLogo="false"
 			:menuItems="userDropdownOptions"
 		>
-			<template #prefix>
-				<img
-					v-if="branding.data?.banner_image"
-					:src="safeUrl(branding.data?.banner_image.file_url)"
-					alt=""
-					class="size-full object-cover"
-				/>
-				<LMSLogo v-else class="size-full" />
-			</template>
 		</SidebarHeader>
 	</div>
 	<SettingsModal v-if="userResource.data?.is_moderator" />
@@ -25,16 +15,12 @@
 import { sessionStore } from '@/stores/session'
 import { call, createResource, SidebarHeader, toast } from 'frappe-ui'
 import { useRouter } from 'vue-router'
-import { convertToTitleCase } from '@/utils'
-import { setThemePreference, themePreference } from '@/utils/theme'
 import { usersStore } from '@/stores/user'
 import { useSettings } from '@/stores/settings'
-import { h, computed } from 'vue'
+import { computed } from 'vue'
 import { createDialog } from '@/utils/dialogs'
 import FrappeCloudIcon from '@/components/Icons/FrappeCloudIcon.vue'
-import LMSLogo from '@/components/Icons/LMSLogo.vue'
 import SettingsModal from '@/components/Settings/Settings.vue'
-import { safeUrl } from '@/utils/safeUrl'
 import { openExternal } from '@/utils/openExternal'
 import { pushSettingsHash } from '@/composables/useSettingsHash'
 
@@ -45,24 +31,6 @@ const settingsStore = useSettings()
 let { isLoggedIn } = sessionStore()
 const frappeCloudBaseEndpoint = 'https://frappecloud.com'
 const $dialog = createDialog
-
-const appName = computed(() =>
-	branding.data?.app_name && branding.data.app_name != 'Frappe'
-		? branding.data.app_name
-		: __('Learning')
-)
-
-// SidebarHeader passes no slots through to its Dropdown, so the check that
-// marks the current theme rides on each option instead.
-const themeCheck = {
-	suffix: ({ selected }) =>
-		selected
-			? h('span', {
-					class: 'lucide-check size-4 text-ink-gray-7',
-					'aria-hidden': 'true',
-			  })
-			: null,
-}
 
 const apps = createResource({
 	url: 'frappe.apps.get_apps',
@@ -125,33 +93,6 @@ const userDropdownOptions = computed(() => {
 					condition: () => {
 						return isLoggedIn
 					},
-				},
-				{
-					icon: 'lucide-sun-moon',
-					label: __('Theme'),
-					submenu: [
-						{
-							icon: 'lucide-sun',
-							label: __('Light'),
-							selected: themePreference.value === 'light',
-							slots: themeCheck,
-							onClick: () => setThemePreference('light'),
-						},
-						{
-							icon: 'lucide-moon',
-							label: __('Dark'),
-							selected: themePreference.value === 'dark',
-							slots: themeCheck,
-							onClick: () => setThemePreference('dark'),
-						},
-						{
-							icon: 'lucide-monitor',
-							label: __('System'),
-							selected: themePreference.value === 'system',
-							slots: themeCheck,
-							onClick: () => setThemePreference('system'),
-						},
-					],
 				},
 				{
 					icon: 'lucide-layout-grid',

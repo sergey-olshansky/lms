@@ -1,0 +1,261 @@
+@import "./mytutor-common.css";
+/* Native Frappe /login only; Desk and native alternative auth states are retained. */
+html:has(body[data-path="login"]) {
+	color-scheme: light;
+}
+body[data-path="login"] {
+	background: #f2f6f8;
+	color: #253039;
+	margin: 0;
+}
+body[data-path="login"] #page-login,
+body[data-path="login"] #page-login .page-content-wrapper {
+	min-height: 100dvh;
+	background: #f2f6f8;
+	padding: 0;
+	margin: 0;
+}
+/* Native website wrappers reserve header/breadcrumb space even without content. */
+body[data-path="login"] > .navbar,
+body[data-path="login"]
+	#page-login
+	:is(.page-breadcrumbs, .page-header-wrapper),
+body[data-path="login"] .web-footer {
+	display: none;
+}
+body[data-path="login"] #page-login main.container {
+	position: relative;
+	width: 100%;
+	max-width: none;
+	min-height: 100dvh;
+	padding: 0;
+	margin: 0;
+	display: flex;
+	align-items: stretch;
+}
+body[data-path="login"] #page-login .page_content {
+	position: relative;
+	isolation: isolate;
+	width: 100%;
+	min-height: 100dvh;
+	display: grid;
+	grid-template-columns: 66% 34%;
+	padding: 0;
+	margin: 0;
+}
+body[data-path="login"] #page-login .page_content::before {
+	content: "";
+	position: absolute;
+	inset: 0 34% 0 0;
+	background: #e5eef2;
+	border-right: 1px solid #d6e2e8;
+	z-index: -1;
+}
+body[data-path="login"] #page-login .page_content > .lms-ai-divider {
+	right: 34%;
+	z-index: 1;
+}
+body[data-path="login"] #page-login .lms-login-placeholder {
+	align-self: center;
+	margin: 48px 48px 48px clamp(48px, 9vw, 144px);
+	max-width: 640px;
+	min-width: 0;
+	color: #556975;
+}
+body[data-path="login"] #page-login .lms-login-placeholder p {
+	margin: 0 0 24px;
+	font-size: 20px;
+	line-height: 28px;
+	font-weight: 500;
+}
+body[data-path="login"] #page-login .lms-login-placeholder-lines {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+body[data-path="login"] #page-login .lms-login-placeholder-lines span {
+	height: 16px;
+	border-radius: 8px;
+	background: #cddee6;
+	opacity: 0.65;
+}
+/* The native root div wraps ALL hash-based forms. Size that column, not the
+   nested .for-login section (34% there used to compound with outer padding). */
+body[data-path="login"] #page-login .page_content > div:not(.lms-ai-divider) {
+	grid-column: 2;
+	min-width: 0;
+	padding: 32px;
+	align-self: center;
+}
+body[data-path="login"] #page-login .for-login {
+	width: 100%;
+	min-width: 0;
+	margin: 0;
+	padding: 0;
+}
+body[data-path="login"] #page-login .login-content.page-card {
+	width: 100%;
+	max-width: 400px;
+	padding: 0;
+	margin: 0 auto;
+	background: transparent;
+	border: 0;
+	border-radius: 0;
+	box-shadow: none;
+}
+body[data-path="login"] #page-login .for-login .app-logo,
+body[data-path="login"] #page-login .for-login .page-card-subtitle,
+body[data-path="login"]
+	#page-login
+	.for-login
+	.text-right:has(a[href="#forgot"]),
+body[data-path="login"] #page-login .for-login .btn-login-with-email-link {
+	display: none !important;
+}
+body[data-path="login"] #page-login .for-login .page-card-head {
+	padding: 0;
+	margin: 0;
+}
+body[data-path="login"] #page-login .for-login .page-card-head h4 {
+	font-size: 28px;
+	line-height: 36px;
+	margin: 0;
+	color: #253039;
+	font-weight: 700;
+}
+body[data-path="login"] #page-login .for-login .login-content {
+	gap: 32px;
+}
+body[data-path="login"] #page-login .form-login {
+	gap: 24px;
+}
+body[data-path="login"] #page-login .form-login .page-card-body {
+	gap: 20px;
+}
+body[data-path="login"] #page-login .form-group {
+	gap: 8px;
+}
+body[data-path="login"] #page-login label,
+body[data-path="login"] #page-login input::placeholder {
+	color: #556975;
+}
+body[data-path="login"] #page-login label {
+	font-size: 14px;
+	line-height: 20px;
+}
+body[data-path="login"] #page-login input.form-control {
+	height: 48px;
+	width: 100%;
+	padding: 12px 14px;
+	font-size: 16px;
+	color: #253039;
+	background: #fff;
+	border: 1px solid #8197a4;
+	border-radius: 12px;
+}
+body[data-path="login"] #page-login input.form-control:focus {
+	outline: 2px solid #087985;
+	outline-offset: 2px;
+	box-shadow: none;
+}
+body[data-path="login"] #page-login .es-button[data-variant="solid"] {
+	height: 48px;
+	background: #087985;
+	color: #fff;
+	border-radius: 12px;
+	font-size: 16px;
+	font-weight: 600;
+}
+body[data-path="login"]
+	#page-login
+	.es-button[data-variant="solid"]:hover:not(:disabled) {
+	background: #066a75;
+}
+body[data-path="login"]
+	#page-login
+	.es-button[data-variant="solid"]:active:not(:disabled) {
+	background: #055c66;
+}
+body[data-path="login"] #page-login .es-button:disabled {
+	opacity: 0.55;
+	cursor: not-allowed;
+}
+body[data-path="login"]
+	#page-login
+	:is(.es-button, .lms-password-toggle):focus-visible {
+	outline: 2px solid #087985;
+	outline-offset: 2px;
+}
+body[data-path="login"] #page-login .password-field {
+	position: relative;
+	width: 100%;
+}
+body[data-path="login"] #page-login #login_password {
+	padding-right: 52px;
+}
+body[data-path="login"] #page-login .lms-password-toggle {
+	position: absolute;
+	right: 2px;
+	top: 2px;
+	width: 44px;
+	height: 44px;
+	display: grid;
+	place-items: center;
+	border: 0;
+	border-radius: 10px;
+	background: transparent;
+	padding: 0;
+	color: #556975;
+	cursor: pointer;
+}
+body[data-path="login"] #page-login .lms-password-toggle:hover {
+	background: #dde9ee;
+}
+body[data-path="login"] #page-login .lms-password-toggle:active {
+	background: #cde3e8;
+}
+body[data-path="login"] #page-login .lms-password-toggle .toggle-password {
+	position: static;
+	width: 20px;
+	height: 20px;
+	margin: 0;
+	transform: none;
+}
+body[data-path="login"] #page-login .alert-danger,
+body[data-path="login"] #page-login .text-danger {
+	color: #b42318;
+}
+@media (max-width: 1023.98px) {
+	body[data-path="login"] #page-login .page_content {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	body[data-path="login"] #page-login .page_content::before,
+	body[data-path="login"] #page-login .lms-ai-divider,
+	body[data-path="login"] #page-login .lms-login-placeholder {
+		display: none;
+	}
+	body[data-path="login"]
+		#page-login
+		.page_content
+		> div:not(.lms-ai-divider) {
+		grid-column: 1;
+		padding: max(32px, env(safe-area-inset-top)) 20px
+			max(32px, env(safe-area-inset-bottom));
+	}
+}
+@media (max-width: 380px) {
+	body[data-path="login"]
+		#page-login
+		.page_content
+		> div:not(.lms-ai-divider) {
+		padding-inline: 16px;
+	}
+}
+@media (max-height: 600px) {
+	body[data-path="login"]
+		#page-login
+		.page_content
+		> div:not(.lms-ai-divider) {
+		align-self: start;
+	}
+}

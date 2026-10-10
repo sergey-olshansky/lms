@@ -7,13 +7,17 @@
 		>
 			{{ __('Skip to main content') }}
 		</a>
-		<div class="h-full border-e bg-surface-sidebar">
+		<div
+			class="h-full border-e bg-surface-sidebar lms-sidebar-edge"
+			aria-hidden="false"
+		>
 			<AppSidebar />
+			<span class="lms-ai-divider" aria-hidden="true" />
 		</div>
 		<main
 			id="main-content"
 			tabindex="-1"
-			class="flex-1 flex flex-col h-full overflow-auto bg-surface-base focus:outline-none"
+			class="flex-1 min-w-0 flex flex-col h-full overflow-auto bg-surface-base focus:outline-none"
 		>
 			<slot />
 		</main>

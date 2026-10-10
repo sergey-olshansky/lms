@@ -1,6 +1,6 @@
 <template>
 	<FrappeUIProvider>
-		<Layout class="isolate text-p-base">
+		<Layout class="isolate text-p-base lms-tutor-theme">
 			<router-view :route="background" />
 		</Layout>
 		<router-view v-if="background" />

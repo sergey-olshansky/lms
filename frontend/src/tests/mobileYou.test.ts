@@ -34,9 +34,7 @@ const {
 	logoutSubmit,
 	loadUnreadCount,
 	otherLinks,
-	setThemePreference,
 	sidebarLinks,
-	themePreference,
 	toggleNotifications,
 	unreadCount,
 	userResource,
@@ -49,9 +47,7 @@ const {
 	logoutSubmit: vi.fn(),
 	loadUnreadCount: vi.fn(),
 	otherLinks: { value: [] as unknown[] },
-	setThemePreference: vi.fn(),
 	sidebarLinks: { value: [] as unknown[] },
-	themePreference: { value: 'system' },
 	toggleNotifications: vi.fn(),
 	unreadCount: { value: 0 },
 	userResource: { data: null as Record<string, unknown> | null },
@@ -84,8 +80,6 @@ vi.mock('@/stores/notifications', () => ({
 	toggleNotifications,
 	unreadCount,
 }))
-
-vi.mock('@/utils/theme', () => ({ setThemePreference, themePreference }))
 
 import MobileYou from '@/pages/MobileYou.vue'
 
@@ -181,7 +175,7 @@ describe('a cold deep link to /you', () => {
 		otherLinks.value = []
 		const { wrapper } = await openYou()
 		expect(wrapper.text()).toContain('Raiza Safeel')
-		expect(wrapper.text()).toContain('Colour mode')
+		expect(wrapper.text()).not.toContain('Colour mode')
 	})
 
 	it('asks for the unread count itself', async () => {
@@ -210,7 +204,7 @@ describe('what the page shows', () => {
 		// settings surface, so there is no row here and no gate on one.
 		const { wrapper } = await openYou()
 		expect(rowLabelled(wrapper, 'Settings')).toBeUndefined()
-		expect(rowLabelled(wrapper, 'Colour mode')).toBeDefined()
+		expect(rowLabelled(wrapper, 'Colour mode')).toBeUndefined()
 	})
 })
 
@@ -244,34 +238,9 @@ describe('picking a row', () => {
 		expect(router.currentRoute.value.name).toBe('Certifications')
 	})
 
-	it('opens the colour-mode sheet rather than navigating away for it', async () => {
+	it('does not expose a theme-selection sheet', async () => {
 		const { wrapper } = await openYou()
-
-		expect(wrapper.find('[data-testid="colour-mode-sheet"]').exists()).toBe(
-			false
-		)
-
-		await rowLabelled(wrapper, 'Colour mode')?.trigger('click')
-
-		const sheet = wrapper.get('[data-testid="colour-mode-sheet"]')
-		expect(sheet.text()).toContain('System')
-		expect(sheet.text()).toContain('Light')
-		expect(sheet.text()).toContain('Dark')
-	})
-
-	it('sets the preference from the sheet and closes it', async () => {
-		const { wrapper } = await openYou()
-
-		await rowLabelled(wrapper, 'Colour mode')?.trigger('click')
-		await wrapper
-			.get('[data-testid="colour-mode-sheet"]')
-			.findAll('button')
-			.find((b) => b.text().includes('Dark'))
-			?.trigger('click')
-
-		expect(setThemePreference).toHaveBeenCalledWith('dark')
-		expect(wrapper.find('[data-testid="colour-mode-sheet"]').exists()).toBe(
-			false
-		)
+		expect(rowLabelled(wrapper, 'Colour mode')).toBeUndefined()
+		expect(wrapper.find('[data-testid="colour-mode-sheet"]').exists()).toBe(false)
 	})
 })

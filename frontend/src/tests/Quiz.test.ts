@@ -11,7 +11,7 @@ const resourceState = vi.hoisted(() => ({
 	submits: [] as string[],
 	response: null as any,
 	// Per-option verdict check_answer returns: 1 correct, 2 partial, 0 wrong.
-	checkAnswer: [] as unknown[],
+	checkAnswer: [] as unknown[] | number,
 	// Attempts list rows for frappe.client.get_list, newest first.
 	attempts: [] as any[],
 	// Submission docs keyed by name for frappe.client.get, the shape
@@ -624,8 +624,8 @@ describe('Quiz question dots', () => {
 
 		const dots = wrapper.findAll(`${dotsNav()} button`)
 		expect(dots).toHaveLength(2)
-		expect(dots[0].classes()).toContain('bg-surface-gray-7')
-		expect(dots[1].classes()).toContain('bg-surface-gray-3')
+		expect(dots[0].classes()).toContain('lms-dot-active')
+		expect(dots[1].classes()).toContain('lms-dot-untouched')
 
 		// Navigation still works: the dots move between questions.
 		await dots[1].trigger('click')
@@ -763,8 +763,20 @@ describe('Quiz question dots', () => {
 		await next!.trigger('click')
 		await flushPromises()
 
-		// The legacy navigation colouring survives: attempted reads blue.
-		expect(dots[0].classes()).toContain('bg-surface-blue-2')
+		// Answered navigation is distinct from current and graded correctness.
+		expect(dots[0].classes()).toContain('lms-dot-attempted')
+		expect(dots[1].attributes('aria-current')).toBe('page')
+		expect(next!.classes()).toContain('lms-quiz-secondary')
+		expect(
+			wrapper
+				.findAll('button')
+				.find((b) => b.text() === 'Finish Quiz')!
+				.classes()
+		).toContain('lms-quiz-primary')
+		wrapper.vm.markForReview(true, 1)
+		await flushPromises()
+		expect(dots[0].attributes('data-flagged')).toBe('true')
+		expect(dots[0].attributes('aria-label')).toContain('Mark for review')
 		for (const dot of dots) {
 			expect(dot.classes()).not.toContain('bg-surface-green-6')
 			expect(dot.classes()).not.toContain('bg-surface-red-6')
@@ -872,5 +884,36 @@ describe('Quiz exhausted attempts verdict dots', () => {
 		expect(graded[0].classes()).toContain('bg-surface-green-6')
 		expect(graded[1].classes()).toContain('bg-surface-red-6')
 		wrapper.unmount()
+	})
+})
+
+
+describe('owner R5 written-answer check action', () => {
+	it.each([0, 1])('keeps native User Input check, draft and verdict %i with secondary Check / primary Finish', async (verdict) => {
+		const response = quizResponse()
+		response.quiz.show_answers = 1
+		response.quiz.questions = [{ question: 'Q1', marks: 1 }]
+		response.questions_by_name.Q1.type = 'User Input'
+		resourceState.response = response
+		resourceState.checkAnswer = verdict
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await startQuiz(wrapper)
+		const check = wrapper.findAll('button').find((b) => b.text() === 'Check')!
+		expect(check.classes()).toContain('lms-quiz-secondary')
+		expect(wrapper.findAll('button').find((b) => b.text() === 'Finish Quiz')!.classes()).toContain('lms-quiz-primary')
+		wrapper.vm.possibleAnswer = 'Retained written answer'
+		await check.trigger('click')
+		await flushPromises()
+		expect(resourceState.request).toHaveBeenCalledWith('lms.lms.doctype.lms_quiz.lms_quiz.check_answer', undefined)
+		expect(wrapper.vm.possibleAnswer).toBe('Retained written answer')
+		expect(wrapper.find('[data-testid="quiz-feedback"]').text()).toContain(verdict ? 'Correct' : 'Incorrect')
+		expect(wrapper.findAll('button').find((b) => b.text() === 'Check')).toBeUndefined()
+		wrapper.unmount()
+		const restored = mountQuiz()
+		await flushPromises()
+		expect(restored.vm.possibleAnswer).toBe('Retained written answer')
+		expect(restored.find('[data-testid="quiz-feedback"]').text()).toContain(verdict ? 'Correct' : 'Incorrect')
+		restored.unmount()
 	})
 })

@@ -411,6 +411,8 @@
 							>
 								<FormControl
 									v-model="possibleAnswer"
+									class="lms-quiz-answer"
+									:aria-label="__('Answer')"
 									type="textarea"
 									:disabled="showAnswers.length ? true : false"
 								/>
@@ -449,14 +451,16 @@
 										{{ __('Marked by your instructor') }}
 									</span>
 								</div>
-								<div class="flex flex-1 justify-end gap-2">
+								<div class="flex flex-1 flex-wrap justify-end gap-2">
 									<Button
+										class="lms-quiz-secondary"
 										v-if="!quiz.data.show_answers && activeQuestion > 1"
 										@click="switchQuestion(activeQuestion - 1)"
 									>
 										<span>{{ __('Previous') }}</span>
 									</Button>
 									<Button
+										class="lms-quiz-secondary"
 										v-if="
 											quiz.data.show_answers &&
 											!showAnswers.length &&
@@ -468,6 +472,7 @@
 										<span>{{ __('Check') }}</span>
 									</Button>
 									<Button
+										class="lms-quiz-secondary"
 										v-else-if="activeQuestion != questions.length"
 										:variant="quiz.data.show_answers ? 'solid' : 'subtle'"
 										@click="
@@ -478,9 +483,13 @@
 									>
 										<span>{{ __('Next') }}</span>
 									</Button>
-									<div v-else-if="!preview" class="flex items-center gap-2">
+									<div
+										v-if="activeQuestion == questions.length && !preview"
+										class="flex items-center gap-2"
+									>
 										<Button
 											v-if="!quiz.data.show_answers"
+											class="lms-quiz-secondary"
 											:label="__('Next question')"
 											@click="switchQuestion(activeQuestion + 1)"
 											:disabled="activeQuestion == questions.length"
@@ -489,13 +498,18 @@
 												<span class="lucide-chevron-right size-4" />
 											</template>
 										</Button>
-										<Button variant="solid" @click="handleSubmitClick()">
+										<Button
+											class="lms-quiz-primary"
+											variant="solid"
+											@click="handleSubmitClick()"
+										>
 											<span>{{ __('Finish Quiz') }}</span>
 										</Button>
 									</div>
 									<!-- Tutor customization: the quiz can be finished early from any
 									     question, not only from the last one. -->
 									<Button
+										class="lms-quiz-primary"
 										v-if="!preview && activeQuestion != questions.length"
 										variant="solid"
 										@click="handleSubmitClick()"
@@ -701,14 +715,29 @@
 					v-for="dot in attemptDots"
 					:key="dot.number"
 					type="button"
-					:aria-label="dot.label"
+					:aria-label="
+						reviewQuestions.includes(dot.number)
+							? `${dot.label}: ${__('Mark for review')}`
+							: dot.label
+					"
+					:data-flagged="reviewQuestions.includes(dot.number)"
 					:title="dot.label"
 					:aria-current="activeQuestion == dot.number ? 'page' : undefined"
 					@click="switchQuestion(dot.number)"
-					class="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full text-sm"
+					class="lms-question-dot flex h-6 w-6 cursor-pointer items-center justify-center rounded-full text-sm"
 					:class="dotStateClass[dot.state]"
 				>
 					{{ dot.number }}
+					<span
+						v-if="
+							activeQuestion == dot.number &&
+							['correct', 'wrong'].includes(dot.state)
+						"
+						aria-hidden="true"
+						class="lms-dot-verdict"
+						:data-verdict="dot.state"
+						>{{ dot.state === 'correct' ? '✓' : '×' }}</span
+					>
 				</button>
 			</nav>
 		</div>
@@ -728,7 +757,12 @@
 					:key="index"
 					type="button"
 					@click="switchQuestion(index)"
-					class="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full bg-surface-gray-3 text-sm"
+					:aria-label="
+						__('Question {0}: {1}').format(index, __('Mark for review'))
+					"
+					data-flagged="true"
+					:aria-current="activeQuestion == index ? 'page' : undefined"
+					class="lms-question-dot lms-dot-untouched flex h-6 w-6 cursor-pointer items-center justify-center rounded-full text-sm"
 				>
 					{{ index }}
 				</button>
@@ -1298,9 +1332,9 @@ watch(latestAttemptName, (name) => {
 type DotState = 'active' | 'attempted' | 'untouched' | 'correct' | 'wrong'
 
 const dotStateClass: Record<DotState, string> = {
-	active: 'bg-surface-gray-7 text-ink-base font-medium',
-	attempted: 'bg-surface-blue-2 text-ink-blue-5',
-	untouched: 'bg-surface-gray-3',
+	active: 'lms-dot-active',
+	attempted: 'lms-dot-attempted',
+	untouched: 'lms-dot-untouched',
 	correct: 'bg-surface-green-6 text-ink-green-1',
 	wrong: 'bg-surface-red-6 text-ink-red-1',
 }

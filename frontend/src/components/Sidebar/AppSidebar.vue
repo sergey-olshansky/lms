@@ -1,13 +1,12 @@
 <template>
 	<Sidebar
-		:collapsed="sidebarStore.isSidebarCollapsed"
+		:collapsed="false"
 		width="14rem"
 		:ariaLabel="__('Main')"
-		class="border-e"
-		@update:collapsed="setCollapsed"
+		class="lms-sidebar"
 	>
 		<UserDropdown />
-		<div class="min-h-0 flex-1 overflow-y-auto px-2 pt-2">
+		<div class="min-h-0 flex-1 overflow-y-auto px-2 pt-1">
 			<div v-if="sidebarSettings.data" class="flex flex-col gap-0.5">
 				<template v-for="row in sidebarRows" :key="row.key">
 					<div v-if="row.kind === 'gap'" class="h-2.5" aria-hidden="true" />
@@ -28,7 +27,7 @@
 				</template>
 			</div>
 		</div>
-		<div class="mt-auto flex flex-col gap-1 px-2 pb-2">
+		<div class="mt-auto flex flex-col gap-0.5 px-2 pb-2">
 			<div
 				v-if="readOnlyMode && !sidebarStore.isSidebarCollapsed"
 				class="z-10 m-2 bg-surface-elevation-2 py-2.5 px-3 text-p-xs text-ink-gray-7 rounded-5"
@@ -39,28 +38,6 @@
 					)
 				}}
 			</div>
-			<template v-if="isStudent && !profileIsComplete">
-				<SidebarItem
-					v-if="sidebarStore.isSidebarCollapsed"
-					:label="__('Complete your profile')"
-					icon="lucide-user"
-					:route="profileRoute"
-					:active="false"
-				/>
-				<SidebarCard
-					v-else
-					:title="__('Complete your profile')"
-					:description="
-						__('Highlight what makes you unique and show your skills.')
-					"
-					icon="lucide-user"
-					:action="{
-						label: __('My Profile'),
-						route: profileRoute,
-						iconLeft: 'lucide-chevrons-right',
-					}"
-				/>
-			</template>
 			<TrialBanner
 				v-if="
 					userResource.data?.is_system_manager && userResource.data?.is_fc_site
@@ -115,12 +92,6 @@
 					/>
 				</Tooltip>
 			</div>
-			<SidebarCollapseToggle
-				class="mt-1"
-				:aria-label="
-					sidebarStore.isSidebarCollapsed ? __('Expand') : __('Collapse')
-				"
-			/>
 		</div>
 		<HelpModal
 			data-testid="onboarding-help-modal"
@@ -153,7 +124,6 @@ import {
 	call,
 	Sidebar,
 	SidebarCard,
-	SidebarCollapseToggle,
 	SidebarItem,
 	SidebarSection,
 	Tooltip,
@@ -275,11 +245,6 @@ const updateUnreadCount = () => {
 			}
 		})
 	})
-}
-
-const setCollapsed = (collapsed) => {
-	sidebarStore.isSidebarCollapsed = collapsed
-	localStorage.setItem('isSidebarCollapsed', JSON.stringify(collapsed))
 }
 
 const getFirstCourse = async () => {

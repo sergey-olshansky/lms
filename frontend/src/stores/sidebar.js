@@ -8,11 +8,8 @@ export const useSidebar = defineStore('sidebar', () => {
 	// only a group the reader has opened is stored.
 	const openSidebarGroups = ref({})
 
-	if (localStorage.getItem('isSidebarCollapsed')) {
-		isSidebarCollapsed.value = JSON.parse(
-			localStorage.getItem('isSidebarCollapsed')
-		)
-	}
+	// Always start expanded. Keep the legacy key untouched, but do not let an
+	// old collapsed preference strand users in the narrow sidebar.
 
 	// A reader who had the old single disclosure open keeps it open, under the
 	// key the synthesised group now uses.
