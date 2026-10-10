@@ -6,17 +6,24 @@
 	width: 14px;
 	overflow: hidden;
 	pointer-events: none;
-	/* Owner R6 clarification: absolute 10% composite opacity, applied once.
-	   One painted layer; both masks only attenuate, never add brightness. */
-	opacity: 0.10;
-	-webkit-mask-image: linear-gradient(to right, transparent, #000);
-	mask-image: linear-gradient(to right, transparent, #000);
+	/* R7: no global attenuation. A 2px colour core and a nonlinear soft
+	   falloff paint inward only; the vertical mask supplies ONE local wave.
+	   Normal source-over compositing keeps colour visible on pale surfaces. */
+	opacity: 1;
+	-webkit-mask-image: linear-gradient(to right,
+		transparent, rgb(0 0 0 / 0.04) 25%, rgb(0 0 0 / 0.16) 50%,
+		rgb(0 0 0 / 0.32) 75%, rgb(0 0 0 / 0.4) calc(100% - 2px),
+		rgb(0 0 0 / 0.82) calc(100% - 2px));
+	mask-image: linear-gradient(to right,
+		transparent, rgb(0 0 0 / 0.04) 25%, rgb(0 0 0 / 0.16) 50%,
+		rgb(0 0 0 / 0.32) 75%, rgb(0 0 0 / 0.4) calc(100% - 2px),
+		rgb(0 0 0 / 0.82) calc(100% - 2px));
 }
 :is(.lms-tutor-theme, body[data-path="login"]) .lms-ai-divider::before {
 	content: "";
 	position: absolute;
 	inset: 0 0 -100%;
-	background-color: #71c7cc;
+	background-color: #49aeb8;
 	/* One broad cosine-like local intensity envelope per surface height.
 	   Repeated identical tiles and a one-tile translation join seamlessly.
 	   The whole single wave changes hue, not separate coloured layers. */
@@ -46,9 +53,9 @@
 	}
 }
 @keyframes lms-ai-hue {
-	0%, 100% { background-color: #71c7cc; }
-	33.333333% { background-color: #99bbd8; }
-	66.666667% { background-color: #b7b0d5; }
+	0%, 100% { background-color: #49aeb8; }
+	33.333333% { background-color: #739fcb; }
+	66.666667% { background-color: #a399cb; }
 }
 @media (prefers-reduced-motion: reduce) {
 	:is(.lms-tutor-theme, body[data-path="login"]) .lms-ai-divider::before {

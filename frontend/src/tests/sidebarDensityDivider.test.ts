@@ -55,18 +55,22 @@ describe('owner-corrected compact sidebar and visible divider', () => {
 			).toBeGreaterThanOrEqual(4.5)
 		}
 	})
-	it('uses one softly travelling, hue-changing R6 wave on both surfaces, with a seamless loop and reduced-motion equivalent', () => {
+	it('uses one softly travelling, hue-changing R7 wave on both surfaces, with a seamless loop and reduced-motion equivalent', () => {
 		expect(common).toContain(':is(.lms-tutor-theme, body[data-path="login"])')
 		expect(common).toContain('width: 14px')
 		expect(common).toContain('pointer-events: none')
-		expect(common).toContain('opacity: 0.10')
+		expect(common).toContain('opacity: 1')
 		expect(common.match(/opacity:/g)).toHaveLength(1)
+		expect(common).toContain('rgb(0 0 0 / 0.82) calc(100% - 2px)')
+		expect(common).toContain('rgb(0 0 0 / 0.16) 50%')
+		expect(common).not.toContain('mix-blend-mode')
+		expect(common).not.toContain('filter: blur')
 		expect(common).not.toContain('.lms-ai-divider::after')
 		expect(common).not.toContain('lms-ai-wave-blue')
 		expect(common).toContain('lms-ai-hue 24s ease-in-out infinite')
-		expect(common).toContain('0%, 100% { background-color: #71c7cc; }')
+		expect(common).toContain('0%, 100% { background-color: #49aeb8; }')
 		expect(common).toContain('rgb(0 0 0 / 0.8536) 37.5%')
-		for (const hue of ['#71c7cc', '#99bbd8', '#b7b0d5']) {
+		for (const hue of ['#49aeb8', '#739fcb', '#a399cb']) {
 			expect(common).toContain(hue)
 		}
 		expect(common).toContain('mask-size: 100% 50%')
