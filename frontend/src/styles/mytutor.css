@@ -274,6 +274,16 @@
 .lms-tutor-theme .lms-quiz-primary:active:not(:disabled) {
 	background: var(--lms-action-pressed);
 }
+/* Native solid Button disabled utilities otherwise win at equal specificity. */
+.lms-tutor-theme .lms-quiz-secondary:disabled {
+	background: var(--lms-secondary);
+	color: var(--lms-action);
+	border-color: var(--lms-field-border);
+}
+.lms-tutor-theme .lms-quiz-primary:disabled {
+	background: var(--lms-action);
+	color: var(--lms-surface);
+}
 .lms-tutor-theme :is(.lms-quiz-primary, .lms-quiz-secondary):disabled {
 	opacity: 0.55;
 	cursor: not-allowed;

@@ -15,6 +15,10 @@ describe('owner-corrected compact sidebar and visible divider', () => {
 		expect(sidebar).toContain('overflow-y-auto px-2 pt-1')
 		expect(sidebar).toContain('flex flex-col gap-0.5')
 	})
+	it('keeps solid quiz actions secondary/primary even under native disabled utilities', () => {
+		expect(css).toMatch(/\.lms-quiz-secondary:disabled \{\s*background: var\(--lms-secondary\);\s*color: var\(--lms-action\)/)
+		expect(css).toMatch(/\.lms-quiz-primary:disabled \{\s*background: var\(--lms-action\);\s*color: var\(--lms-surface\)/)
+	})
 	it('uses the measured visible wave on both surfaces, with a seamless loop and reduced-motion equivalent', () => {
 		expect(common).toContain(':is(.lms-tutor-theme, body[data-path="login"])')
 		expect(common).toContain('width: 12px')
