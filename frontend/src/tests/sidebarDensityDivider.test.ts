@@ -19,18 +19,21 @@ describe('owner-corrected compact sidebar and visible divider', () => {
 		expect(css).toMatch(/\.lms-quiz-secondary:disabled \{\s*background: var\(--lms-secondary\);\s*color: var\(--lms-action\)/)
 		expect(css).toMatch(/\.lms-quiz-primary:disabled \{\s*background: var\(--lms-action\);\s*color: var\(--lms-surface\)/)
 	})
-	it('uses the measured visible wave on both surfaces, with a seamless loop and reduced-motion equivalent', () => {
+	it('uses one softly travelling, hue-changing R6 wave on both surfaces, with a seamless loop and reduced-motion equivalent', () => {
 		expect(common).toContain(':is(.lms-tutor-theme, body[data-path="login"])')
-		expect(common).toContain('width: 12px')
+		expect(common).toContain('width: 14px')
 		expect(common).toContain('pointer-events: none')
-		expect(common).toContain('opacity: calc(')
-		expect(common).toContain(' * 1.15)')
-		expect(common).toContain('.lms-ai-divider::after')
-		expect(common).toContain('animation-name: lms-ai-wave-blue')
+		expect(common).toContain('opacity: 0.10')
+		expect(common.match(/opacity:/g)).toHaveLength(1)
+		expect(common).not.toContain('.lms-ai-divider::after')
+		expect(common).not.toContain('lms-ai-wave-blue')
+		expect(common).toContain('lms-ai-hue 24s ease-in-out infinite')
+		expect(common).toContain('0%, 100% { background-color: #71c7cc; }')
+		expect(common).toContain('rgb(0 0 0 / 0.8536) 37.5%')
 		for (const hue of ['#71c7cc', '#99bbd8', '#b7b0d5']) {
 			expect(common).toContain(hue)
 		}
-		expect(common).toContain('background-size: 100% 50%')
+		expect(common).toContain('mask-size: 100% 50%')
 		expect(common).toContain('animation: lms-ai-wave 24s linear infinite')
 		expect(common).toContain('transform: translateY(-50%)')
 		expect(common).toMatch(

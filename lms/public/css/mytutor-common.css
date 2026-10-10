@@ -1,50 +1,41 @@
-/* Shared, non-interactive left-only decoration. Only this 12px layer clips. */
+/* Shared, non-interactive left-only decoration. Only this 14px layer clips. */
 :is(.lms-tutor-theme, body[data-path="login"]) .lms-ai-divider {
 	position: absolute;
 	inset-block: 0;
 	right: 0;
-	width: 12px;
+	width: 14px;
 	overflow: hidden;
 	pointer-events: none;
-	/* One composite gain, not two stacked global opacities. Calibrated against
-	   the R4 rendered composition (10.2140817901 mean sRGB contrast versus
-	   16.9337821502 at full gain). Normalize first (including browser alpha quantization), then +15% relative. */
-	opacity: calc(0.5958520833905926 * 1.15);
+	/* Owner R6 clarification: absolute 10% composite opacity, applied once.
+	   One painted layer; both masks only attenuate, never add brightness. */
+	opacity: 0.10;
 	-webkit-mask-image: linear-gradient(to right, transparent, #000);
 	mask-image: linear-gradient(to right, transparent, #000);
 }
-:is(.lms-tutor-theme, body[data-path="login"]) .lms-ai-divider::before,
-:is(.lms-tutor-theme, body[data-path="login"]) .lms-ai-divider::after {
+:is(.lms-tutor-theme, body[data-path="login"]) .lms-ai-divider::before {
 	content: "";
 	position: absolute;
 	inset: 0 0 -100%;
-	/* Identical repeated tiles give exact loop continuity. Each colour has
-	   its own travelling intensity envelope, not a shared monochrome mask. */
-	background-size: 100% 50%;
-	animation: lms-ai-wave 24s linear infinite;
-}
-:is(.lms-tutor-theme, body[data-path="login"]) .lms-ai-divider::before {
-	background-image: linear-gradient(
-		180deg,
-		rgb(113 199 204 / 0.04),
-		#71c7cc 25%,
-		rgb(113 199 204 / 0.04) 50%,
-		rgb(113 199 204 / 0.04)
+	background-color: #71c7cc;
+	/* One broad cosine-like local intensity envelope per surface height.
+	   Repeated identical tiles and a one-tile translation join seamlessly.
+	   The whole single wave changes hue, not separate coloured layers. */
+	-webkit-mask-image: linear-gradient(
+		180deg, transparent, rgb(0 0 0 / 0.1464) 12.5%,
+		rgb(0 0 0 / 0.5) 25%, rgb(0 0 0 / 0.8536) 37.5%,
+		#000 50%, rgb(0 0 0 / 0.8536) 62.5%,
+		rgb(0 0 0 / 0.5) 75%, rgb(0 0 0 / 0.1464) 87.5%, transparent
 	);
-}
-:is(.lms-tutor-theme, body[data-path="login"]) .lms-ai-divider::after {
-	background-image: linear-gradient(
-		180deg,
-		rgb(153 187 216 / 0.04),
-		rgb(153 187 216 / 0.04) 50%,
-		#99bbd8 65%,
-		#b7b0d5 80%,
-		rgb(153 187 216 / 0.04)
+	mask-image: linear-gradient(
+		180deg, transparent, rgb(0 0 0 / 0.1464) 12.5%,
+		rgb(0 0 0 / 0.5) 25%, rgb(0 0 0 / 0.8536) 37.5%,
+		#000 50%, rgb(0 0 0 / 0.8536) 62.5%,
+		rgb(0 0 0 / 0.5) 75%, rgb(0 0 0 / 0.1464) 87.5%, transparent
 	);
-	/* Independently eased travel, with separated peak phase. Unlike opposite
-	   directions, these envelopes never collide into a single scanning beam. */
-	animation-name: lms-ai-wave-blue;
-	animation-timing-function: ease-in-out;
+	-webkit-mask-size: 100% 50%;
+	mask-size: 100% 50%;
+	animation: lms-ai-wave 24s linear infinite,
+		lms-ai-hue 24s ease-in-out infinite;
 }
 @keyframes lms-ai-wave {
 	from {
@@ -54,16 +45,13 @@
 		transform: translateY(0);
 	}
 }
-@keyframes lms-ai-wave-blue {
-	0% { transform: translateY(-50%); }
-	25% { transform: translateY(-42%); }
-	50% { transform: translateY(-25%); }
-	75% { transform: translateY(-8%); }
-	100% { transform: translateY(0); }
+@keyframes lms-ai-hue {
+	0%, 100% { background-color: #71c7cc; }
+	33.333333% { background-color: #99bbd8; }
+	66.666667% { background-color: #b7b0d5; }
 }
 @media (prefers-reduced-motion: reduce) {
-	:is(.lms-tutor-theme, body[data-path="login"]) .lms-ai-divider::before,
-	:is(.lms-tutor-theme, body[data-path="login"]) .lms-ai-divider::after {
+	:is(.lms-tutor-theme, body[data-path="login"]) .lms-ai-divider::before {
 		animation: none;
 	}
 }
