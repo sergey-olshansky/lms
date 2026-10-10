@@ -1,9 +1,9 @@
-/* Shared, non-interactive left-only decoration. Only this 14px layer clips. */
+/* Shared, non-interactive left-only decoration. Only this 12px layer clips. */
 :is(.lms-tutor-theme, body[data-path="login"]) .lms-ai-divider {
 	position: absolute;
 	inset-block: 0;
 	right: 0;
-	width: 14px;
+	width: 12px;
 	overflow: hidden;
 	pointer-events: none;
 	/* R7: no global attenuation. A 2px colour core and a nonlinear soft
@@ -24,25 +24,33 @@
 	position: absolute;
 	inset: 0 0 -100%;
 	background-color: #49aeb8;
-	/* One broad cosine-like local intensity envelope per surface height.
+	/* One broad, slightly asymmetric intensity envelope per surface height.
 	   Repeated identical tiles and a one-tile translation join seamlessly.
-	   The whole single wave changes hue, not separate coloured layers. */
+	   Each point brightens and fades as this single wave passes. */
 	-webkit-mask-image: linear-gradient(
-		180deg, transparent, rgb(0 0 0 / 0.1464) 12.5%,
-		rgb(0 0 0 / 0.5) 25%, rgb(0 0 0 / 0.8536) 37.5%,
-		#000 50%, rgb(0 0 0 / 0.8536) 62.5%,
-		rgb(0 0 0 / 0.5) 75%, rgb(0 0 0 / 0.1464) 87.5%, transparent
+		180deg, transparent, rgb(0 0 0 / 0.04) 8%,
+		rgb(0 0 0 / 0.16) 18%, rgb(0 0 0 / 0.4) 30%,
+		rgb(0 0 0 / 0.74) 42%, #000 50%,
+		rgb(0 0 0 / 0.9) 58%, rgb(0 0 0 / 0.64) 70%,
+		rgb(0 0 0 / 0.34) 82%, rgb(0 0 0 / 0.12) 92%, transparent
 	);
 	mask-image: linear-gradient(
-		180deg, transparent, rgb(0 0 0 / 0.1464) 12.5%,
-		rgb(0 0 0 / 0.5) 25%, rgb(0 0 0 / 0.8536) 37.5%,
-		#000 50%, rgb(0 0 0 / 0.8536) 62.5%,
-		rgb(0 0 0 / 0.5) 75%, rgb(0 0 0 / 0.1464) 87.5%, transparent
+		180deg, transparent, rgb(0 0 0 / 0.04) 8%,
+		rgb(0 0 0 / 0.16) 18%, rgb(0 0 0 / 0.4) 30%,
+		rgb(0 0 0 / 0.74) 42%, #000 50%,
+		rgb(0 0 0 / 0.9) 58%, rgb(0 0 0 / 0.64) 70%,
+		rgb(0 0 0 / 0.34) 82%, rgb(0 0 0 / 0.12) 92%, transparent
 	);
 	-webkit-mask-size: 100% 50%;
 	mask-size: 100% 50%;
-	animation: lms-ai-wave 24s linear infinite,
-		lms-ai-hue 24s ease-in-out infinite;
+	animation:
+		lms-ai-wave 48s linear(
+			0, 0.1112 10%, 0.2187 20%, 0.3182 30%, 0.4112 40%,
+			0.5 50%, 0.5888 60%, 0.6818 70%, 0.7813 80%, 0.8888 90%, 1
+		)
+		infinite,
+		lms-ai-hue 48s ease-in-out infinite,
+		lms-ai-breathe 19s ease-in-out infinite;
 }
 @keyframes lms-ai-wave {
 	from {
@@ -51,6 +59,10 @@
 	to {
 		transform: translateY(0);
 	}
+}
+@keyframes lms-ai-breathe {
+	0%, 100% { opacity: 0.82; }
+	50% { opacity: 1; }
 }
 @keyframes lms-ai-hue {
 	0%, 100% { background-color: #49aeb8; }
