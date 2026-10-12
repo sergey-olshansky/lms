@@ -305,11 +305,27 @@ def rewrite_private_media(content: str) -> str:
 	if not content:
 		return content
 	endpoint = "/api/method/lms.lms.doctype.course_lesson.course_lesson.serve_resource?file_url="
-	return re.sub(
-		r"/private/files/([^\"'\\]+)",
-		lambda m: endpoint + quote(m.group(0)),
-		content,
-	)
+
+	def rewrite(value):
+		if isinstance(value, dict):
+			return {key: rewrite(item) for key, item in value.items()}
+		if isinstance(value, list):
+			return [rewrite(item) for item in value]
+		if isinstance(value, str):
+			return re.sub(
+				r"/private/files/([^\"'\\<>\r\n]+)",
+				lambda m: endpoint + quote(m.group(0), safe=""),
+				value,
+			)
+		return value
+
+	# EditorJS JSON escapes characters such as № as \u2116. Decode before
+	# rewriting so the whole filename is encoded, rather than just its prefix.
+	try:
+		data = json.loads(content)
+	except ValueError:
+		return rewrite(content)
+	return json.dumps(rewrite(data), ensure_ascii=False)
 
 
 def get_instructors(doctype: str, docname: str):
@@ -1961,6 +1977,7 @@ def get_lesson(course: str, chapter: int, lesson: int) -> dict:
 	# through the access-gated serve_resource endpoint.
 	lesson_details.content = rewrite_private_media(lesson_details.content)
 	lesson_details.instructor_content = rewrite_private_media(lesson_details.instructor_content)
+	lesson_details.body = rewrite_private_media(lesson_details.body)
 
 	return lesson_details
 

@@ -130,6 +130,64 @@ class TestServeResourceUnderscoreFilename(BaseTestUtils):
 		frappe.db.set_value("File", self.pdf.name, {"attached_to_doctype": None, "attached_to_name": None})
 		self.assertTrue(_resolve_lesson_references(self.file_url))
 
+	def test_unattached_json_escaped_pdf_served_only_to_members(self):
+		original_url = self.file_url
+		try:
+			for filename in ("Urok №29.pdf", "Урок 1.pdf", "Lesson 🧪.pdf"):
+				for escaped_slashes in (False, True):
+					with self.subTest(filename=filename, escaped_slashes=escaped_slashes):
+						self.file_url = f"/private/files/{filename}"
+						frappe.db.set_value(
+							"File",
+							self.pdf.name,
+							{
+								"file_url": self.file_url,
+								"attached_to_doctype": None,
+								"attached_to_name": None,
+							},
+						)
+						content = json.dumps(
+							{
+								"blocks": [
+									{
+										"type": "upload",
+										"data": {"file_url": self.file_url, "file_type": "PDF"},
+									}
+								]
+							}
+						)
+						if escaped_slashes:
+							content = content.replace("/", "\\/")
+						frappe.db.set_value("Course Lesson", self.lesson.name, "content", content)
+						self.assertIsNotNone(self._serve_as(self.student.email))
+						with self.assertRaises(frappe.PermissionError):
+							self._serve_as(self.outsider.email)
+		finally:
+			self.file_url = original_url
+
+	def test_json_escaped_instructor_pdf_stays_private(self):
+		original_url = self.file_url
+		try:
+			self.file_url = "/private/files/Instructor №29.pdf"
+			frappe.db.set_value(
+				"File",
+				self.pdf.name,
+				{"file_url": self.file_url, "attached_to_doctype": None, "attached_to_name": None},
+			)
+			frappe.db.set_value(
+				"Course Lesson",
+				self.lesson.name,
+				{
+					"content": None,
+					"instructor_content": json.dumps({"blocks": [{"data": {"file_url": self.file_url}}]}),
+				},
+			)
+			with self.assertRaises(frappe.PermissionError):
+				self._serve_as(self.student.email)
+			self.assertIsNotNone(self._serve_as(self.instructor.email))
+		finally:
+			self.file_url = original_url
+
 	# --- user-facing behaviour ----------------------------------------------------
 
 	def test_enrolled_student_served(self):
