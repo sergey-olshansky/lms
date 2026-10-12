@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import inspect
+import json
 from functools import cache
 from typing import NamedTuple
 from urllib.parse import unquote
@@ -248,14 +249,21 @@ def _resolve_lesson_references(file_url: str) -> list[_LessonReference]:
 	# Module_1_Introduction.pdf) silently matched nothing, denying enrolled students and
 	# preview guests their own lesson media.
 	lesson = frappe.qb.DocType("Course Lesson")
+	# Content can contain the literal URL or JSON's escaped spelling (including
+	# Unicode and optional escaped slashes). Keep LOCATE's literal matching; LIKE
+	# would turn filename characters such as _ and % into permission wildcards.
+	url_spellings = {
+		file_url,
+		json.dumps(file_url, ensure_ascii=True)[1:-1],
+		json.dumps(file_url, ensure_ascii=False)[1:-1],
+	}
+	url_spellings |= {url.replace("/", "\\/") for url in url_spellings}
 	fields = [(f, False) for f in STUDENT_CONTENT_FIELDS] + [(f, True) for f in INSTRUCTOR_FIELDS]
 	for field, instructor_only in fields:
-		names = (
-			frappe.qb.from_(lesson)
-			.select(lesson.name)
-			.where(Locate(file_url, lesson[field]) > 0)
-			.run(pluck=True)
-		)
+		matches = Locate(file_url, lesson[field]) > 0
+		for spelling in url_spellings - {file_url}:
+			matches |= Locate(spelling, lesson[field]) > 0
+		names = frappe.qb.from_(lesson).select(lesson.name).where(matches).run(pluck=True)
 		for name in names:
 			refs.append(_LessonReference(name, instructor_only, False, canonical_owner, True, True))
 

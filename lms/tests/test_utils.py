@@ -44,9 +44,44 @@ from lms.lms.utils import (
 	has_student_role,
 	is_instructor,
 	resolve_page_length,
+	rewrite_private_media,
 	sanitize_editorjs,
 	slugify,
 )
+
+
+class TestRewritePrivateMedia(UnitTestCase):
+	def test_json_escaped_filenames_reach_the_gated_endpoint(self):
+		from urllib.parse import parse_qs, urlsplit
+
+		for filename in ("Urok №29.pdf", "Урок 1.pdf", "Lesson 🧪.pdf", "report_50%.pdf"):
+			for escaped_slashes in (False, True):
+				with self.subTest(filename=filename, escaped_slashes=escaped_slashes):
+					url = f"/private/files/{filename}"
+					content = json.dumps({"blocks": [{"type": "upload", "data": {"file_url": url}}]})
+					if escaped_slashes:
+						content = content.replace("/", "\\/")
+					result = rewrite_private_media(content)
+					served_url = json.loads(result)["blocks"][0]["data"]["file_url"]
+					parts = urlsplit(served_url)
+					self.assertTrue(parts.path.endswith(".serve_resource"))
+					self.assertEqual(parse_qs(parts.query)["file_url"], [url])
+					self.assertEqual(rewrite_private_media(result), result)
+
+	def test_legacy_html_rewrites_without_swallowing_markup(self):
+		from urllib.parse import quote
+
+		url = "/private/files/Urok №29.pdf"
+		html = f'<a href="{url}">PDF</a>'
+		result = rewrite_private_media(html)
+		self.assertIn("file_url=" + quote(url, safe=""), result)
+		self.assertTrue(result.endswith('">PDF</a>'))
+
+	def test_other_content_is_preserved(self):
+		self.assertEqual(rewrite_private_media(None), None)
+		self.assertEqual(rewrite_private_media(""), "")
+		data = {"blocks": [{"data": {"url": "/files/public.pdf", "count": 2, "enabled": True}}]}
+		self.assertEqual(json.loads(rewrite_private_media(json.dumps(data))), data)
 
 
 class TestLMSUtils(BaseTestUtils):
