@@ -1,3 +1,48 @@
+@property --lms-teal-center {
+	syntax: "<percentage>";
+	inherits: false;
+	initial-value: 26%;
+}
+@property --lms-teal-span {
+	syntax: "<percentage>";
+	inherits: false;
+	initial-value: 22%;
+}
+@property --lms-teal-colour {
+	syntax: "<color>";
+	inherits: false;
+	initial-value: rgb(61 197 199 / 0.9);
+}
+@property --lms-blue-center {
+	syntax: "<percentage>";
+	inherits: false;
+	initial-value: 50%;
+}
+@property --lms-blue-span {
+	syntax: "<percentage>";
+	inherits: false;
+	initial-value: 24%;
+}
+@property --lms-blue-colour {
+	syntax: "<color>";
+	inherits: false;
+	initial-value: rgb(103 165 224 / 0.9);
+}
+@property --lms-lavender-center {
+	syntax: "<percentage>";
+	inherits: false;
+	initial-value: 74%;
+}
+@property --lms-lavender-span {
+	syntax: "<percentage>";
+	inherits: false;
+	initial-value: 22%;
+}
+@property --lms-lavender-colour {
+	syntax: "<color>";
+	inherits: false;
+	initial-value: rgb(164 147 214 / 0.9);
+}
 /* Shared, non-interactive left-only decoration. Only this 14px layer clips. */
 :is(.lms-tutor-theme, body[data-path="login"]) .lms-ai-divider {
 	position: absolute;
@@ -24,11 +69,15 @@
 	position: absolute;
 	inset: 0 0 -100%;
 	background-color: #49aeb8;
-	/* Three neighbouring cool hues, tiled with the single intensity envelope.
-	   Translucent stops retain the slow underlying hue change. */
-	background-image: linear-gradient(180deg,
-		rgb(74 194 204 / 0.72), rgb(114 169 214 / 0.72) 50%,
-		rgb(166 155 211 / 0.72));
+	/* Three simultaneous colour blooms share one travelling wave. Each bloom
+	   changes its own height and shade on a different, seamless cycle. */
+	background-image:
+		linear-gradient(180deg, transparent calc(var(--lms-teal-center) - var(--lms-teal-span)),
+			var(--lms-teal-colour) var(--lms-teal-center), transparent calc(var(--lms-teal-center) + var(--lms-teal-span))),
+		linear-gradient(180deg, transparent calc(var(--lms-blue-center) - var(--lms-blue-span)),
+			var(--lms-blue-colour) var(--lms-blue-center), transparent calc(var(--lms-blue-center) + var(--lms-blue-span))),
+		linear-gradient(180deg, transparent calc(var(--lms-lavender-center) - var(--lms-lavender-span)),
+			var(--lms-lavender-colour) var(--lms-lavender-center), transparent calc(var(--lms-lavender-center) + var(--lms-lavender-span)));
 	background-size: 100% 50%;
 	/* One broad, slightly asymmetric intensity envelope per surface height.
 	   Repeated identical tiles and a one-tile translation join seamlessly.
@@ -56,7 +105,10 @@
 		)
 		infinite,
 		lms-ai-hue 48s ease-in-out infinite,
-		lms-ai-breathe 19s ease-in-out infinite;
+		lms-ai-breathe 19s ease-in-out infinite,
+		lms-ai-teal-bloom 37s ease-in-out infinite,
+		lms-ai-blue-bloom 47s ease-in-out infinite,
+		lms-ai-lavender-bloom 59s ease-in-out infinite;
 }
 @keyframes lms-ai-wave {
 	from {
@@ -87,4 +139,16 @@
 	:is(.lms-tutor-theme, body[data-path="login"]) .lms-ai-divider {
 		display: none;
 	}
+}
+@keyframes lms-ai-teal-bloom {
+	0%, 100% { --lms-teal-center: 26%; --lms-teal-span: 22%; --lms-teal-colour: rgb(61 197 199 / 0.9); }
+	50% { --lms-teal-center: 34%; --lms-teal-span: 34%; --lms-teal-colour: rgb(83 174 216 / 0.9); }
+}
+@keyframes lms-ai-blue-bloom {
+	0%, 100% { --lms-blue-center: 50%; --lms-blue-span: 24%; --lms-blue-colour: rgb(103 165 224 / 0.9); }
+	50% { --lms-blue-center: 43%; --lms-blue-span: 15%; --lms-blue-colour: rgb(145 155 222 / 0.9); }
+}
+@keyframes lms-ai-lavender-bloom {
+	0%, 100% { --lms-lavender-center: 74%; --lms-lavender-span: 22%; --lms-lavender-colour: rgb(164 147 214 / 0.9); }
+	50% { --lms-lavender-center: 66%; --lms-lavender-span: 32%; --lms-lavender-colour: rgb(121 176 211 / 0.9); }
 }

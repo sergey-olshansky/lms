@@ -63,10 +63,18 @@ describe('owner-corrected compact sidebar and visible divider', () => {
 		expect(common).toContain('lms-ai-breathe 19s ease-in-out infinite')
 		expect(common).toContain('rgb(0 0 0 / 0.98) calc(100% - 1px)')
 		expect(common).toContain('rgb(0 0 0 / 0.30) 50%')
-		expect(common).toContain('background-image: linear-gradient(180deg,')
-		expect(common).toContain('rgb(74 194 204 / 0.72)')
-		expect(common).toContain('rgb(114 169 214 / 0.72) 50%')
-		expect(common).toContain('rgb(166 155 211 / 0.72)')
+		for (const [colour, period] of [
+			['teal', 37],
+			['blue', 47],
+			['lavender', 59],
+		]) {
+			expect(common).toContain(`@property --lms-${colour}-span`)
+			expect(common).toContain(`@property --lms-${colour}-colour`)
+			expect(common).toContain(`var(--lms-${colour}-colour)`)
+			expect(common).toContain(
+				`lms-ai-${colour}-bloom ${period}s ease-in-out infinite`
+			)
+		}
 		expect(common).toContain('background-size: 100% 50%')
 		expect(common).not.toContain('mix-blend-mode')
 		expect(common).not.toContain('filter: blur')
