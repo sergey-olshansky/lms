@@ -57,7 +57,7 @@ describe('owner-corrected compact sidebar and visible divider', () => {
 	})
 	it('uses two complementary living streams with a confident core on both surfaces, with a seamless loop and reduced-motion equivalent', () => {
 		expect(common).toContain(':is(.lms-tutor-theme, body[data-path="login"])')
-		expect(common).toContain('width: 22px')
+		expect(common).toContain('width: 27px')
 		expect(common).toContain('pointer-events: none')
 		expect(common).toContain('opacity: 1')
 		expect(common).toContain('lms-ai-breathe 19s ease-in-out infinite')
@@ -82,8 +82,8 @@ describe('owner-corrected compact sidebar and visible divider', () => {
 		expect(common).toContain('lms-ai-presence 41s ease-in-out infinite')
 		expect(common).toContain('-20.5s')
 		expect(common).toContain('mask-composite: intersect')
-		expect(common).toContain('--lms-stream-width: 6px')
-		expect(common).toContain('--lms-stream-width: 20px')
+		expect(common).toContain('--lms-stream-width: 10px')
+		expect(common).toContain('--lms-stream-width: 25px')
 		expect(common).toContain(
 			'opacity: calc(var(--lms-presence) * var(--lms-density))'
 		)
