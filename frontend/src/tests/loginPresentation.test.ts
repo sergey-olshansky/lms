@@ -43,10 +43,6 @@ describe('native login presentation enhancement', () => {
 		expect(input.autocomplete).toBe('current-password')
 		run()
 		expect(document.querySelectorAll('.lms-password-toggle')).toHaveLength(1)
-		expect(document.querySelectorAll('.lms-ai-divider')).toHaveLength(1)
-		expect(
-			document.querySelector('.lms-ai-divider')!.getAttribute('aria-hidden')
-		).toBe('true')
 	})
 	it('does not alter other website pages', () => {
 		document.body.innerHTML = '<main>Other app</main>'

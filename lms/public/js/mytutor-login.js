@@ -66,6 +66,9 @@ const mountLoginPresentation = () => {
 	const third = document.createElement("span");
 	third.className = "lms-ai-stream-third";
 	edge.append(third);
+	const halo = document.createElement("span");
+	halo.className = "lms-ai-halo";
+	edge.append(halo);
 	content.append(edge);
 	window.lmsDividerMotion?.start(edge);
 };

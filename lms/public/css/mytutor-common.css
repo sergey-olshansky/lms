@@ -1,3 +1,68 @@
+@property --lms-halo-strength {
+	syntax: "<number>";
+	inherits: false;
+	initial-value: 0;
+}
+@property --lms-halo-y {
+	syntax: "<percentage>";
+	inherits: false;
+	initial-value: 50%;
+}
+@property --lms-halo-colour {
+	syntax: "<color>";
+	inherits: false;
+	initial-value: #a5bddb;
+}
+@property --lms-halo-colour-two {
+	syntax: "<color>";
+	inherits: false;
+	initial-value: #72c8cf;
+}
+@property --lms-halo-colour-three {
+	syntax: "<color>";
+	inherits: false;
+	initial-value: #b29cda;
+}
+@property --lms-meet-first {
+ syntax: "<length>";
+ inherits: true;
+ initial-value: 0px;
+}
+@property --lms-meet-second {
+ syntax: "<length>";
+ inherits: true;
+ initial-value: 0px;
+}
+@property --lms-meet-third {
+ syntax: "<length>";
+ inherits: true;
+ initial-value: 0px;
+}
+@property --lms-result-pop {
+ syntax: "<number>";
+ inherits: true;
+ initial-value: 0;
+}
+@property --lms-sunset {
+ syntax: "<number>";
+ inherits: true;
+ initial-value: 0;
+}
+@property --lms-success-converge {
+	syntax: "<number>";
+	inherits: true;
+	initial-value: 0;
+}
+@property --lms-success-warmth {
+	syntax: "<number>";
+	inherits: true;
+	initial-value: 0;
+}
+@property --lms-flash-intensity {
+	syntax: "<number>";
+	inherits: true;
+	initial-value: 1;
+}
 @property --lms-third-colour {
 	syntax: "<color>";
 	inherits: false;
@@ -103,12 +168,12 @@
 	inherits: false;
 	initial-value: rgb(164 147 214 / 0.9);
 }
-/* Shared, non-interactive left-only decoration. Only this 42px envelope clips. */
+/* Shared, non-interactive left-only decoration. Only this inward-facing envelope clips. */
 :is(.lms-tutor-theme, body[data-path="login"]) .lms-ai-divider {
 	position: absolute;
 	inset-block: 0;
 	right: 0;
-	width: 42px;
+	width: 260px;
 	overflow: hidden;
 	/* Isolate only this decoration, so light can mix without trapping UI. */
 	isolation: isolate;
@@ -125,20 +190,20 @@
 	content: "";
 	position: absolute;
 	inset: 0 0 -100% auto;
-	width: var(--lms-stream-width);
-	opacity: calc(var(--lms-presence) * var(--lms-density) * 0.72);
-	filter: brightness(calc(var(--lms-ink) * var(--lms-breath))) saturate(var(--lms-saturation));
+	width: calc(var(--lms-stream-width) * (1 + var(--lms-success-converge) * .4 + var(--lms-result-pop) * .16) * (1 + var(--lms-sunset) * 2.2));
+	opacity: clamp(0, calc(max(var(--lms-presence), var(--lms-success-converge)) * var(--lms-density) * 0.72 * var(--lms-flash-intensity)), 1);
+	filter: brightness(calc(var(--lms-ink) * var(--lms-breath) * (1 + var(--lms-success-converge) * .12))) saturate(var(--lms-saturation)) saturate(calc(1 + var(--lms-success-converge) * .32)) blur(calc(var(--lms-sunset) * 1.8px));
 	background-color: #49aeb8;
 	/* A faint procedural grain scatters light like fine sand, without blur.
 	   Three simultaneous colour blooms in each travelling stream. Each bloom
 	   changes its own height and shade on a different, seamless cycle. */
 	background-image:
 		linear-gradient(180deg, transparent calc(var(--lms-teal-center) - var(--lms-teal-span)),
-			var(--lms-teal-colour) var(--lms-teal-center), transparent calc(var(--lms-teal-center) + var(--lms-teal-span))),
+			color-mix(in srgb, var(--lms-teal-colour) calc(100% - var(--lms-success-warmth) * 92%), var(--lms-result-teal, #ff6655)) var(--lms-teal-center), transparent calc(var(--lms-teal-center) + var(--lms-teal-span))),
 		linear-gradient(180deg, transparent calc(var(--lms-blue-center) - var(--lms-blue-span)),
-			var(--lms-blue-colour) var(--lms-blue-center), transparent calc(var(--lms-blue-center) + var(--lms-blue-span))),
+			color-mix(in srgb, var(--lms-blue-colour) calc(100% - var(--lms-success-warmth) * 92%), var(--lms-result-blue, #f04457)) var(--lms-blue-center), transparent calc(var(--lms-blue-center) + var(--lms-blue-span))),
 		linear-gradient(180deg, transparent calc(var(--lms-lavender-center) - var(--lms-lavender-span)),
-			var(--lms-lavender-colour) var(--lms-lavender-center), transparent calc(var(--lms-lavender-center) + var(--lms-lavender-span)));
+			color-mix(in srgb, var(--lms-lavender-colour) calc(100% - var(--lms-success-warmth) * 92%), var(--lms-result-lavender, #df3c69)) var(--lms-lavender-center), transparent calc(var(--lms-lavender-center) + var(--lms-lavender-span)));
 	background-size: 100% 50%;
 	background-blend-mode: screen;
 	mix-blend-mode: screen;
@@ -150,22 +215,34 @@
 		rgb(0 0 0 / 0.60) 75%, rgb(0 0 0 / 0.72) calc(100% - 2px),
 		rgb(0 0 0 / 0.92) calc(100% - 1px),
 		rgb(0 0 0 / 0.38) calc(100% - 0.25px), transparent), linear-gradient(
-		180deg, transparent, rgb(0 0 0 / 0.04) 8%,
-		rgb(0 0 0 / 0.22) 18%, rgb(0 0 0 / 0.5) 30%,
-		rgb(0 0 0 / 0.82) 42%, #000 50%,
-		rgb(0 0 0 / 0.96) 58%, rgb(0 0 0 / 0.76) 70%,
-		rgb(0 0 0 / 0.44) 82%, rgb(0 0 0 / 0.18) 92%, transparent
+		180deg, transparent calc(50% + -50% * (1 - var(--lms-sunset) * .85)),
+		rgb(0 0 0 / 0.04) calc(50% + -42% * (1 - var(--lms-sunset) * .85)),
+		rgb(0 0 0 / 0.22) calc(50% + -32% * (1 - var(--lms-sunset) * .85)),
+		rgb(0 0 0 / 0.5) calc(50% + -20% * (1 - var(--lms-sunset) * .85)),
+		rgb(0 0 0 / 0.82) calc(50% + -8% * (1 - var(--lms-sunset) * .85)),
+		#000 calc(50% + 0% * (1 - var(--lms-sunset) * .85)),
+		rgb(0 0 0 / 0.96) calc(50% + 8% * (1 - var(--lms-sunset) * .85)),
+		rgb(0 0 0 / 0.76) calc(50% + 20% * (1 - var(--lms-sunset) * .85)),
+		rgb(0 0 0 / 0.44) calc(50% + 32% * (1 - var(--lms-sunset) * .85)),
+		rgb(0 0 0 / 0.18) calc(50% + 42% * (1 - var(--lms-sunset) * .85)),
+		transparent calc(50% + 50% * (1 - var(--lms-sunset) * .85))
 	), url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2296%22%20height%3D%2296%22%3E%3Cfilter%20id%3D%22sand%22%3E%3CfeTurbulence%20type%3D%22fractalNoise%22%20baseFrequency%3D%22.72%22%20numOctaves%3D%223%22%20stitchTiles%3D%22stitch%22%2F%3E%3CfeColorMatrix%20type%3D%22matrix%22%20values%3D%220%200%200%200%200%200%200%200%200%200%200%200%200%200%200%20.16%200%200%200%20.84%22%2F%3E%3C%2Ffilter%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20filter%3D%22url%28%23sand%29%22%2F%3E%3C%2Fsvg%3E");
 	mask-image: linear-gradient(to right,
 		transparent, rgb(0 0 0 / 0.12) 25%, rgb(0 0 0 / 0.36) 50%,
 		rgb(0 0 0 / 0.60) 75%, rgb(0 0 0 / 0.72) calc(100% - 2px),
 		rgb(0 0 0 / 0.92) calc(100% - 1px),
 		rgb(0 0 0 / 0.38) calc(100% - 0.25px), transparent), linear-gradient(
-		180deg, transparent, rgb(0 0 0 / 0.04) 8%,
-		rgb(0 0 0 / 0.22) 18%, rgb(0 0 0 / 0.5) 30%,
-		rgb(0 0 0 / 0.82) 42%, #000 50%,
-		rgb(0 0 0 / 0.96) 58%, rgb(0 0 0 / 0.76) 70%,
-		rgb(0 0 0 / 0.44) 82%, rgb(0 0 0 / 0.18) 92%, transparent
+		180deg, transparent calc(50% + -50% * (1 - var(--lms-sunset) * .85)),
+		rgb(0 0 0 / 0.04) calc(50% + -42% * (1 - var(--lms-sunset) * .85)),
+		rgb(0 0 0 / 0.22) calc(50% + -32% * (1 - var(--lms-sunset) * .85)),
+		rgb(0 0 0 / 0.5) calc(50% + -20% * (1 - var(--lms-sunset) * .85)),
+		rgb(0 0 0 / 0.82) calc(50% + -8% * (1 - var(--lms-sunset) * .85)),
+		#000 calc(50% + 0% * (1 - var(--lms-sunset) * .85)),
+		rgb(0 0 0 / 0.96) calc(50% + 8% * (1 - var(--lms-sunset) * .85)),
+		rgb(0 0 0 / 0.76) calc(50% + 20% * (1 - var(--lms-sunset) * .85)),
+		rgb(0 0 0 / 0.44) calc(50% + 32% * (1 - var(--lms-sunset) * .85)),
+		rgb(0 0 0 / 0.18) calc(50% + 42% * (1 - var(--lms-sunset) * .85)),
+		transparent calc(50% + 50% * (1 - var(--lms-sunset) * .85))
 	), url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2296%22%20height%3D%2296%22%3E%3Cfilter%20id%3D%22sand%22%3E%3CfeTurbulence%20type%3D%22fractalNoise%22%20baseFrequency%3D%22.72%22%20numOctaves%3D%223%22%20stitchTiles%3D%22stitch%22%2F%3E%3CfeColorMatrix%20type%3D%22matrix%22%20values%3D%220%200%200%200%200%200%200%200%200%200%200%200%200%200%200%20.16%200%200%200%20.84%22%2F%3E%3C%2Ffilter%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20filter%3D%22url%28%23sand%29%22%2F%3E%3C%2Fsvg%3E");
 	-webkit-mask-size: 100% 100%, 100% 50%, 96px 96px;
 	mask-size: 100% 100%, 100% 50%, 96px 96px;
@@ -189,10 +266,10 @@
 }
 @keyframes lms-ai-wave {
 	from {
-		transform: translateX(var(--lms-drift)) translateY(-50%);
+		transform: translateX(0) translateY(-50%);
 	}
 	to {
-		transform: translateX(var(--lms-drift)) translateY(0);
+		transform: translateX(0) translateY(0);
 	}
 }
 @keyframes lms-ai-breathe {
@@ -266,8 +343,8 @@
 }
 
 @keyframes lms-ai-wave-wander {
-	from { transform: translateX(var(--lms-drift)) translateY(-50%); }
-	to { transform: translateX(var(--lms-drift)) translateY(0); }
+	from { transform: translateX(0) translateY(-50%); }
+	to { transform: translateX(0) translateY(0); }
 }
 
 /* The tile meets itself exactly; this moves only the very fine grain. */
@@ -279,13 +356,13 @@
 /* A softly present third stream prevents the edge from fading away as the
    first pair alternates. Registered properties let random changes melt in. */
 :is(.lms-tutor-theme, body[data-path="login"]) .lms-ai-stream-third {
-	width: var(--lms-third-width);
-	filter: brightness(calc(1.04 * var(--lms-breath))) saturate(90%);
-	opacity: calc(var(--lms-third-gain) * 0.6);
+	width: calc(var(--lms-third-width) * (1 + var(--lms-success-converge) * .4 + var(--lms-result-pop) * .16) * (1 + var(--lms-sunset) * 2.2));
+	filter: brightness(calc(1.04 * var(--lms-breath) * (1 + var(--lms-success-converge) * .12))) saturate(90%) saturate(calc(1 + var(--lms-success-converge) * .32)) blur(calc(var(--lms-sunset) * 1.8px));
+	opacity: clamp(0, calc(var(--lms-third-gain) * 0.6 * var(--lms-flash-intensity)), 1);
 	background-color: rgb(89 146 175 / 0.35);
 	background-image: linear-gradient(180deg,
 		transparent calc(var(--lms-third-center) - var(--lms-third-span)),
-		var(--lms-third-colour) var(--lms-third-center),
+		color-mix(in srgb, var(--lms-third-colour) calc(100% - var(--lms-success-warmth) * 92%), var(--lms-result-third, #f45854)) var(--lms-third-center),
 		transparent calc(var(--lms-third-center) + var(--lms-third-span)));
 	animation-name: lms-ai-wave-third, none, lms-ai-breathe, none,
 		lms-ai-drift, none, none, none, none, lms-ai-sand-drift;
@@ -296,8 +373,8 @@
 		--lms-third-gain 8s ease-in-out, --lms-third-width 10s ease-in-out;
 }
 @keyframes lms-ai-wave-third {
-	from { transform: translateX(var(--lms-drift)) translateY(-50%); }
-	to { transform: translateX(var(--lms-drift)) translateY(0); }
+	from { transform: translateX(0) translateY(-50%); }
+	to { transform: translateX(0) translateY(0); }
 }
 @media (prefers-reduced-motion: reduce) {
 	:is(.lms-tutor-theme, body[data-path="login"]) .lms-ai-stream-third {
@@ -305,4 +382,50 @@
 		transition: none;
 		opacity: 0.25;
 	}
+}
+
+
+.lms-ai-divider.success-active .lms-ai-halo { visibility: hidden; }
+.lms-ai-divider.success-gather { animation: lms-result-pop 1.8s ease-in-out both; }
+@keyframes lms-result-pop {
+ 0%, 34%, 100% { --lms-result-pop: 0; }
+ 58% { --lms-result-pop: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+ .lms-ai-divider.success-gather { animation: none; }
+}
+/* Avoid additive whitening while the success streams overlap. */
+.lms-ai-divider.success-gather::before,
+.lms-ai-divider.success-gather::after,
+.lms-ai-divider.success-gather .lms-ai-stream-third {
+ background-blend-mode: normal;
+ mix-blend-mode: normal;
+}
+.lms-ai-divider.success-gather::before {
+ transform: translateX(0) translateY(calc(var(--lms-meet-first) + var(--lms-sunset) * 6px)) !important;
+}
+.lms-ai-divider.success-gather::after {
+ transform: translateX(0) translateY(calc(var(--lms-meet-second) + var(--lms-sunset) * 12px)) !important;
+}
+.lms-ai-divider.success-gather .lms-ai-stream-third {
+ transform: translateX(0) translateY(calc(var(--lms-meet-third) + var(--lms-sunset) * 19px)) !important;
+}
+
+/* A collision blooms inward only; its radius and light follow actual overlap. */
+:is(.lms-tutor-theme, body[data-path="login"]) .lms-ai-halo {
+	position: absolute;
+	inset: 0 0 0 auto;
+	width: calc(110px + var(--lms-halo-strength) * 75px);
+	opacity: calc(var(--lms-halo-strength) * 0.62);
+	background:
+		radial-gradient(ellipse 90% 15% at 100% calc(var(--lms-halo-y) - 3%), color-mix(in srgb, var(--lms-halo-colour-two) 26%, transparent), transparent 72%),
+		radial-gradient(ellipse 100% 19% at 100% var(--lms-halo-y), color-mix(in srgb, var(--lms-halo-colour) 38%, transparent), color-mix(in srgb, var(--lms-halo-colour) 16%, transparent) 38%, transparent 76%),
+		radial-gradient(ellipse 90% 15% at 100% calc(var(--lms-halo-y) + 3%), color-mix(in srgb, var(--lms-halo-colour-three) 24%, transparent), transparent 74%);
+	mix-blend-mode: screen;
+	transition: --lms-halo-strength 2.8s ease-in-out,
+		--lms-halo-y 3s ease-in-out, --lms-halo-colour 5s ease-in-out,
+		--lms-halo-colour-two 5.5s ease-in-out, --lms-halo-colour-three 6s ease-in-out;
+}
+@media (prefers-reduced-motion: reduce) {
+	:is(.lms-tutor-theme, body[data-path="login"]) .lms-ai-halo { display: none; }
 }

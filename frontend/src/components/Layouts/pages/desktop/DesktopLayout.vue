@@ -14,6 +14,7 @@
 			<AppSidebar />
 			<span ref="divider" class="lms-ai-divider" aria-hidden="true">
 				<span class="lms-ai-stream-third" />
+				<span class="lms-ai-halo" />
 			</span>
 		</div>
 		<main
