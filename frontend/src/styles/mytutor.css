@@ -2,7 +2,7 @@
 /* MyTutor's cool, light learner palette is deliberately scoped to the LMS SPA. */
 .lms-tutor-theme {
 	/* token-exempt-start: exact palette mandated by the MyTutor product spec; no matching Frappe semantic tokens */
-	--lms-background: #f2f6f8;
+	--lms-background: #fff;
 	--lms-sidebar: #e5eef2;
 	--lms-surface: #fff;
 	--lms-text: #253039;

@@ -43,26 +43,26 @@
 	inherits: false;
 	initial-value: rgb(164 147 214 / 0.9);
 }
-/* Shared, non-interactive left-only decoration. Only this 14px layer clips. */
+/* Shared, non-interactive left-only decoration. Only this 18px layer clips. */
 :is(.lms-tutor-theme, body[data-path="login"]) .lms-ai-divider {
 	position: absolute;
 	inset-block: 0;
 	right: 0;
-	width: 14px;
+	width: 18px;
 	overflow: hidden;
 	pointer-events: none;
-	/* A thin 1px colour core and a wider, brighter nonlinear soft
+	/* A confident 2px colour core and a wider, brighter nonlinear soft
 	   falloff paint inward only; the vertical mask supplies ONE local wave.
 	   Normal source-over compositing keeps colour visible on pale surfaces. */
 	opacity: 1;
 	-webkit-mask-image: linear-gradient(to right,
-		transparent, rgb(0 0 0 / 0.10) 25%, rgb(0 0 0 / 0.30) 50%,
-		rgb(0 0 0 / 0.52) 75%, rgb(0 0 0 / 0.64) calc(100% - 1px),
-		rgb(0 0 0 / 0.98) calc(100% - 1px));
+		transparent, rgb(0 0 0 / 0.12) 25%, rgb(0 0 0 / 0.36) 50%,
+		rgb(0 0 0 / 0.60) 75%, rgb(0 0 0 / 0.72) calc(100% - 2px),
+		rgb(0 0 0 / 1) calc(100% - 2px));
 	mask-image: linear-gradient(to right,
-		transparent, rgb(0 0 0 / 0.10) 25%, rgb(0 0 0 / 0.30) 50%,
-		rgb(0 0 0 / 0.52) 75%, rgb(0 0 0 / 0.64) calc(100% - 1px),
-		rgb(0 0 0 / 0.98) calc(100% - 1px));
+		transparent, rgb(0 0 0 / 0.12) 25%, rgb(0 0 0 / 0.36) 50%,
+		rgb(0 0 0 / 0.60) 75%, rgb(0 0 0 / 0.72) calc(100% - 2px),
+		rgb(0 0 0 / 1) calc(100% - 2px));
 }
 :is(.lms-tutor-theme, body[data-path="login"]) .lms-ai-divider::before {
 	content: "";
@@ -119,7 +119,7 @@
 	}
 }
 @keyframes lms-ai-breathe {
-	0%, 100% { opacity: 0.94; }
+	0%, 100% { opacity: 0.97; }
 	50% { opacity: 1; }
 }
 @keyframes lms-ai-hue {
