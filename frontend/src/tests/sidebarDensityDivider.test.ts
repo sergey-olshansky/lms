@@ -55,7 +55,7 @@ describe('owner-corrected compact sidebar and visible divider', () => {
 			).toBeGreaterThanOrEqual(4.5)
 		}
 	})
-	it('uses two complementary living streams with a confident core on both surfaces, with a seamless loop and reduced-motion equivalent', () => {
+	it('uses three blending streams with a complementary first pair with a confident core on both surfaces, with a seamless loop and reduced-motion equivalent', () => {
 		expect(common).toContain(':is(.lms-tutor-theme, body[data-path="login"])')
 		expect(common).toContain('width: 27px')
 		expect(common).toContain('pointer-events: none')
@@ -76,7 +76,9 @@ describe('owner-corrected compact sidebar and visible divider', () => {
 			)
 		}
 		expect(common).toContain('background-size: 100% 50%')
-		expect(common).not.toContain('mix-blend-mode')
+		expect(common).toContain('mix-blend-mode: screen')
+		expect(common).toContain('background-blend-mode: screen')
+		expect(common).toContain('isolation: isolate')
 		expect(common).not.toContain('filter: blur')
 		expect(common).toContain('.lms-ai-divider::after')
 		expect(common).toContain('lms-ai-presence 41s ease-in-out infinite')
@@ -86,14 +88,10 @@ describe('owner-corrected compact sidebar and visible divider', () => {
 			'rgb(0 0 0 / 0.38) calc(100% - 0.25px), transparent'
 		)
 		expect(common).toContain('data:image/svg+xml,')
-		expect(common).toContain('animation-name: none, lms-ai-hue')
-		expect(common).toContain(
-			'--lms-intensity-mask: linear-gradient(180deg, #000, rgb(0 0 0 / 0.8) 20%, transparent 70%)'
-		)
-		expect(common).toContain('--lms-stream-width: 10px')
+		expect(common).toContain('--lms-stream-width: 20px')
 		expect(common).toContain('--lms-stream-width: 25px')
 		expect(common).toContain(
-			'opacity: calc(var(--lms-presence) * var(--lms-density))'
+			'opacity: calc(var(--lms-presence) * var(--lms-density) * 0.72)'
 		)
 		expect(common).not.toContain('lms-ai-wave-blue')
 		expect(common).toContain('lms-ai-hue 48s ease-in-out infinite')

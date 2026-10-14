@@ -63,7 +63,11 @@ const mountLoginPresentation = () => {
 	const edge = document.createElement("span");
 	edge.className = "lms-ai-divider";
 	edge.setAttribute("aria-hidden", "true");
+	const third = document.createElement("span");
+	third.className = "lms-ai-stream-third";
+	edge.append(third);
 	content.append(edge);
+	window.lmsDividerMotion?.start(edge);
 };
 
 if (document.readyState === "loading") {
