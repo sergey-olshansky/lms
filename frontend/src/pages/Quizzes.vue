@@ -192,6 +192,9 @@ const quizColumns = computed(() => {
 			key: 'title',
 			width: 2,
 			icon: 'lucide-file-text',
+			// Wraps, on the desk row and the phone card alike, rather than
+			// ellipsizing a title that is the whole point of the row.
+			wrap: true,
 		},
 		{
 			label: __('Total Marks'),

@@ -671,7 +671,8 @@ def validate_stepenin_format(pdf: Any, header: str) -> tuple:
 				left = (centers[column - 1] + centers[column]) / 2 if column else 0.0
 				right = (
 					(centers[column] + centers[column + 1]) / 2
-					if column + 1 < len(centers) else float(page.width)
+					if column + 1 < len(centers)
+					else float(page.width)
 				)
 				cell_words = sorted(
 					[word for word in values if left <= (float(word["x0"]) + float(word["x1"])) / 2 < right],
@@ -691,15 +692,16 @@ def validate_stepenin_format(pdf: Any, header: str) -> tuple:
 					"page_height": float(page.height),
 					"bbox": pad_bbox(
 						union_bbox([number_word, *cell_words]),
-						float(page.width), float(page.height), 3.0, 3.0,
+						float(page.width),
+						float(page.height),
+						3.0,
+						3.0,
 					),
 				}
 	missing = sorted(set(numbers) - set(numbered_answers))
 	extra = sorted(set(numbered_answers) - set(numbers))
 	if missing or extra:
-		raise FormatError(
-			f"Stepenin task/answer mismatch; missing answers={missing}, extra answers={extra}"
-		)
+		raise FormatError(f"Stepenin task/answer mismatch; missing answers={missing}, extra answers={extra}")
 	answers = {task["key"]: numbered_answers[task["number"]] for task in tasks}
 	return header, [header], tasks, answers, answer_page_start, []
 
@@ -720,7 +722,8 @@ def validate_format(
 	first_page_text = pdf.pages[0].extract_text() or ""
 	stepenin_header = next(
 		(
-			line["text"].strip() for line in extract_lines(pdf.pages[0])
+			line["text"].strip()
+			for line in extract_lines(pdf.pages[0])
 			if re.match(r"^Вопрос\s*№\s*\d+\s+ОГЭ\s*\(открытый банк ФИПИ\)$", line["text"].strip())
 		),
 		None,

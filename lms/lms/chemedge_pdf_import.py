@@ -318,7 +318,11 @@ def import_pdf_trainer(
 		succeeded = True
 		return {"quiz": quiz.name, "title": quiz.title, "question_count": len(meta["tasks"])}
 	except FormatError as exc:
-		frappe.throw(_("This PDF does not match a supported trainer format (Chemedge or Stepenin): {0}").format(str(exc)))
+		frappe.throw(
+			_("This PDF does not match a supported trainer format (Chemedge or Stepenin): {0}").format(
+				str(exc)
+			)
+		)
 	except Exception:
 		raise
 	finally:

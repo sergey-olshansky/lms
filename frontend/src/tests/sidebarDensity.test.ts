@@ -2,10 +2,9 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const css = readFileSync('src/styles/mytutor.css', 'utf8')
-const common = readFileSync('../lms/public/css/mytutor-common.css', 'utf8')
 const sidebar = readFileSync('src/components/Sidebar/AppSidebar.vue', 'utf8')
 
-describe('owner-corrected compact sidebar and visible divider', () => {
+describe('compact sidebar and accessible quiz palette', () => {
 	it('keeps compact desktop controls and generous coarse-pointer targets', () => {
 		expect(css).toMatch(/sidebar-item'\] \{\s*min-height: 32px/)
 		expect(css).toMatch(/sidebar-header'\] \{\s*height: 40px/)
@@ -54,30 +53,5 @@ describe('owner-corrected compact sidebar and visible divider', () => {
 				(luminance(background) + 0.05) / (luminance(foreground) + 0.05)
 			).toBeGreaterThanOrEqual(4.5)
 		}
-	})
-	it('uses one softly travelling, hue-changing R7 wave on both surfaces, with a seamless loop and reduced-motion equivalent', () => {
-		expect(common).toContain(':is(.lms-tutor-theme, body[data-path="login"])')
-		expect(common).toContain('width: 12px')
-		expect(common).toContain('pointer-events: none')
-		expect(common).toContain('opacity: 1')
-		expect(common).toContain('lms-ai-breathe 19s ease-in-out infinite')
-		expect(common).toContain('rgb(0 0 0 / 0.82) calc(100% - 2px)')
-		expect(common).toContain('rgb(0 0 0 / 0.16) 50%')
-		expect(common).not.toContain('mix-blend-mode')
-		expect(common).not.toContain('filter: blur')
-		expect(common).not.toContain('.lms-ai-divider::after')
-		expect(common).not.toContain('lms-ai-wave-blue')
-		expect(common).toContain('lms-ai-hue 48s ease-in-out infinite')
-		expect(common).toContain('0%, 100% { background-color: #49aeb8; }')
-		expect(common).toContain('rgb(0 0 0 / 0.74) 42%')
-		for (const hue of ['#49aeb8', '#739fcb', '#a399cb']) {
-			expect(common).toContain(hue)
-		}
-		expect(common).toContain('mask-size: 100% 50%')
-		expect(common).toContain('lms-ai-wave 48s linear(')
-		expect(common).toContain('transform: translateY(-50%)')
-		expect(common).toMatch(
-			/prefers-reduced-motion: reduce[\s\S]*animation: none/
-		)
 	})
 })

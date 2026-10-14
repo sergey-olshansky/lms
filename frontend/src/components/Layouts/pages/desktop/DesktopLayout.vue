@@ -12,7 +12,10 @@
 			aria-hidden="false"
 		>
 			<AppSidebar />
-			<span class="lms-ai-divider" aria-hidden="true" />
+			<span ref="divider" class="lms-ai-divider" aria-hidden="true">
+				<span class="lms-ai-stream-third" />
+				<span class="lms-ai-halo" />
+			</span>
 		</div>
 		<main
 			id="main-content"
@@ -24,6 +27,14 @@
 	</div>
 </template>
 <script setup>
+import { ref, onMounted, onBeforeUnmount } from 'vue'
+import '../../../../../../lms/public/js/mytutor-divider-motion.js'
 import { skipToContent } from '@/utils/a11y'
 import AppSidebar from '@/components/Sidebar/AppSidebar.vue'
+const divider = ref(null)
+let stopMotion
+onMounted(() => {
+	stopMotion = window.lmsDividerMotion.start(divider.value)
+})
+onBeforeUnmount(() => stopMotion?.())
 </script>

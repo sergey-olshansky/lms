@@ -62,6 +62,7 @@ export type QuizAttempt = {
 
 /** What `lms_quiz.submit_quiz` returns. */
 export interface QuizSubmissionResult {
+	pass: boolean
 	submission?: string
 	is_open_ended?: boolean | 0 | 1
 	percentage: number

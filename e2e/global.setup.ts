@@ -1,5 +1,6 @@
 import { test as setup } from "@playwright/test";
 import { authFile } from "./config";
+import { authenticate } from "./auth";
 
 // Every spec used to call cy.login() before nearly every `it()`, re-
 // authenticating dozens of times per run for no reason — Cypress can only
@@ -8,37 +9,9 @@ import { authFile } from "./config";
 // every spec via playwright.config.ts's `e2e` project, and specs that need
 // their own fixtures (a course, a quiz, an instructor) create and tear those
 // down themselves in `test.beforeAll`/`afterAll`.
-setup("authenticate", async ({ request }) => {
+setup("authenticate", async ({ page }) => {
 	const user = process.env.PLAYWRIGHT_TEST_USER || "frappe@example.com";
 	const password = process.env.PLAYWRIGHT_ADMIN_PASSWORD || "admin";
 
-	// Playwright's APIRequestContext doesn't fail-on-status-code the way
-	// Cypress's cy.request() does by default: an unchecked 401 here would
-	// still write an unauthenticated admin.json, and every spec sharing it
-	// would then fail downstream with confusing symptoms (redirected to
-	// /login, elements not found) instead of one clear setup failure.
-	const response = await request.post("/api/method/login", {
-		form: { usr: user, pwd: password },
-	});
-	if (!response.ok()) {
-		throw new Error(
-			`Login as ${user} failed: ${response.status()} ${await response.text()}`
-		);
-	}
-
-	// Frappe creates the CSRF cookie on the first authenticated page request.
-	// Capture it in the saved state so browser requests made by the e2e
-	// project do not start with an authenticated sid but no CSRF token.
-	const appResponse = await request.get("/lms/courses");
-	if (!appResponse.ok()) {
-		throw new Error(
-			`Authenticated app bootstrap failed: ${appResponse.status()} ${await appResponse.text()}`
-		);
-	}
-
-	const state = await request.storageState();
-	if (!state.cookies.some((cookie) => cookie.name === "csrf_token")) {
-		throw new Error("Authenticated app bootstrap did not set the Frappe CSRF cookie");
-	}
-	await request.storageState({ path: authFile });
+	await authenticate(page, user, password, authFile);
 });

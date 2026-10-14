@@ -1867,12 +1867,26 @@ const createSubmission = (reason: SubmissionReason = 'manual'): void => {
 			submission_reason: reason,
 		},
 		{
-			onSuccess() {
+			onSuccess(data: QuizSubmissionResult) {
 				proctoringActive.value = false
 				try {
 					localStorage.removeItem(submittedDraftKey)
 				} catch {}
 				if (props.quizName !== submittedQuiz) return
+				const result = data ?? quizSubmission.data
+				// Pending written answers have no final verdict yet. The server's
+				// pass flag applies this quiz's configured threshold without rounding.
+				if (
+					result &&
+					!result.is_open_ended &&
+					typeof result.pass === 'boolean'
+				) {
+					window.dispatchEvent(
+						new CustomEvent('lms:quiz-result', {
+							detail: { passed: result.pass },
+						})
+					)
+				}
 				markLessonProgress()
 				if (quiz.data && quiz.data.max_attempts) attempts.reload()
 				stopTimer()
