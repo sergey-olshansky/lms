@@ -57,7 +57,7 @@ describe('owner-corrected compact sidebar and visible divider', () => {
 	})
 	it('uses three blending streams with a complementary first pair with a confident core on both surfaces, with a seamless loop and reduced-motion equivalent', () => {
 		expect(common).toContain(':is(.lms-tutor-theme, body[data-path="login"])')
-		expect(common).toContain('width: 27px')
+		expect(common).toContain('width: 42px')
 		expect(common).toContain('pointer-events: none')
 		expect(common).toContain('opacity: 1')
 		expect(common).toContain('lms-ai-breathe 19s ease-in-out infinite')

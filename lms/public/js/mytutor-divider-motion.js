@@ -55,6 +55,8 @@
 						"#d58ea7",
 						"#dfa783",
 						"#8b91d0",
+						"#88c6b4",
+						"#b8a1ce",
 					];
 					third.style.setProperty(
 						"--lms-third-colour",
@@ -68,13 +70,14 @@
 						"--lms-third-span",
 						`${22 + random() * 20}%`
 					);
+					const spread = random();
 					third.style.setProperty(
 						"--lms-third-gain",
-						String(0.45 + random() * 0.45)
+						String(0.65 + spread * 0.25)
 					);
 					third.style.setProperty(
 						"--lms-third-width",
-						`${20 + random() * 5}px`
+						`${20 + spread * 20}px`
 					);
 					const travel = animations.find(
 						(item) => item.animationName === "lms-ai-wave-third"

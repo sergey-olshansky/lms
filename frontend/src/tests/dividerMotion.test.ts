@@ -98,6 +98,22 @@ describe('random travel of only the second divider stream', () => {
 		stop()
 		expect(vi.getTimerCount()).toBe(0)
 	})
+	it('lets the third stream approach 40px with only a modest light increase', () => {
+		const { element } = stream()
+		const third = document.createElement('span')
+		third.className = 'lms-ai-stream-third'
+		element.append(third)
+		const stop = controller().start(element, { random: () => 0.999999 })
+		vi.advanceTimersByTime(30000)
+		expect(
+			parseFloat(third.style.getPropertyValue('--lms-third-width'))
+		).toBeCloseTo(40)
+		expect(
+			Number(third.style.getPropertyValue('--lms-third-gain'))
+		).toBeCloseTo(0.9)
+		expect(third.style.getPropertyValue('--lms-third-colour')).toBe('#b8a1ce')
+		stop()
+	})
 	it('stops when its element is detached', () => {
 		const { element, moving } = stream()
 		controller().start(element, { random: () => 0 })
