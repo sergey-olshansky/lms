@@ -55,14 +55,14 @@ describe('owner-corrected compact sidebar and visible divider', () => {
 			).toBeGreaterThanOrEqual(4.5)
 		}
 	})
-	it('uses one softly travelling, hue-changing R7 wave on both surfaces, with a seamless loop and reduced-motion equivalent', () => {
+	it('uses one brighter, wider wave with a thin core on both surfaces, with a seamless loop and reduced-motion equivalent', () => {
 		expect(common).toContain(':is(.lms-tutor-theme, body[data-path="login"])')
-		expect(common).toContain('width: 12px')
+		expect(common).toContain('width: 14px')
 		expect(common).toContain('pointer-events: none')
 		expect(common).toContain('opacity: 1')
 		expect(common).toContain('lms-ai-breathe 19s ease-in-out infinite')
-		expect(common).toContain('rgb(0 0 0 / 0.82) calc(100% - 2px)')
-		expect(common).toContain('rgb(0 0 0 / 0.16) 50%')
+		expect(common).toContain('rgb(0 0 0 / 0.90) calc(100% - 1px)')
+		expect(common).toContain('rgb(0 0 0 / 0.20) 50%')
 		expect(common).not.toContain('mix-blend-mode')
 		expect(common).not.toContain('filter: blur')
 		expect(common).not.toContain('.lms-ai-divider::after')
