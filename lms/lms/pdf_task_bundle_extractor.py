@@ -627,7 +627,7 @@ def find_inline_answers(pdf: Any, tasks: list[dict[str, Any]]) -> dict[str, dict
 	return answers
 
 
-STEPENIN_TASK_RE = re.compile(r"^\[?(\d{1,4})\]\s+\S")
+STEPENIN_TASK_RE = re.compile(r"^\[?(\d{1,4})\]\s+[^\[\d\s]")
 STEPENIN_ANSWER_RE = re.compile(r"^\[(\d{1,4})\]$")
 
 
