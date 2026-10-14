@@ -62,7 +62,12 @@
 							@click="onCardClick(row)"
 						>
 							<div
-								class="truncate text-p-base-medium text-ink-gray-9 [&>*]:truncate"
+								class="text-p-base-medium text-ink-gray-9"
+								:class="
+									titleColumn.wrap
+										? 'whitespace-normal break-words'
+										: 'truncate [&>*]:truncate'
+								"
 							>
 								<slot
 									name="cell"

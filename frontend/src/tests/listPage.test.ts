@@ -83,12 +83,50 @@ vi.mock('frappe-ui', () => ({
 // Real ListFooter. Its default `#left` builds the page-length tabs.
 vi.mock('frappe-ui/experimental', async (importOriginal) => {
 	const { ListFooter } = await importOriginal<any>()
+	const { h, provide, inject } = await import('vue')
+
+	// The real List feeds its ListRows by injection and draws every cell
+	// through the #cell slot. The stub pair keeps that shape, so a desk row's
+	// cell markup can be read from the DOM the same way a card's is — and only
+	// when the rows themselves are on screen, which is the branch ListRows
+	// lives in.
+	const rowCells = () => {
+		const list = inject<any>('listViewCells', null)
+		return () =>
+			h(
+				'div',
+				{ 'data-testid': 'list-rows' },
+				list?.cell
+					? list.props.rows.flatMap((row: any) =>
+							list.props.columns.map((column: any) =>
+								h(
+									'div',
+									{
+										key: `${String(row[list.props.rowKey])}:${column.key}`,
+									},
+									list.cell({
+										column,
+										row,
+										item: row[column.key],
+										align: column.align,
+									})
+								)
+							)
+						)
+					: []
+			)
+	}
+
 	return {
 		ListFooter,
 		ListView: {
 			name: 'ListView',
 			props: ['columns', 'rows', 'rowKey', 'options'],
-			template: '<div data-testid="listview"><slot /></div>',
+			setup(props: any, { slots }: any) {
+				provide('listViewCells', { props, cell: slots.cell })
+				return () =>
+					h('div', { 'data-testid': 'listview' }, slots.default?.())
+			},
 		},
 		ListHeader: passthrough('div', 'list-header'),
 		ListHeaderItem: {
@@ -96,7 +134,7 @@ vi.mock('frappe-ui/experimental', async (importOriginal) => {
 			template:
 				'<div><slot name="prefix" :item="item" />{{ item.label }}</div>',
 		},
-		ListRows: { template: '<div data-testid="list-rows" />' },
+		ListRows: { name: 'ListRows', setup: rowCells },
 		ListRowItem: { template: '<div><slot /></div>' },
 		ListSelectBanner: { template: '<div><slot name="actions" /></div>' },
 	}
@@ -461,12 +499,16 @@ describe('PageBody mobile filters', () => {
 })
 
 describe('ResponsiveListView', () => {
-	async function mountList(cellSlot?: string) {
+	async function mountList(
+		cellSlot?: string,
+		columns: any[] = COLUMNS,
+		rows = ROWS
+	) {
 		const { default: ResponsiveListView } = await import(
 			'@/components/ResponsiveListView.vue'
 		)
 		return mount(ResponsiveListView, {
-			props: { columns: COLUMNS, rows: ROWS, rowKey: 'name' },
+			props: { columns, rows, rowKey: 'name' },
 			slots: cellSlot ? { cell: cellSlot } : {},
 			global: { stubs: { 'router-link': { template: '<a><slot /></a>' } } },
 		})
@@ -532,5 +574,69 @@ describe('ResponsiveListView', () => {
 		)
 		expect(wrapper.findAll('b.cell').length).toBe(ROWS.length * COLUMNS.length)
 		expect(wrapper.text()).toContain('title:Alpha')
+	})
+
+	// Wrapping is per column, and both widths have to honour it the same way,
+	// or the same list reads two different ways in a desk window and a phone.
+	const WRAPPED_COLUMNS = [
+		{ label: 'Title', key: 'title', width: 2, wrap: true },
+		{ label: 'Updated On', key: 'modified', width: 1 },
+	]
+
+	it('wraps a flagged desk cell and truncates its unflagged neighbours', async () => {
+		mobile.value = false
+		const wrapper = await mountList(
+			'<b class="cell">{{ params.column.key }}</b>',
+			WRAPPED_COLUMNS
+		)
+
+		const cells = wrapper.findAll('[data-testid="list-rows"] b.cell')
+		expect(cells.map((cell: any) => cell.text())).toEqual([
+			'title',
+			'modified',
+			'title',
+			'modified',
+		])
+
+		const classesOf = (cell: any) =>
+			(cell.element.parentElement as HTMLElement).className
+		expect(classesOf(cells[0])).toContain('whitespace-normal')
+		expect(classesOf(cells[0])).toContain('break-words')
+		expect(classesOf(cells[0])).not.toContain('truncate')
+		expect(classesOf(cells[1])).toContain('truncate')
+		expect(classesOf(cells[1])).not.toContain('whitespace-normal')
+	})
+
+	it('wraps the card heading when its column is flagged, and only then', async () => {
+		const heading = async (columns: any[]) => {
+			mobile.value = true
+			const wrapper = await mountList(undefined, columns)
+			return wrapper.find('[data-list-card] > div')
+		}
+
+		const wrapped = await heading(WRAPPED_COLUMNS)
+		expect(wrapped.classes()).toContain('whitespace-normal')
+		expect(wrapped.classes()).toContain('break-words')
+		expect(wrapped.classes()).not.toContain('truncate')
+
+		const unflagged = await heading(COLUMNS)
+		expect(unflagged.classes()).toContain('truncate')
+		expect(unflagged.classes()).toContain('[&>*]:truncate')
+		expect(unflagged.classes()).not.toContain('break-words')
+	})
+
+	// A wrapped heading has to survive its worst content: one long unbroken
+	// token, the kind a PDF import leaves as a quiz title. `break-words` is
+	// what keeps it inside the card instead of pushed past the screen edge.
+	it('keeps an unbroken title inside the card instead of overflowing it', async () => {
+		mobile.value = true
+		const longTitle = `StepeninOGE${'A'.repeat(96)}`
+		const wrapper = await mountList(undefined, WRAPPED_COLUMNS, [
+			{ name: 'a', title: longTitle, modified: '01 Jan 2026' },
+		])
+
+		const heading = wrapper.find('[data-list-card] > div')
+		expect(heading.text()).toBe(longTitle)
+		expect(heading.classes()).toContain('break-words')
 	})
 })
