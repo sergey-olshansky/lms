@@ -1,4 +1,4 @@
-"""Import validated Chemedge PDF trainers into native LMS quiz documents."""
+"""Import supported PDF trainers into native LMS quiz documents."""
 
 from __future__ import annotations
 
@@ -66,8 +66,9 @@ def _store_task_image(image_path: Path, quiz_name: str, task_number: int):
 def _question_html(task: dict, image_url: str) -> str:
 	number = int(task["number"])
 	task_id = frappe.utils.escape_html(str(task["id"]))
+	id_label = f" · FIPI ID {task_id}" if task_id else ""
 	return sanitize_html(
-		f'<p>Task {number} · FIPI ID {task_id}</p><p><img src="{image_url}" alt="Task {number}"></p>',
+		f'<p>Task {number}{id_label}</p><p><img src="{image_url}" alt="Task {number}"></p>',
 		always_sanitize=True,
 	)
 
@@ -254,7 +255,7 @@ def import_pdf_trainer(
 	last_task_number: str | int | None = None,
 	show_answers: bool | int | str = False,
 ):
-	"""Create one native LMS Quiz from one strict-format Chemedge PDF.
+	"""Create one native LMS Quiz from one supported trainer PDF.
 
 	The upload is attached to the created quiz only after every question and image
 	has been created.  Any error deletes created LMS objects/files and the upload.
@@ -317,7 +318,7 @@ def import_pdf_trainer(
 		succeeded = True
 		return {"quiz": quiz.name, "title": quiz.title, "question_count": len(meta["tasks"])}
 	except FormatError as exc:
-		frappe.throw(_("This PDF does not match the supported Chemedge trainer format: {0}").format(str(exc)))
+		frappe.throw(_("This PDF does not match a supported trainer format (Chemedge or Stepenin): {0}").format(str(exc)))
 	except Exception:
 		raise
 	finally:
