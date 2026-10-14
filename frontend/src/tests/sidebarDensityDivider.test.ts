@@ -61,7 +61,7 @@ describe('owner-corrected compact sidebar and visible divider', () => {
 		expect(common).toContain('pointer-events: none')
 		expect(common).toContain('opacity: 1')
 		expect(common).toContain('lms-ai-breathe 19s ease-in-out infinite')
-		expect(common).toContain('rgb(0 0 0 / 1) calc(100% - 2px)')
+		expect(common).toContain('rgb(0 0 0 / 1) calc(100% - 1px)')
 		expect(common).toContain('rgb(0 0 0 / 0.36) 50%')
 		for (const [colour, period] of [
 			['teal', 37],
@@ -82,6 +82,11 @@ describe('owner-corrected compact sidebar and visible divider', () => {
 		expect(common).toContain('lms-ai-presence 41s ease-in-out infinite')
 		expect(common).toContain('-20.5s')
 		expect(common).toContain('mask-composite: intersect')
+		expect(common).toContain('--lms-stream-width: 6px')
+		expect(common).toContain('--lms-stream-width: 20px')
+		expect(common).toContain(
+			'opacity: calc(var(--lms-presence) * var(--lms-density))'
+		)
 		expect(common).not.toContain('lms-ai-wave-blue')
 		expect(common).toContain('lms-ai-hue 48s ease-in-out infinite')
 		expect(common).toContain('0%, 100% { background-color: #49aeb8; }')

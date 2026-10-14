@@ -26,6 +26,9 @@ const settingsTab = (page: import("@playwright/test").Page) =>
 		.filter({ hasText: "Settings" });
 
 test.describe("Course Creation", () => {
+	// These steps share the course created above. Retry the whole flow so a
+	// fresh worker never continues with an undefined courseSlug.
+	test.describe.configure({ mode: "serial" });
 	test("creates a new course with settings", async ({ page }) => {
 		await page.goto("/lms/courses");
 		await closeOnboardingModal(page);
@@ -132,11 +135,16 @@ test.describe("Course Creation", () => {
 		);
 		for (const tag of ["Learning", "Frappe", "ERPNext"]) {
 			await tagInput.fill(tag);
-			await tagInput.press("Enter");
+			// The query creates its option asynchronously. Wait for that exact
+			// option instead of pressing Enter before the first one is rendered.
+			await page
+				.getByRole("option", { name: `Create "${tag}"`, exact: true })
+				.click();
 		}
 		await page.keyboard.press("Escape");
 
 		await button(page, "Save").click();
+		await expect(page.getByText("Course updated successfully")).toBeVisible();
 
 		// Publish
 		await page
