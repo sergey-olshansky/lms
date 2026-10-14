@@ -35,7 +35,7 @@
 		</div>
 		<div v-else class="space-y-4 text-base">
 			<p class="text-ink-gray-6">
-				Upload one or more supported Chemedge PDFs. The imported quizzes will
+				Upload one or more supported Chemedge or Stepenin OGE PDFs. The imported quizzes will
 				have two attempts, an 85% passing score, and one mark per question.
 			</p>
 			<Checkbox

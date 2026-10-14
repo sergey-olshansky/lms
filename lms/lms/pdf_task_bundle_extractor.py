@@ -8,6 +8,9 @@ Expected layout:
 - answer entries such as ``1. 34`` or table rows such as
   ``1 439B4A 34``, arranged in one or more columns.
 
+Also supports Stepenin OGE bank PDFs with ``[1]`` task prefixes and
+alternating bracketed-number / answer rows in the final answer table.
+
 Usage:
     python pdf_task_bundle_extractor.py /path/to/file.pdf
     python pdf_task_bundle_extractor.py /path/to/file.pdf --output-root ./bundles
@@ -331,10 +334,10 @@ def source_metadata(
 	}
 
 
-def find_tasks(pdf: Any) -> list[dict[str, Any]]:
+def find_tasks(pdf: Any, heading_finder: Any = find_task_headings) -> list[dict[str, Any]]:
 	tasks: list[dict[str, Any]] = []
 	for page_index, page in enumerate(pdf.pages):
-		starts = find_task_headings(page)
+		starts = heading_finder(page)
 		if not starts:
 			continue
 
@@ -624,6 +627,83 @@ def find_inline_answers(pdf: Any, tasks: list[dict[str, Any]]) -> dict[str, dict
 	return answers
 
 
+STEPENIN_TASK_RE = re.compile(r"^\[?(\d{1,4})\]\s+\S")
+STEPENIN_ANSWER_RE = re.compile(r"^\[(\d{1,4})\]$")
+
+
+def find_stepenin_task_headings(page: Any) -> list[dict[str, Any]]:
+	# Some originals omit the opening bracket (for example, task 70).
+	return [
+		{
+			"number": int(match.group(1)),
+			"id": "",
+			**{key: float(line[key]) for key in ("x0", "top", "x1", "bottom")},
+		}
+		for line in extract_lines(page)
+		if (match := STEPENIN_TASK_RE.match(str(line["text"]).strip()))
+	]
+
+
+def validate_stepenin_format(pdf: Any, header: str) -> tuple:
+	"""Read bracketed tasks and alternating number/answer rows from Stepenin PDFs."""
+	tasks = find_tasks(pdf, heading_finder=find_stepenin_task_headings)
+	if not tasks:
+		raise FormatError("No Stepenin task headings matching '[NUMBER] text' were found")
+	numbers = [task["number"] for task in tasks]
+	if len(set(numbers)) != len(numbers):
+		raise FormatError("Duplicate Stepenin task numbers")
+	answer_page_start = find_answer_page_start(pdf, max(task["page_index"] for task in tasks))
+	numbered_answers: dict[int, dict[str, Any]] = {}
+	for page_index in range(answer_page_start, len(pdf.pages)):
+		page = pdf.pages[page_index]
+		rows = cluster_by_top(page.extract_words(x_tolerance=2, y_tolerance=3), tolerance=2.0)
+		for row_index, row in enumerate(rows):
+			ordered = sorted(row, key=lambda word: float(word["x0"]))
+			if not ordered or not all(STEPENIN_ANSWER_RE.fullmatch(word["text"]) for word in ordered):
+				continue
+			if row_index + 1 >= len(rows):
+				raise FormatError("Stepenin answer table ends with a number row")
+			values = rows[row_index + 1]
+			if any(STEPENIN_ANSWER_RE.fullmatch(word["text"]) for word in values):
+				raise FormatError("Missing answer row in Stepenin table")
+			centers = [(float(word["x0"]) + float(word["x1"])) / 2 for word in ordered]
+			for column, number_word in enumerate(ordered):
+				left = (centers[column - 1] + centers[column]) / 2 if column else 0.0
+				right = (
+					(centers[column] + centers[column + 1]) / 2
+					if column + 1 < len(centers) else float(page.width)
+				)
+				cell_words = sorted(
+					[word for word in values if left <= (float(word["x0"]) + float(word["x1"])) / 2 < right],
+					key=lambda word: float(word["x0"]),
+				)
+				if not cell_words:
+					raise FormatError(f"Empty answer cell for {number_word['text']}")
+				number = int(STEPENIN_ANSWER_RE.fullmatch(number_word["text"]).group(1))
+				if number in numbered_answers:
+					raise FormatError(f"Duplicate answer number: {number}")
+				numbered_answers[number] = {
+					"number": number,
+					"text": " ".join(word["text"] for word in cell_words),
+					"page_index": page_index,
+					"page_number": page_index + 1,
+					"page_width": float(page.width),
+					"page_height": float(page.height),
+					"bbox": pad_bbox(
+						union_bbox([number_word, *cell_words]),
+						float(page.width), float(page.height), 3.0, 3.0,
+					),
+				}
+	missing = sorted(set(numbers) - set(numbered_answers))
+	extra = sorted(set(numbered_answers) - set(numbers))
+	if missing or extra:
+		raise FormatError(
+			f"Stepenin task/answer mismatch; missing answers={missing}, extra answers={extra}"
+		)
+	answers = {task["key"]: numbered_answers[task["number"]] for task in tasks}
+	return header, [header], tasks, answers, answer_page_start, []
+
+
 def validate_format(
 	pdf: Any,
 ) -> tuple[
@@ -636,6 +716,17 @@ def validate_format(
 ]:
 	if len(pdf.pages) < 2:
 		raise FormatError("The PDF must contain task pages and at least one answer page")
+
+	first_page_text = pdf.pages[0].extract_text() or ""
+	stepenin_header = next(
+		(
+			line["text"].strip() for line in extract_lines(pdf.pages[0])
+			if re.match(r"^Вопрос\s*№\s*\d+\s+ОГЭ\s*\(открытый банк ФИПИ\)$", line["text"].strip())
+		),
+		None,
+	)
+	if stepenin_header and "stepenin.ru/tasks/" in first_page_text:
+		return validate_stepenin_format(pdf, stepenin_header)
 
 	header, header_lines = extract_red_header(pdf.pages[0])
 	if not header_lines:
