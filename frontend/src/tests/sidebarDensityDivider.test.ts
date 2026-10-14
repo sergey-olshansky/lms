@@ -61,7 +61,7 @@ describe('owner-corrected compact sidebar and visible divider', () => {
 		expect(common).toContain('pointer-events: none')
 		expect(common).toContain('opacity: 1')
 		expect(common).toContain('lms-ai-breathe 19s ease-in-out infinite')
-		expect(common).toContain('rgb(0 0 0 / 1) calc(100% - 1px)')
+		expect(common).toContain('rgb(0 0 0 / 0.92) calc(100% - 1px)')
 		expect(common).toContain('rgb(0 0 0 / 0.36) 50%')
 		for (const [colour, period] of [
 			['teal', 37],
@@ -81,7 +81,15 @@ describe('owner-corrected compact sidebar and visible divider', () => {
 		expect(common).toContain('.lms-ai-divider::after')
 		expect(common).toContain('lms-ai-presence 41s ease-in-out infinite')
 		expect(common).toContain('-20.5s')
-		expect(common).toContain('mask-composite: intersect')
+		expect(common).toContain('mask-composite: intersect, intersect')
+		expect(common).toContain(
+			'rgb(0 0 0 / 0.38) calc(100% - 0.25px), transparent'
+		)
+		expect(common).toContain('data:image/svg+xml,')
+		expect(common).toContain('animation-name: none, lms-ai-hue')
+		expect(common).toContain(
+			'--lms-intensity-mask: linear-gradient(180deg, #000, rgb(0 0 0 / 0.8) 20%, transparent 70%)'
+		)
 		expect(common).toContain('--lms-stream-width: 10px')
 		expect(common).toContain('--lms-stream-width: 25px')
 		expect(common).toContain(
@@ -94,7 +102,7 @@ describe('owner-corrected compact sidebar and visible divider', () => {
 		for (const hue of ['#49aeb8', '#739fcb', '#a399cb']) {
 			expect(common).toContain(hue)
 		}
-		expect(common).toContain('mask-size: 100% 100%, 100% 50%')
+		expect(common).toContain('mask-size: 100% 100%, 100% 50%, 96px 96px')
 		expect(common).toContain('lms-ai-wave 48s linear(')
 		expect(common).toContain('translateY(-50%)')
 		expect(common).toMatch(
