@@ -71,13 +71,32 @@ export interface QuizSubmissionResult {
 }
 
 /** A child row of a submission's result table, the shape `frappe.client.get`
- * returns it in. `is_correct` is binary: 1 marks a fully correct answer. */
+ * returns it in. `is_correct` is binary: 1 marks a fully correct answer;
+ * `answer` is the learner's own response ("" once the server normalised a
+ * skipped question), never a correct answer or key. */
 export interface QuizResultRow {
 	name: string
 	parent: string
 	question_name: string | null
 	question_type?: QuizQuestionType
 	is_correct?: 0 | 1
+	question?: string | null
+	answer?: string | null
+	marks?: number
+	marks_out_of?: number
+}
+
+/** The verdict of one row of the post-submit attempt summary (#27). */
+export type QuizAttemptRowStatus = 'correct' | 'incorrect' | 'skipped' | 'pending'
+
+/** One rendered row of the post-submit attempt summary (#27): the question
+ * text, the learner's own answer and its verdict — never the answer key. */
+export interface QuizSummaryRow {
+	number: number
+	questionName: string
+	question: string
+	answer: string
+	status: QuizAttemptRowStatus
 }
 
 /** 1 correct, 2 partially correct, 0 wrong; undefined for an untouched option. */

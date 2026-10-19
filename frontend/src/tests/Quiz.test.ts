@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
+import { defineComponent, h } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import Quiz from '@/components/Quiz.vue'
@@ -160,6 +161,16 @@ vi.mock('@/components/ProgressBar.vue', () => ({
 	default: { template: '<div />' },
 }))
 
+// The rich text editor drags in ProseMirror and its upload composable, and
+// the open-ended summaries here read stored rows, not live editor content.
+vi.mock('@/components/RichTextEditor.vue', () => ({
+	default: defineComponent({
+		name: 'RichTextEditor',
+		emits: ['change'],
+		render: () => h('div', { class: 'editor' }),
+	}),
+}))
+
 vi.mock('@/utils/sanitizeRichHTML', () => ({
 	sanitizeRichHTML: (value: string) => value,
 }))
@@ -206,8 +217,9 @@ const quizResponse = () => ({
 let mountedQuizzes = 0
 
 // A distinct idPrefix per mount, as mountBlock gives each lesson block.
-const mountQuiz = (props: Record<string, unknown> = {}) =>
+const mountQuiz = (props: Record<string, unknown> = {}, options = {}) =>
 	mount(Quiz, {
+		...options,
 		props: { quizName: 'QUIZ-1', ...props },
 		global: {
 			config: { idPrefix: `quiz-${++mountedQuizzes}` },
@@ -304,6 +316,19 @@ const startQuiz = async (wrapper: VueWrapper<any>) => {
 		.find((button) => button.text() === 'Start Quiz')
 	expect(start).toBeDefined()
 	await start!.trigger('click')
+	await flushPromises()
+}
+
+// Submitting on a quiz without live checking defers the POST by 500ms so the
+// last answer can reach localStorage first (see submitQuiz in Quiz.vue).
+const submitWithoutLiveChecking = async (wrapper: VueWrapper<any>) => {
+	vi.useFakeTimers()
+	try {
+		;(wrapper.vm as any).submitQuiz()
+		await vi.advanceTimersByTimeAsync(1000)
+	} finally {
+		vi.useRealTimers()
+	}
 	await flushPromises()
 }
 describe('Quiz in an author preview', () => {
@@ -788,16 +813,31 @@ describe('Quiz question dots', () => {
 	})
 })
 
-describe('Quiz result screen verdict dots', () => {
-	it('replays the submission verdicts, marking unattempted questions wrong', async () => {
+describe('Quiz result screen summary rows', () => {
+	// A finished attempt replays every question as a row: its text, the
+	// learner's own answer and a textual verdict. show_answers gates only the
+	// live in-question verdicts (#2), never this summary (#27).
+	it('replays one row per question with its own answer and a textual verdict', async () => {
 		const response = choicesQuizResponse(3)
 		response.quiz.show_answers = 1
 		resourceState.response = response
 		resourceState.submissionDocs['SUBM-1'] = {
 			name: 'SUBM-1',
 			result: [
-				{ question_name: 'Q1', is_correct: 1 },
-				{ question_name: 'Q2', is_correct: 0 },
+				{
+					question_name: 'Q1',
+					question: 'Question body 1',
+					answer: 'First option 1',
+					question_type: 'Choices',
+					is_correct: 1,
+				},
+				{
+					question_name: 'Q2',
+					question: 'Question body 2',
+					answer: 'Second option 2',
+					question_type: 'Choices',
+					is_correct: 0,
+				},
 			],
 		}
 		const wrapper = mountQuiz()
@@ -811,43 +851,249 @@ describe('Quiz result screen verdict dots', () => {
 		await flushPromises()
 
 		expect(wrapper.text()).toContain('Quiz Summary')
-		const graded = wrapper.findAll(`nav[aria-label="Question results"] span`)
-		expect(graded).toHaveLength(3)
-		expect(graded[0].classes()).toContain('bg-surface-green-6')
-		expect(graded[0].attributes('aria-label')).toBe('Question 1: Correct')
-		expect(graded[1].classes()).toContain('bg-surface-red-6')
-		expect(graded[1].attributes('aria-label')).toBe('Question 2: Incorrect')
-		// No row for Q3: it counts as wrong, not as a missing dot.
-		expect(graded[2].classes()).toContain('bg-surface-red-6')
+		const rows = wrapper.findAll('[data-testid="quiz-summary-row"]')
+		expect(rows).toHaveLength(3)
+
+		expect(rows[0].text()).toContain('Question body 1')
+		expect(rows[0].text()).toContain('Your answer:')
+		expect(rows[0].text()).toContain('First option 1')
+		const correct = rows[0].find('[data-testid="quiz-summary-status"]')!
+		expect(correct.text()).toBe('Correct')
+		expect(correct.classes()).toContain('bg-surface-green-6')
+
+		// The missed question shows its red highlight plus the word, and the
+		// learner's own wrong answer — never the correct one.
+		expect(rows[1].text()).toContain('Second option 2')
+		expect(rows[1].classes()).toContain('bg-surface-red-1')
+		const wrong = rows[1].find('[data-testid="quiz-summary-status"]')!
+		expect(wrong.text()).toBe('Incorrect')
+		expect(wrong.classes()).toContain('bg-surface-red-6')
+
+		// Q3 was never attempted: it still gets its row, read as skipped with
+		// no answer of its own to show.
+		const skipped = rows[2].find('[data-testid="quiz-summary-status"]')!
+		expect(skipped.text()).toBe('Skipped')
+		expect(rows[2].text()).not.toContain('Your answer:')
+
+		// The correct option behind the missed question is an answer key; it
+		// must not surface anywhere on the summary.
+		expect(wrapper.text()).not.toContain('First option 2')
 		wrapper.unmount()
 	})
 
-	it('shows no graded dots when show_answers is off', async () => {
-		vi.useFakeTimers()
-		try {
-			resourceState.response = choicesQuizResponse(1)
-			const wrapper = mountQuiz()
-			await flushPromises()
-			await startQuiz(wrapper)
-			;(wrapper.vm as any).submitQuiz()
-			await vi.advanceTimersByTimeAsync(1000)
-			await flushPromises()
-
-			expect(wrapper.text()).toContain('Quiz Summary')
-			expect(wrapper.find('nav[aria-label="Question results"]').exists()).toBe(
-				false
-			)
-			wrapper.unmount()
-		} finally {
-			vi.useRealTimers()
+	it('shows the summary rows when show_answers is off', async () => {
+		resourceState.response = choicesQuizResponse(2)
+		resourceState.submissionDocs['SUBM-1'] = {
+			name: 'SUBM-1',
+			result: [
+				{
+					question_name: 'Q1',
+					question: 'Question body 1',
+					answer: 'First option 1',
+					question_type: 'Choices',
+					is_correct: 1,
+				},
+				{
+					question_name: 'Q2',
+					question: 'Question body 2',
+					answer: 'Second option 2',
+					question_type: 'Choices',
+					is_correct: 0,
+				},
+			],
 		}
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await startQuiz(wrapper)
+		await submitWithoutLiveChecking(wrapper)
+
+		expect(wrapper.text()).toContain('Quiz Summary')
+		// The graded rows were fetched and rendered even without live checking.
+		expect(resourceState.request).toHaveBeenCalledWith('frappe.client.get', {
+			doctype: 'LMS Quiz Submission',
+			name: 'SUBM-1',
+		})
+		const rows = wrapper.findAll('[data-testid="quiz-summary-row"]')
+		expect(rows).toHaveLength(2)
+		expect(
+			rows[0].find('[data-testid="quiz-summary-status"]')!.text()
+		).toBe('Correct')
+		expect(
+			rows[1].find('[data-testid="quiz-summary-status"]')!.text()
+		).toBe('Incorrect')
+		expect(wrapper.find('nav[aria-label="Question results"]').exists()).toBe(
+			false
+		)
+		wrapper.unmount()
+	})
+
+	it('shows the saved percentage and pending review for answered open-ended questions', async () => {
+		const response = choicesQuizResponse(2)
+		response.questions_by_name.Q2.type = 'Open Ended'
+		resourceState.response = response
+		resourceState.submitResponse = {
+			pass: false,
+			submission: 'SUBM-1',
+			is_open_ended: 1,
+			percentage: 50,
+			score: 0.5,
+			score_out_of: 2,
+		}
+		resourceState.submissionDocs['SUBM-1'] = {
+			name: 'SUBM-1',
+			result: [
+				{
+					question_name: 'Q1',
+					question: 'Question body 1',
+					answer: 'First option 1',
+					question_type: 'Choices',
+					is_correct: 1,
+				},
+				{
+					question_name: 'Q2',
+					question: 'Question body 2',
+					answer: '<p>My essay</p>',
+					question_type: 'Open Ended',
+					is_correct: 0,
+				},
+			],
+		}
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await startQuiz(wrapper)
+		await submitWithoutLiveChecking(wrapper)
+
+		// The saved percentage stays visible for a quiz with open-ended
+		// questions, with the review notice added rather than replacing it.
+		expect(wrapper.text()).toContain(
+			'You got 50% correct answers with a score of 0.5 out of 2'
+		)
+		expect(wrapper.text()).toContain(
+			'Open-ended answers are pending instructor review.'
+		)
+		const rows = wrapper.findAll('[data-testid="quiz-summary-row"]')
+		const pending = rows[1].find('[data-testid="quiz-summary-status"]')!
+		expect(pending.text()).toBe('Pending review')
+		expect(pending.classes()).toContain('bg-surface-orange-1')
+		// The written answer itself renders as rich text.
+		expect(rows[1].text()).toContain('My essay')
+		wrapper.unmount()
+	})
+
+	it('reads a blank open-ended answer as skipped and drops the review notice', async () => {
+		const response = choicesQuizResponse(1)
+		response.questions_by_name.Q1.type = 'Open Ended'
+		resourceState.response = response
+		resourceState.submitResponse = {
+			pass: false,
+			submission: 'SUBM-1',
+			is_open_ended: 1,
+			percentage: 0,
+			score: 0,
+			score_out_of: 1,
+		}
+		resourceState.submissionDocs['SUBM-1'] = {
+			name: 'SUBM-1',
+			result: [
+				{
+					question_name: 'Q1',
+					question: 'Question body 1',
+					answer: '',
+					question_type: 'Open Ended',
+					is_correct: 0,
+				},
+			],
+		}
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await startQuiz(wrapper)
+		await submitWithoutLiveChecking(wrapper)
+
+		const rows = wrapper.findAll('[data-testid="quiz-summary-row"]')
+		expect(rows).toHaveLength(1)
+		expect(
+			rows[0].find('[data-testid="quiz-summary-status"]')!.text()
+		).toBe('Skipped')
+		expect(rows[0].text()).not.toContain('Your answer:')
+		// Nothing is pending review: the blank answer has nothing to grade.
+		expect(wrapper.text()).not.toContain(
+			'Open-ended answers are pending instructor review.'
+		)
+		wrapper.unmount()
+	})
+
+	it('focuses the summary heading after submitting', async () => {
+		resourceState.response = choicesQuizResponse(1)
+		resourceState.submissionDocs['SUBM-1'] = {
+			name: 'SUBM-1',
+			result: [
+				{
+					question_name: 'Q1',
+					question: 'Question body 1',
+					answer: 'First option 1',
+					question_type: 'Choices',
+					is_correct: 1,
+				},
+			],
+		}
+		const wrapper = mountQuiz({}, { attachTo: document.body })
+		await flushPromises()
+		await startQuiz(wrapper)
+		await submitWithoutLiveChecking(wrapper)
+
+		const heading = wrapper.find('h2[tabindex="-1"]')
+		expect(heading.exists()).toBe(true)
+		expect(heading.text()).toContain('Quiz Summary')
+		// Moving focus announces the summary instead of staying on Finish.
+		expect(document.activeElement?.textContent).toContain('Quiz Summary')
+		// The result line is announced politely once it appears.
+		expect(
+			wrapper.find('[role="status"][aria-live="polite"]').exists()
+		).toBe(true)
+		wrapper.unmount()
+	})
+
+	it('offers a retry when the question rows cannot be loaded', async () => {
+		resourceState.response = choicesQuizResponse(2)
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await startQuiz(wrapper)
+		await submitWithoutLiveChecking(wrapper)
+
+		// The mock resources cannot fail on their own, so the failure state is
+		// injected the way a network error leaves the real resource.
+		const results = (wrapper.vm as any).submissionResults
+		results.data = null
+		results.error = new Error('network')
+		await flushPromises()
+
+		expect(wrapper.text()).toContain('Could not load question results')
+		const reads = resourceState.request.mock.calls.filter(
+			([url]) => url === 'frappe.client.get'
+		).length
+
+		const retry = wrapper
+			.findAll('button')
+			.find((button) => button.text() === 'Retry')
+		expect(retry).toBeDefined()
+		await retry!.trigger('click')
+		await flushPromises()
+
+		expect(wrapper.text()).not.toContain('Could not load question results')
+		const readsAfter = resourceState.request.mock.calls.filter(
+			([url]) => url === 'frappe.client.get'
+		).length
+		expect(readsAfter).toBeGreaterThan(reads)
+		// The rest of the summary is unaffected by the rows failing.
+		expect(wrapper.text()).toContain('Quiz Summary')
+		expect(wrapper.text()).toContain('Try Again')
+		wrapper.unmount()
 	})
 })
 
-describe('Quiz exhausted attempts verdict dots', () => {
-	it('verdicts the latest attempt on the card that blocks new ones', async () => {
+describe('Quiz exhausted attempts summary rows', () => {
+	it('summarises the latest attempt on the card that blocks new ones', async () => {
 		const response = choicesQuizResponse(2)
-		response.quiz.show_answers = 1
 		response.quiz.max_attempts = 2
 		resourceState.response = response
 		resourceState.attempts = [
@@ -871,18 +1117,39 @@ describe('Quiz exhausted attempts verdict dots', () => {
 		resourceState.submissionDocs['SUBM-2'] = {
 			name: 'SUBM-2',
 			result: [
-				{ question_name: 'Q1', is_correct: 1 },
-				{ question_name: 'Q2', is_correct: 0 },
+				{
+					question_name: 'Q1',
+					question: 'Question body 1',
+					answer: 'First option 1',
+					question_type: 'Choices',
+					is_correct: 1,
+				},
+				{
+					question_name: 'Q2',
+					question: 'Question body 2',
+					answer: 'Second option 2',
+					question_type: 'Choices',
+				is_correct: 0,
+				},
 			],
 		}
 		const wrapper = mountQuiz()
 		await flushPromises()
 
 		expect(wrapper.text()).toContain("You've used all 2 attempts")
-		const graded = wrapper.findAll('nav[aria-label="Question results"] span')
-		expect(graded).toHaveLength(2)
-		expect(graded[0].classes()).toContain('bg-surface-green-6')
-		expect(graded[1].classes()).toContain('bg-surface-red-6')
+		// The rows load for the latest attempt even with show_answers off.
+		expect(resourceState.request).toHaveBeenCalledWith('frappe.client.get', {
+			doctype: 'LMS Quiz Submission',
+			name: 'SUBM-2',
+		})
+		const rows = wrapper.findAll('[data-testid="quiz-summary-row"]')
+		expect(rows).toHaveLength(2)
+		expect(
+			rows[0].find('[data-testid="quiz-summary-status"]')!.text()
+		).toBe('Correct')
+		expect(
+			rows[1].find('[data-testid="quiz-summary-status"]')!.text()
+		).toBe('Incorrect')
 		wrapper.unmount()
 	})
 })

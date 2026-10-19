@@ -150,32 +150,15 @@
 								)
 							}}
 						</FeedbackBanner>
-						<!-- Tutor customization: the same read-only verdict replay on
-						     the card the learner sees once every attempt is spent,
-						     verdicting the most recent attempt. -->
-						<div
-							v-if="quiz.data.show_answers"
-							class="rounded-6 border border-outline-gray-2 p-3.5"
-						>
-							<div class="text-sm-semibold text-ink-gray-9">
-								{{ __('Questions') }}
-							</div>
-							<nav
-								:aria-label="__('Question results')"
-								class="mt-2 flex flex-wrap items-center gap-2"
-							>
-								<span
-									v-for="dot in gradedDots"
-									:key="dot.number"
-									:aria-label="dot.label"
-									:title="dot.label"
-									class="flex h-6 w-6 items-center justify-center rounded-full text-sm"
-									:class="dotStateClass[dot.state]"
-								>
-									{{ dot.number }}
-								</span>
-							</nav>
-						</div>
+						<!-- Tutor customization (#27): the same read-only per-question
+						     summary on the card the learner sees once every attempt is
+						     spent, summarising the most recent attempt. -->
+						<QuizSummaryRows
+							:rows="summaryRows"
+							:loading="summaryRowsLoading"
+							:error="submissionResults.error"
+							@retry="retrySummaryRows"
+						/>
 						<Button v-if="inVideo" @click="props.backToVideo()">{{
 							__('Resume Video')
 						}}</Button>
@@ -550,63 +533,59 @@
 					</p>
 				</div>
 				<div class="space-y-3 p-3.5">
-					<div class="text-base-semibold text-ink-gray-9">
+					<h2
+						ref="summaryHeading"
+						tabindex="-1"
+						class="text-base-semibold text-ink-gray-9 outline-none"
+					>
 						{{ __('Quiz Summary') }}
-					</div>
+					</h2>
+					<!-- Tutor customization (#27): the saved verdict of the attempt,
+					     shown for every quiz type. show_answers gates only the live
+					     in-question verdicts, never this summary; nothing here can
+					     reveal the answer key, because the payload carries only the
+					     learner's own responses. -->
 					<div
-						class="flex items-start gap-2 rounded-6 border border-outline-gray-2 bg-surface-gray-1 p-3"
+						role="status"
+						aria-live="polite"
+						class="space-y-2 rounded-6 border border-outline-gray-2 bg-surface-gray-1 p-3"
 					>
-						<span
-							class="lucide-check-circle mt-0.5 size-4 shrink-0 text-ink-gray-6"
-						/>
-						<p
-							v-if="quizSubmission.data.is_open_ended"
-							class="text-p-base text-ink-gray-7"
-						>
-							{{
-								__(
-									"Your submission has been successfully saved. The instructor will review and grade it shortly, and you'll be notified of your final result."
-								)
-							}}
-						</p>
-						<p v-else class="text-p-base text-ink-gray-7">
-							{{
-								__(
-									'You got {0}% correct answers with a score of {1} out of {2}'
-								).format(
-									Math.ceil(quizSubmission.data.percentage),
-									quizSubmission.data.score,
-									quizSubmission.data.score_out_of
-								)
-							}}
-						</p>
-					</div>
-					<!-- Tutor customization: a read-only verdict replay of the
-					     questions in the attempt's order, only when the quiz
-					     was configured to show answers. -->
-					<div
-						v-if="quiz.data.show_answers"
-						class="rounded-6 border border-outline-gray-2 p-3.5"
-					>
-						<div class="text-sm-semibold text-ink-gray-9">
-							{{ __('Questions') }}
-						</div>
-						<nav
-							:aria-label="__('Question results')"
-							class="mt-2 flex flex-wrap items-center gap-2"
-						>
+						<div class="flex items-start gap-2">
 							<span
-								v-for="dot in gradedDots"
-								:key="dot.number"
-								:aria-label="dot.label"
-								:title="dot.label"
-								class="flex h-6 w-6 items-center justify-center rounded-full text-sm"
-								:class="dotStateClass[dot.state]"
-							>
-								{{ dot.number }}
-							</span>
-						</nav>
+								class="lucide-check-circle mt-0.5 size-4 shrink-0 text-ink-gray-6"
+							/>
+							<p class="text-p-base text-ink-gray-7">
+								{{
+									__(
+										'You got {0}% correct answers with a score of {1} out of {2}'
+									).format(
+										Math.ceil(quizSubmission.data.percentage),
+										quizSubmission.data.score,
+										quizSubmission.data.score_out_of
+									)
+								}}
+							</p>
+						</div>
+						<p
+							v-if="hasPendingReview"
+							class="ps-6 text-p-base text-ink-gray-6"
+						>
+							{{
+								__(
+									'Open-ended answers are pending instructor review.'
+								)
+							}}
+						</p>
 					</div>
+					<!-- Tutor customization (#27): a read-only summary of every
+					     question in the attempt's order — the learner's own answer
+					     and its textual verdict, never the answer key. -->
+					<QuizSummaryRows
+						:rows="summaryRows"
+						:loading="summaryRowsLoading"
+						:error="submissionResults.error"
+						@retry="retrySummaryRows"
+					/>
 					<div
 						v-if="
 							!quiz.data.max_attempts ||
@@ -874,6 +853,7 @@ import type { FrappeResourceError } from 'frappe-ui'
 import {
 	computed,
 	inject,
+	nextTick,
 	onMounted,
 	onUnmounted,
 	reactive,
@@ -896,15 +876,18 @@ import AssessmentCardHeader from '@/components/Assessment/AssessmentCardHeader.v
 import OptionRow from '@/components/Assessment/OptionRow.vue'
 import FeedbackBanner from '@/components/Assessment/FeedbackBanner.vue'
 import QuizStats from '@/components/Assessment/QuizStats.vue'
-import { attemptsLeftLabel, formatQuizSubtitle } from '@/utils/quizSummary'
+import QuizSummaryRows from '@/components/Assessment/QuizSummaryRows.vue'
+import { attemptsLeftLabel, attemptRowStatus, formatQuizSubtitle } from '@/utils/quizSummary'
 import type {
 	AnswerVerdict,
 	QuizAttempt,
+	QuizAttemptRowStatus,
 	QuizDetails,
 	QuizQuestionDetails,
 	QuizQuestionRow,
 	QuizResultRow,
 	QuizSubmissionResult,
+	QuizSummaryRow,
 	QuizWithQuestions,
 	SavedAnswer,
 	SessionUser,
@@ -1291,11 +1274,13 @@ const attempts = createResource<QuizAttempt[]>({
 	},
 })
 
-// Verdict rows of one of the learner's own submissions, for the read-only
-// question-dot rows after the quiz is over. Read the whole submission doc:
-// the graded rows are its child table, and the submission doctype's rules
+// Graded rows of one of the learner's own submissions, for the read-only
+// per-question summary after the quiz is over (#27). Read the whole submission
+// doc: the graded rows are its child table, and the submission doctype's rules
 // already restrict `frappe.client.get` to the learner's own submissions (and
 // their instructors'), so unlike check_answer there is no gate to open here.
+// The rows are needed for every quiz, regardless of show_answers: that
+// setting gates only the live in-question verdicts, never this summary.
 const submissionResults = createResource<QuizResultRow[]>({
 	url: 'frappe.client.get',
 	makeParams() {
@@ -1309,26 +1294,20 @@ const submissionResults = createResource<QuizResultRow[]>({
 	},
 })
 
-// The exhausted-attempts card has no submission of its own; it verdicts the
-// most recent attempt, so the rows have to load before the card can colour.
-// No `immediate`: attempts land asynchronously after mount, which triggers
-// this watch on the component's normal paths.
+// The exhausted-attempts card has no submission of its own; it summarises the
+// most recent attempt, so the rows have to load before the card can show
+// them. No `immediate`: attempts land asynchronously after mount, which
+// triggers this watch on the component's normal paths.
 watch(latestAttemptName, (name) => {
-	if (
-		name &&
-		quiz.data?.show_answers &&
-		attemptsExhausted.value &&
-		!quizSubmission.data
-	) {
+	if (name && attemptsExhausted.value && !quizSubmission.data) {
 		submissionResults.fetch()
 	}
 })
 
 // --- Question dot verdicts -------------------------------------------------
-// The same dot row means three different things across the card's states:
-// during an attempt it tracks the learner's own checked answers, and once the
-// quiz is over it replays the graded rows of the latest submission. With
-// show_answers off, the dots stay plain navigation and never colour.
+// During an attempt the dots track the learner's own checked answers. With
+// show_answers off, the dots stay plain navigation and never colour; the
+// post-submit verdicts live in the summary rows below instead (#27).
 type DotState = 'active' | 'attempted' | 'untouched' | 'correct' | 'wrong'
 
 const dotStateClass: Record<DotState, string> = {
@@ -1351,26 +1330,6 @@ const liveDotVerdict = (index: number): AnswerVerdict | undefined => {
 	)
 		return undefined
 	return verdicts.some((verdict) => verdict == 0 || verdict == 2) ? 0 : 1
-}
-
-// The stored verdict is binary (is_correct 1/0). No row means the question
-// was never attempted, which the submission marks incorrect in its place.
-const gradedVerdictByName = computed(() => {
-	const map = new Map<string, AnswerVerdict>()
-	for (const row of submissionResults.data ?? []) {
-		if (!row?.question_name) continue
-		map.set(row.question_name, row.is_correct ? 1 : 0)
-	}
-	return map
-})
-
-const gradedDotVerdict = (index: number): AnswerVerdict | undefined => {
-	// null data means the graded rows have not loaded yet; colouring every
-	// dot red in the meantime would flash a false verdict on the result screen.
-	if (!Array.isArray(submissionResults.data)) return undefined
-	const name = questions.value[index - 1]?.question
-	if (!name) return undefined
-	return gradedVerdictByName.value.get(name) ?? 0
 }
 
 const dotState = (
@@ -1402,7 +1361,84 @@ const buildDots = (verdictFor: (index: number) => AnswerVerdict | undefined) =>
 	})
 
 const attemptDots = computed(() => buildDots(liveDotVerdict))
-const gradedDots = computed(() => buildDots(gradedDotVerdict))
+
+// --- Post-submit per-question summary rows (#27) ---------------------------
+// One row per question in the attempt's order: the question text, the
+// learner's own answer and its textual verdict. Correct answers, keys and
+// explanations are never part of this surface — not gated, absent.
+
+const summaryRow = (number: number, row: QuizResultRow): QuizSummaryRow => ({
+	number,
+	questionName: row.question_name ?? '',
+	question: row.question ?? '',
+	answer: row.answer ?? '',
+	status: attemptRowStatus(row),
+})
+
+const summaryRows = computed<QuizSummaryRow[] | null>(() => {
+	const results = submissionResults.data
+	// null, not [], until the graded rows have actually arrived: rendering a
+	// partial verdict early would flash a false status, and [] also means "an
+	// attempt with nothing to grade", which renders no section at all.
+	if (!Array.isArray(results)) return null
+	const byName = new Map<string, QuizResultRow>()
+	for (const row of results) {
+		if (row?.question_name) byName.set(row.question_name, row)
+	}
+	const ordered: QuizSummaryRow[] = []
+	const matched = new Set<string>()
+	for (const question of questions.value) {
+		matched.add(question.question)
+		const row = byName.get(question.question)
+		if (row) {
+			ordered.push(summaryRow(ordered.length + 1, row))
+		} else {
+			// No graded row: the question was never attempted, so nothing was
+			// answered or graded for it. It still gets its row (#27: one row per
+			// question), read as skipped, with no answer to show.
+			ordered.push({
+				number: ordered.length + 1,
+				questionName: question.question,
+				question: questionsByName.value[question.question]?.question ?? '',
+				answer: '',
+				status: 'skipped',
+			})
+		}
+	}
+	// Rows whose question no longer matches the quiz (edited after the
+	// attempt) are appended in submission order rather than dropped, so a
+	// graded answer is never silently lost from the summary.
+	for (const row of results) {
+		if (!row?.question_name || matched.has(row.question_name)) continue
+		ordered.push(summaryRow(ordered.length + 1, row))
+	}
+	return ordered
+})
+
+// True while the rows are on their way and nothing has failed yet; the
+// summary keeps its Questions section as skeletons instead of flashing
+// verdicts it does not have.
+const summaryRowsLoading = computed(
+	() => !Array.isArray(submissionResults.data) && !submissionResults.error
+)
+
+const retrySummaryRows = () => {
+	// fetch() clears the error on a real resource; clear it here too so the
+	// section swaps back to its loading shape instead of staying on the retry
+	// line until the response lands.
+	submissionResults.error = null
+	submissionResults.fetch()
+}
+
+// Written answers wait for an instructor. Once the rows have landed this is
+// row-accurate (a blank open-ended answer is skipped, not pending); before
+// that — or if the rows cannot load — the submission's own quiz-level flag is
+// the honest provisional answer.
+const hasPendingReview = computed(() => {
+	const rows = summaryRows.value
+	if (rows) return rows.some((row) => row.status === 'pending')
+	return !!quizSubmission.data?.is_open_ended
+})
 
 const quizSubmission = createResource<QuizSubmissionResult>({
 	url: 'lms.lms.doctype.lms_quiz.lms_quiz.submit_quiz',
@@ -1538,13 +1574,20 @@ const storedViolationLog = createResource<StoredViolationRow[]>({
 	},
 })
 
+// The summary's heading receives focus once the result screen appears, so
+// screen readers announce it rather than staying on the submitted quiz.
+const summaryHeading = ref<HTMLElement | null>(null)
+
 watch(
 	() => quizSubmission.data?.submission,
 	(submission) => {
-		if (submission) storedViolationLog.fetch()
-		// The result screen replays the submission's graded verdicts in the
-		// read-only question dots, so they load with the rest of the result.
-		if (submission && quiz.data?.show_answers) submissionResults.fetch()
+		if (!submission) return
+		storedViolationLog.fetch()
+		// The result screen replays the submission's graded rows in the
+		// read-only per-question summary, so they load with the rest of the
+		// result — for every quiz, regardless of show_answers (#27).
+		submissionResults.fetch()
+		nextTick(() => summaryHeading.value?.focus())
 	}
 )
 
