@@ -266,6 +266,8 @@ def get_lesson_icon(body: str, content: str):
 	if content:
 		for block in get_editorjs_blocks(content):
 			data = block.get("data") or {}
+			if block.get("type") == "videoArchive":
+				return "icon-youtube"
 			if block.get("type") == "upload" and (data.get("file_type") or "").lower() in [
 				"mp4",
 				"webm",

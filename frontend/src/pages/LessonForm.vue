@@ -152,6 +152,21 @@ import {
 	saveShortcut,
 } from '@/composables/useKeyboardShortcuts'
 
+const props = defineProps({
+	courseName: {
+		type: String,
+		required: true,
+	},
+	chapterNumber: {
+		type: String,
+		required: true,
+	},
+	lessonNumber: {
+		type: String,
+		required: true,
+	},
+})
+
 const { isMobile } = useScreenSize()
 const showLessonDetails = ref(false)
 
@@ -188,8 +203,13 @@ function autoGrowTitle() {
 }
 
 // reactive so the upload block picks up `docname` once the lesson is saved.
-const contentUploadContext = reactive({ docname: null, fieldname: 'content' })
+const contentUploadContext = reactive({
+	course: props.courseName,
+	docname: null,
+	fieldname: 'content',
+})
 const instructorUploadContext = reactive({
+	course: props.courseName,
 	docname: null,
 	fieldname: 'instructor_content',
 })
@@ -231,21 +251,6 @@ function warnUnreadable() {
 		).format(fields),
 	})
 }
-
-const props = defineProps({
-	courseName: {
-		type: String,
-		required: true,
-	},
-	chapterNumber: {
-		type: String,
-		required: true,
-	},
-	lessonNumber: {
-		type: String,
-		required: true,
-	},
-})
 
 const isDirty = ref(false)
 // Set once the Course Lesson exists. Its Lesson Reference is a second request,

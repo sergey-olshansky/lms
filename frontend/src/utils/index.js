@@ -4,6 +4,7 @@ import { Quiz } from '@/utils/quiz'
 import { Program } from '@/utils/program'
 import { Assignment } from '@/utils/assignment'
 import { Upload } from '@/utils/upload'
+import { VideoArchive } from '@/utils/videoArchive'
 import { Markdown } from '@/utils/markdownParser'
 import { useSettings } from '@/stores/settings'
 import { usersStore } from '@/stores/user'
@@ -162,6 +163,11 @@ export function getEditorTools(
 		upload: {
 			class: Upload,
 			config: uploadContext,
+		},
+		videoArchive: {
+			class: VideoArchive,
+			config: uploadContext,
+			toolbox: uploadContext.course ? undefined : false,
 		},
 		table: {
 			class: Table,
