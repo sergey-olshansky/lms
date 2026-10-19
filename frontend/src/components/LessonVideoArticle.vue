@@ -7,25 +7,25 @@
 			<iframe
 				v-if="playerSource"
 				:src="safeUrl(playerSource) || undefined"
-				:title="manifest?.lecture_title || 'Видео урока'"
+				:title="article?.lecture_title || 'Видео урока'"
 				class="block aspect-video w-full border-0"
 				allow="autoplay; encrypted-media; fullscreen; picture-in-picture; screen-wake-lock"
 				allowfullscreen
 			/>
 		</div>
-		<template v-if="manifest">
+		<template v-if="article">
 			<header class="space-y-4">
 				<h2 class="text-2xl font-semibold text-ink-gray-9">
-					{{ manifest.lecture_title }}
+					{{ article.lecture_title }}
 				</h2>
 				<p class="text-sm text-ink-gray-5">
-					{{ lessonTimecode(manifest.source.duration_sec) }} ·
-					{{ manifest.sections.length }} разделов · {{ frameCount }} кадров
+					{{ lessonTimecode(article.source.duration_sec) }} ·
+					{{ article.sections.length }} разделов · {{ frameCount }} кадров
 				</p>
-				<p class="leading-7 text-ink-gray-7">{{ manifest.summary }}</p>
+				<p class="leading-7 text-ink-gray-7">{{ article.summary }}</p>
 				<div class="flex flex-wrap gap-2">
 					<span
-						v-for="tag in manifest.top_tags"
+						v-for="tag in article.top_tags"
 						:key="tag"
 						class="rounded bg-surface-gray-2 px-2 py-1 text-xs text-ink-gray-6"
 						>{{ tag }}</span
@@ -38,7 +38,7 @@
 				</summary>
 				<nav class="mt-3 space-y-2" aria-label="Содержание занятия">
 					<button
-						v-for="section in manifest.sections"
+						v-for="section in article.sections"
 						:key="section.id"
 						type="button"
 						class="flex w-full gap-3 text-left text-sm text-ink-gray-7 hover:underline"
@@ -52,7 +52,7 @@
 				</nav>
 			</details>
 			<section
-				v-for="section in manifest.sections"
+				v-for="section in article.sections"
 				:key="section.id"
 				:ref="(node) => rememberSection(section.id, node)"
 				class="space-y-4 border-t border-outline-gray-2 pt-6"
@@ -161,12 +161,14 @@ import { Button, Dialog } from 'frappe-ui'
 import type { LessonFrame, LessonManifest } from '@/utils/lessonArchive'
 import {
 	lessonTimecode,
+	lessonDisplayManifest,
 	videoAtTime,
 	vkVideoSource,
 } from '@/utils/lessonArchive'
 import { safeUrl } from '@/utils/safeUrl'
 
 const props = defineProps<{ videoSource: string; manifest?: LessonManifest }>()
+const article = computed(() => lessonDisplayManifest(props.manifest))
 const videoRoot = ref<HTMLElement | null>(null)
 const playerSource = ref(vkVideoSource(props.videoSource))
 const selectedFrame = ref<LessonFrame | null>(null)

@@ -174,4 +174,16 @@ describe('lesson archive video and article', () => {
 		expect(wrapper.get('iframe').attributes('src')).toBe(src)
 		wrapper.unmount()
 	})
+	it('shows saved ASCII arrows and decoded text without creating HTML elements', () => {
+		const manifest = structuredClone(data.manifest!)
+		manifest.sections[0].equations = ['Cr --OH--&gt; Cr']
+		manifest.sections[0].bullets = ['&lt;img onerror="bad()"&gt;']
+		const wrapper = mount(LessonVideoArticle, {
+			props: { videoSource: src, manifest },
+		})
+		expect(wrapper.text()).toContain('Cr --OH--> Cr')
+		expect(wrapper.text()).toContain('<img onerror="bad()">')
+		expect(wrapper.find('[onerror]').exists()).toBe(false)
+		wrapper.unmount()
+	})
 })

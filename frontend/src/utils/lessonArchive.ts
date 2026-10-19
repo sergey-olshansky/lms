@@ -1,3 +1,5 @@
+import { decodeEntities } from '@/utils/inertHtml'
+
 export interface LessonFrame {
 	file: string
 	image_url: string
@@ -81,4 +83,31 @@ export function videoAtTime(source: string, seconds: number): string {
 	)
 	url.searchParams.set('autoplay', '1')
 	return url.href
+}
+
+// The lesson's HTML sanitizer encodes ASCII reaction arrows on save. Decode
+// only display text, which Vue still renders through textContent, never HTML.
+export function lessonDisplayManifest(
+	manifest?: LessonManifest
+): LessonManifest | undefined {
+	if (!manifest) return undefined
+	const text = (value: string) => decodeEntities(value)
+	return {
+		...manifest,
+		lecture_title: text(manifest.lecture_title),
+		summary: text(manifest.summary),
+		top_tags: manifest.top_tags.map(text),
+		sections: manifest.sections.map((section) => ({
+			...section,
+			title: text(section.title),
+			tags: section.tags.map(text),
+			bullets: section.bullets.map(text),
+			equations: section.equations.map(text),
+			frames: section.frames.map((frame) => ({
+				...frame,
+				caption: text(frame.caption),
+				board_text: text(frame.board_text),
+			})),
+		})),
+	}
 }
