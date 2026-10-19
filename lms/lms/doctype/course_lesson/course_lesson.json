@@ -134,7 +134,7 @@
   },
   {
    "fieldname": "content",
-   "fieldtype": "Text",
+   "fieldtype": "Long Text",
    "ignore_xss_filter": 1,
    "label": "Content"
   },
@@ -144,7 +144,7 @@
   },
   {
    "fieldname": "instructor_content",
-   "fieldtype": "Text",
+   "fieldtype": "Long Text",
    "ignore_xss_filter": 1,
    "label": "Instructor Content"
   },
