@@ -81,6 +81,8 @@ def parse_archive(content):
 	Only referenced PNG members are read. No member is extracted to a filesystem path.
 	Returns normalized metadata and the verified image bytes keyed by archive path.
 	"""
+	if not isinstance(content, bytes):
+		raise LessonArchiveError("Не удалось прочитать ZIP-архив урока.")
 	if len(content) > MAX_ARCHIVE_BYTES:
 		raise LessonArchiveError("Размер ZIP не должен превышать 100 МБ.")
 	try:

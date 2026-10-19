@@ -107,8 +107,9 @@ class TestLessonArchiveFormat(unittest.TestCase):
 			parse_archive(archive_bytes(data))
 
 	def test_rejects_corrupt_zip(self):
-		with self.assertRaises(LessonArchiveError):
-			parse_archive(b"not a zip")
+		for content in [b"not a zip", "text renamed to lesson.zip"]:
+			with self.subTest(content=content), self.assertRaises(LessonArchiveError):
+				parse_archive(content)
 
 	def test_video_url_requires_vk_https_embed(self):
 		self.assertEqual(
