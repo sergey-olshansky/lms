@@ -10,7 +10,13 @@ from lms.lms.lesson_archive_format import MAX_ARCHIVE_BYTES, LessonArchiveError,
 
 
 @frappe.whitelist(methods=["POST"])
-def import_lesson_archive(video_src, archive_url, course, lesson=None, fieldname="content"):
+def import_lesson_archive(
+	video_src: str,
+	archive_url: str,
+	course: str,
+	lesson: str | None = None,
+	fieldname: str = "content",
+):
 	"""Prepare a video + article block; the lesson's normal autosave persists it."""
 	from lms.lms.permissions import can_access_lesson, can_author_course, is_site_administrator
 
