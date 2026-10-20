@@ -11079,8 +11079,8 @@ msgid "Try Again"
 msgstr "Попробовать снова"
 
 #: frontend/src/components/Quiz.vue
-msgid "Retake only incorrect questions"
-msgstr "Перерешать только неправильные"
+msgid "Retake"
+msgstr "Перерешать"
 
 #: frontend/src/pages/Courses/CourseDashboard.vue:131
 msgid "Try a different name."

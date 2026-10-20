@@ -612,7 +612,7 @@
 						"
 						@click="resetQuiz()"
 					>
-						{{ __('Retake only incorrect questions') }}
+						{{ __('Retake') }}
 					</Button>
 					</div>
 				</div>

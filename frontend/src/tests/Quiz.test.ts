@@ -835,7 +835,7 @@ describe('Quiz question dots', () => {
 
 		const tryAgain = wrapper
 			.findAll('button')
-			.find((button) => button.text() === 'Retake only incorrect questions')
+			.find((button) => button.text() === 'Retake')
 		expect(tryAgain).toBeDefined()
 		await tryAgain!.trigger('click')
 		await flushPromises()
@@ -901,7 +901,7 @@ describe('Quiz result screen after submission', () => {
 		expect(wrapper.text()).toContain(
 			'You got 100% correct answers with a score of 1 out of 1'
 		)
-		expect(wrapper.text()).toContain('Retake only incorrect questions')
+		expect(wrapper.text()).toContain('Retake')
 		// The per-question rows are gone from the result screen; the graded
 		// submission is not even fetched on the learner's behalf anymore.
 		expect(wrapper.find('[data-testid="quiz-summary-row"]').exists()).toBe(
@@ -933,7 +933,7 @@ describe('Quiz result screen after submission', () => {
 		await startQuiz(wrapper)
 		await submitWithoutLiveChecking(wrapper)
 
-		const retakeLabel = 'Retake only incorrect questions'
+		const retakeLabel = 'Retake'
 		expect(wrapper.text()).toContain(retakeLabel)
 
 		// Simulate the server history now including this attempt: the result
@@ -994,7 +994,7 @@ describe('Quiz result screen after submission', () => {
 
 		expect(wrapper.text()).toContain("You've used all 2 attempts")
 		expect(wrapper.text()).not.toContain('Finish Quiz')
-		expect(wrapper.text()).not.toContain('Retake only incorrect questions')
+		expect(wrapper.text()).not.toContain('Retake')
 		wrapper.unmount()
 	})
 
@@ -1094,7 +1094,7 @@ describe('Quiz result screen after submission', () => {
 
 		const tryAgain = wrapper
 			.findAll('button')
-			.find((button) => button.text() === 'Retake only incorrect questions')
+			.find((button) => button.text() === 'Retake')
 		expect(tryAgain).toBeDefined()
 		await tryAgain!.trigger('click')
 		await flushPromises()
