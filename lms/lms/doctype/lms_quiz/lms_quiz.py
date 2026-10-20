@@ -154,13 +154,31 @@ def _validate_quiz_results(results):
 	Rejects genuinely malformed items (non-dict, no question_name, or an answer that isn't a
 	list) with a clean validation error. A blank/null answer element is NOT rejected here: the
 	UI legitimately emits answer=[null] for a skipped open-ended question; process_results
-	normalises those to "" so a student can still submit a partially-answered quiz."""
+	normalises those to "" so a student can still submit a partially-answered quiz.
+
+	One question, one row. Duplicate question_name rows would each be graded and
+	each carry marks while the attempt's denominator counts the question once,
+	so the attempt could read past 100% — including duplicates of an
+	already-credited question, which the retake merge would stamp at full
+	marks twice. They are rejected here, before anything scores.
+	"""
+	seen: set[str] = set()
 	for result in results:
-		if not (isinstance(result, dict) and result.get("question_name")):
+		if not (
+			isinstance(result, dict)
+			and isinstance(result.get("question_name"), str)
+			and result["question_name"]
+		):
 			frappe.throw(_("Invalid quiz results submitted."), frappe.ValidationError)
 		answer = result.get("answer")
 		if answer is not None and not isinstance(answer, list):
 			frappe.throw(_("Invalid quiz results submitted."), frappe.ValidationError)
+		if result["question_name"] in seen:
+			frappe.throw(
+				_("Duplicate answers for the same question cannot be submitted."),
+				frappe.ValidationError,
+			)
+		seen.add(result["question_name"])
 
 
 @frappe.whitelist()
@@ -170,6 +188,7 @@ def submit_quiz(
 	violation_count: int = 0,
 	submission_reason: str = "manual",
 	violation_events: str | None = None,
+	question_pool: str | list | None = None,
 ):
 	if not isinstance(quiz, str):
 		frappe.throw(_("Invalid quiz."), frappe.ValidationError)
@@ -196,6 +215,7 @@ def submit_quiz(
 			"enable_scheduling",
 			"schedule_start",
 			"schedule_end",
+			"limit_questions_to",
 		],
 		as_dict=1,
 	)
@@ -217,6 +237,18 @@ def submit_quiz(
 	data = process_results(results, quiz_details)
 	is_open_ended = data["is_open_ended"]
 
+	# A retake only asks the never-credited questions; the credited answers of
+	# earlier attempts ride along so this attempt's score accounts for them
+	# (#32). The denominator follows the same coverage — unique credited
+	# questions plus this attempt's offered pool at current marks — so a
+	# limited shuffled quiz can no longer score past 100% across retakes.
+	quiz_questions = _quiz_question_rows(quiz)
+	credited = _credited_question_rows(quiz, frappe.session.user)
+	merge_credited_results(quiz_questions, credited, data["results"])
+	score_out_of = resolve_attempt_score_out_of(
+		quiz_details, quiz_questions, credited, data["results"], _parse_question_pool(question_pool)
+	)
+
 	proctoring = _build_proctoring_record(quiz_details, violation_count, submission_reason, violation_events)
 
 	# Score and percentage are the submission's responsibility. Its validate()
@@ -225,7 +257,7 @@ def submit_quiz(
 	submission = create_submission(
 		quiz,
 		data["results"],
-		quiz_details.total_marks,
+		score_out_of,
 		quiz_details.passing_percentage,
 		violation_count=proctoring["violation_count"],
 		submission_reason=proctoring["submission_reason"],
@@ -235,6 +267,13 @@ def submit_quiz(
 
 	_save_violation_events(submission.name, proctoring["events"])
 	_attach_answer_files(data["answer_files"], submission.name)
+
+	# The attempt report email (#34) is a side effect of completion, never of
+	# grading: it rides after commit so the queued job reads a submission that
+	# exists, and its failure can never cost the learner their attempt.
+	from lms.lms.doctype.lms_quiz.quiz_attempt_report import enqueue_attempt_report_email
+
+	enqueue_attempt_report_email(submission.name)
 
 	return {
 		"score": submission.score,
@@ -620,6 +659,238 @@ def verify_answer(question: str, answer: list):
 	return correct
 
 
+def _quiz_question_rows(quiz: str) -> dict[str, dict]:
+	"""The quiz's live question rows, keyed by question name (#32).
+
+	Live means the quiz still carries the row AND its LMS Question still
+	exists — the exact set a client can offer — because the retake pool and
+	the cumulative denominator are both bounded by what the quiz can ask
+	today. Marks are the quiz row's current ones.
+	"""
+	rows = frappe.get_all(
+		"LMS Quiz Question",
+		filters={"parent": quiz, "parenttype": "LMS Quiz"},
+		fields=["question", "question_detail", "marks", "type"],
+	)
+	if not rows:
+		return {}
+	# Question rows whose LMS Question has been deleted are unreachable from
+	# any client; a denominator counting them would punish every honest taker.
+	# nosemgrep: lms-unjustified-ignore-permissions - read behind submit's own quiz access check
+	existing = set(
+		frappe.get_all(
+			"LMS Question",
+			filters={"name": ("in", [row.question for row in rows if row.question])},
+			pluck="name",
+			ignore_permissions=True,
+		)
+	)
+	return {row.question: row for row in rows if row.question and row.question in existing}
+
+
+def _credited_question_rows(quiz: str, member: str) -> dict[str, dict]:
+	"""The member's already-credited answers on this quiz, across every previous
+	attempt (#32).
+
+	A credited answer is one that grading recorded at full marks: objective rows
+	land there through the answer check, an open-ended row through an
+	instructor's full-mark grade. A partially graded open-ended answer is NOT
+	credited — the learner may re-answer it on a retake and have the new answer
+	graded, which is the only way to improve a partial mark.
+
+	Keyed by question name; when several attempts credit the same question, any
+	of them carries the credit (their verdicts are identical at full marks).
+	"""
+	if not member or member == "Guest":
+		return {}
+
+	previous = frappe.get_all(
+		"LMS Quiz Submission",
+		filters={"quiz": quiz, "member": member},
+		pluck="name",
+	)
+	if not previous:
+		return {}
+
+	# Reading the caller's own submissions back: the member filter above is the
+	# audience, so the child rows need no permission pass of their own.
+	# nosemgrep: lms-unjustified-ignore-permissions - the member's own attempt rows, gated by the member filter above
+	rows = frappe.get_all(
+		"LMS Quiz Result",
+		filters={"parent": ("in", previous), "parenttype": "LMS Quiz Submission"},
+		fields=[
+			"question_name",
+			"question",
+			"answer",
+			"marks",
+			"marks_out_of",
+			"question_type",
+			"is_correct",
+		],
+	)
+	credited: dict[str, dict] = {}
+	for row in rows:
+		if not row.question_name:
+			continue
+		if cint(row.marks_out_of) <= 0 or cint(row.marks) < cint(row.marks_out_of):
+			continue
+		credited.setdefault(row.question_name, row)
+	return credited
+
+
+def merge_credited_results(quiz_questions: dict, credited: dict, results: list) -> None:
+	"""Fold the member's already-credited answers into a retake's results (#32).
+
+	The retake UI offers only the never-credited questions; the credited ones are
+	carried into this attempt's result table at the quiz's CURRENT marks, so the
+	attempt's score, percentage and pass verdict account for them and history
+	stays whole — every attempt keeps its own submission document.
+
+	A credited question the client re-submits anyway (a stale tab, a hand-built
+	request) keeps its credited verdict and the answer that earned it: credit
+	already earned cannot be lost to a re-answer. A question that has since left
+	the quiz is not carried — its marks no longer exist to be credited.
+
+	In-place on ``results``, before create_submission scores the attempt.
+	"""
+	if not credited:
+		return
+
+	submitted = set()
+	for result in results:
+		name = result.get("question_name")
+		submitted.add(name)
+		if name not in credited:
+			continue
+		current = quiz_questions.get(name)
+		marks = cint(current.marks) if current else cint(result.get("marks_out_of"))
+		source = credited[name]
+		result["answer"] = source.answer or ""
+		result["marks"] = marks
+		result["marks_out_of"] = marks
+		result["is_correct"] = 1
+
+	for question_name, source in credited.items():
+		if question_name in submitted:
+			continue
+		current = quiz_questions.get(question_name)
+		if not current:
+			continue
+		results.append(
+			{
+				"question_name": question_name,
+				"question": current.question_detail,
+				"question_type": current.type,
+				"answer": source.answer or "",
+				"marks": cint(current.marks),
+				"marks_out_of": cint(current.marks),
+				"is_correct": 1,
+			}
+		)
+
+
+def _parse_question_pool(raw) -> list[str] | None:
+	"""The client's declaration of the questions this attempt was offered.
+
+	``None`` means the client declared nothing (an older client, a beacon that
+	lost its state); an empty/invalid declaration is returned as-is so the
+	denominator resolver can judge it. Names are only strings, deduplicated,
+	order-free.
+	"""
+	if raw is None:
+		return None
+	if isinstance(raw, str):
+		pool = _parse_json_arg(raw, _("question pool"))
+	else:
+		pool = raw
+	if not isinstance(pool, list):
+		frappe.throw(_("Invalid question pool submitted."), frappe.ValidationError)
+	seen: dict[str, None] = {}
+	for name in pool:
+		if not isinstance(name, str) or not name:
+			frappe.throw(_("Invalid question pool submitted."), frappe.ValidationError)
+		seen.setdefault(name)
+	return list(seen)
+
+
+def resolve_attempt_score_out_of(
+	quiz_details: dict,
+	quiz_questions: dict,
+	credited: dict,
+	results: list,
+	question_pool: list[str] | None,
+) -> int:
+	"""The cumulative denominator of an attempt (#32): the unique credited
+	questions of earlier attempts plus the questions this attempt covers, each
+	at the quiz's current marks.
+
+	On a shuffled quiz limited to a few questions, retakes cover new questions
+	while the credited ones ride along; against the quiz's fixed total_marks
+	that union can outscore 100%. The denominator therefore follows the union:
+
+	- A declared pool (what the client offered, answered or not) bounds the
+	  attempt's coverage from below — skipping an offered, never-credited
+	  question cannot lift the percentage, because its marks stay in the
+	  denominator while its answer earns none.
+	- Every submitted question joins the coverage whatever the declaration
+	  said, so answers cannot be smuggled in beside a shrunk pool.
+	- The declaration is bounded, not proven: the draw is the client's today
+	  (the shuffle runs there). It must name live quiz questions, steer clear
+	  of the credited set, and match what the quiz could have offered — within
+	  the limit, and no shorter than the offered remainder. Anything else
+	  widens the coverage to every question the quiz currently asks, the same
+	  strict reading an absent declaration gets on a retake.
+	- A first attempt with no declaration keeps the quiz's total_marks, which
+	  is exactly the coverage such an attempt has always had.
+	"""
+	total_marks = cint(quiz_details.total_marks)
+	if not credited and question_pool is None:
+		return total_marks
+
+	if question_pool is None:
+		covered = set(quiz_questions)
+	else:
+		non_credited = {name for name in quiz_questions if name not in credited}
+		declared = question_pool
+		in_quiz = [name for name in declared if name in quiz_questions]
+		pool = [name for name in in_quiz if name not in credited]
+		limit = cint(quiz_details.limit_questions_to)
+		bound = limit if limit else len(quiz_questions)
+		declared_ok = (
+			len(in_quiz) == len(declared)
+			and len(pool) <= bound
+			and len(pool) >= min(len(non_credited), bound)
+		)
+		covered = set(pool) if declared_ok else set(quiz_questions)
+
+	covered |= {row.get("question_name") for row in results if row.get("question_name")}
+	covered |= {name for name in credited if name in quiz_questions}
+	return sum(
+		cint(row.marks) for name, row in quiz_questions.items() if name in covered
+	)
+
+
+@frappe.whitelist()
+def get_quiz_credited_questions(quiz: str) -> list[str]:
+	"""Question names the current user has already credited on this quiz (#32).
+
+	The retake UI hides these from the offered pool, so the learner answers only
+	what was never credited. Reading one's own credits reveals nothing the
+	per-attempt report does not: it lists verdicts of attempts the caller owns.
+	"""
+	from lms.lms.permissions import can_access_quiz
+
+	if not isinstance(quiz, str) or not quiz:
+		frappe.throw(_("Invalid quiz."), frappe.ValidationError)
+	if not frappe.db.exists("LMS Quiz", quiz):
+		frappe.throw(_("Invalid quiz."), frappe.ValidationError)
+	if not can_access_quiz(quiz):
+		frappe.throw(
+			_("You are not authorized to view this quiz."), frappe.PermissionError
+		)
+	return sorted(_credited_question_rows(quiz, frappe.session.user))
+
+
 def _save_file(created: list[str], match: re.Match) -> str:
 	data = match.group(1).split("data:")[1]
 	headers, content = data.split(",")
@@ -768,6 +1039,16 @@ def get_submission_correct_answers(submission: str) -> dict[str, list[str]]:
 	if not question_names:
 		return {}
 
+	return _correct_answers_for_questions(question_names)
+
+
+def _correct_answers_for_questions(question_names: list[str]) -> dict[str, list[str]]:
+	"""The answer key rows for a set of questions.
+
+	Split out of get_submission_correct_answers so the attempt-report PDF (#33)
+	and its email (#34) render keys from the one existing key source, under the
+	authorization their callers have already established.
+	"""
 	fields = [
 		"name",
 		"type",

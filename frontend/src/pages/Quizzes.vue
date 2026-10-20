@@ -190,10 +190,11 @@ const quizColumns = computed(() => {
 		{
 			label: __('Title'),
 			key: 'title',
-			width: 2,
+			// The row is the title (#29): it takes the width the secondary
+			// columns give up and wraps, so a long name is never truncated away
+			// or pushed off the screen by the columns beside it.
+			width: 4,
 			icon: 'lucide-file-text',
-			// Wraps, on the desk row and the phone card alike, rather than
-			// ellipsizing a title that is the whole point of the row.
 			wrap: true,
 		},
 		{
@@ -208,7 +209,7 @@ const quizColumns = computed(() => {
 			label: __('Passing Percentage'),
 			key: 'passing_percentage',
 			hideOnMobile: true,
-			width: 1,
+			width: 0.75,
 			align: 'left',
 			icon: 'lucide-percent',
 		},
@@ -231,9 +232,12 @@ const quizColumns = computed(() => {
 		{
 			label: __('Updated On'),
 			key: 'modified',
-			width: 1,
+			width: 0.75,
 			align: 'left',
 			icon: 'lucide-clock',
+			// Secondary on the phone card too (#29): the card keeps the title
+			// route and drops the date line, which the desk column still shows.
+			hideOnMobile: true,
 		},
 	]
 })

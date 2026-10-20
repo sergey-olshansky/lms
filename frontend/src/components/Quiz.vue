@@ -131,7 +131,22 @@
 						</span>
 					</div>
 
-					<template v-if="!questions.length">
+					<template v-if="allQuestionsCredited">
+						<!-- Every question already credited (#32): a retake has
+						     nothing left to ask, so the pool is empty for a different
+						     reason than an unfinished quiz. -->
+						<FeedbackBanner :correct="true">
+							{{
+								__(
+									'You have already answered every question of this quiz correctly. There is nothing left to retake.'
+								)
+							}}
+						</FeedbackBanner>
+						<Button v-if="inVideo" @click="props.backToVideo()">{{
+							__('Resume Video')
+						}}</Button>
+					</template>
+					<template v-else-if="!questions.length">
 						<p class="text-p-base text-ink-gray-5">
 							{{ __('This quiz has no questions available yet.') }}
 						</p>
@@ -1009,6 +1024,10 @@ const handlePageHide = (): void => {
 			violation_count: String(violationCount.value),
 			submission_reason: 'browser_closed',
 		})
+		// The offered pool rides along here too (#32): the beacon is a submit
+		// like any other, and its denominator must not default to the strict
+		// whole-quiz reading for want of a declaration.
+		params.set('question_pool', JSON.stringify(questions.value.map((row) => row.question)))
 		// Beacons go out as a query string, so only spend the URL budget on the
 		// log when there is one.
 		if (violationLog.value.length) {
@@ -1077,14 +1096,21 @@ const populateQuestions = () => {
 		(row: QuizQuestionRow) =>
 			row?.question && questionsByName.value[row.question]
 	)
+	// A retake asks only the never-credited questions (#32). The preview is
+	// rendered as shipped, so the author's own credits never hide content.
+	const offered = props.preview
+		? resolvable
+		: resolvable.filter(
+				(row: QuizQuestionRow) => !creditedQuestionNames.value.has(row.question)
+		  )
 	if (data?.shuffle_questions) {
-		let next = shuffleArray([...resolvable])
+		let next = shuffleArray([...offered])
 		if (data.limit_questions_to) {
 			next = next.slice(0, data.limit_questions_to)
 		}
 		questions.value = next
 	} else {
-		questions.value = resolvable
+		questions.value = offered
 	}
 }
 
@@ -1171,6 +1197,20 @@ const introTips = computed(() => {
 	const proctored = quiz.data.enable_proctoring
 	const tips: string[] = []
 	if (props.inVideo) tips.push(__('Complete the quiz to continue the video.'))
+	if (!props.preview && creditedQuestionNames.value.size && questions.value.length) {
+		// What a retake is (#32): the credited answers of earlier attempts
+		// already count, and only the rest is asked now.
+		tips.push(
+			__(
+				'You already have {0} credited {1} from earlier attempts. This attempt covers the remaining {2} {3}.'
+			).format(
+				creditedQuestionNames.value.size,
+				creditedQuestionNames.value.size == 1 ? __('answer') : __('answers'),
+				questions.value.length,
+				questions.value.length == 1 ? __('question') : __('questions')
+			)
+		)
+	}
 	if (!proctored) {
 		tips.push(
 			__(
@@ -1263,33 +1303,89 @@ const shuffleArray = <T>(array: T[]): T[] => {
 	return array
 }
 
-const attempts = createResource<QuizAttempt[]>({
-	url: 'frappe.client.get_list',
-	makeParams() {
-		return {
-			doctype: 'LMS Quiz Submission',
-			filters: {
-				member: user.data?.name,
-				quiz: quiz.data?.name,
-			},
-			fields: [
-				'name',
-				'creation',
-				'score',
-				'score_out_of',
-				'percentage',
-				'passing_percentage',
-			],
-			order_by: 'creation desc',
+	const attempts = createResource<QuizAttempt[]>({
+		url: 'frappe.client.get_list',
+		makeParams() {
+			return {
+				doctype: 'LMS Quiz Submission',
+				filters: {
+					member: user.data?.name,
+					quiz: quiz.data?.name,
+				},
+				fields: [
+					'name',
+					'creation',
+					'score',
+					'score_out_of',
+					'percentage',
+					'passing_percentage',
+				],
+				order_by: 'creation desc',
+			}
+		},
+		transform(data: QuizAttempt[]) {
+			data.forEach((submission, index) => {
+				submission.creation = timeAgo(submission.creation)
+				submission.idx = index + 1
+			})
+		},
+	})
+
+	// --- Retake credit (#32) ----------------------------------------------------
+	// The questions this learner has already credited on this quiz, across
+	// earlier attempts. A retake offers only what was never credited; the
+	// credited answers ride into the new attempt's score on the server, which
+	// remains the arbiter even if this list is stale. An author preview renders
+	// the quiz as shipped and ignores the author's own credits.
+	const creditedQuestions = createResource<string[]>({
+		url: 'lms.lms.doctype.lms_quiz.lms_quiz.get_quiz_credited_questions',
+		makeParams() {
+			return { quiz: props.quizName }
+		},
+		auto: true,
+	})
+
+	const creditedQuestionNames = computed<Set<string>>(
+		() => new Set(creditedQuestions.data || [])
+	)
+
+	// Every current question already credited: the retake has nothing to ask.
+	// Distinct from an empty quiz, which keeps its own "no questions" wording.
+	const allQuestionsCredited = computed(() => {
+		if (props.preview) return false
+		const rawCount = Array.isArray(quiz.data?.questions)
+			? quiz.data!.questions!.length
+			: 0
+		return (
+			rawCount > 0 &&
+			creditedQuestionNames.value.size > 0 &&
+			questions.value.length === 0
+		)
+	})
+
+	// Credits land after the quiz (two requests): rebuild the offered pool
+	// around them, and drop a restored draft's answers for questions this
+	// retake no longer asks. Mid-attempt the attempt stands as drawn — the
+	// server's merge still protects the score — so the shuffle the learner is
+	// sitting is not rewritten under them.
+	watch(
+		() => creditedQuestions.data,
+		() => {
+			if (!quiz.data) return
+			if (activeQuestion.value > 0 && !quizSubmission.data) return
+			populateQuestions()
+			const valid = new Set(questions.value.map((row) => row.question))
+			savedAnswers.value = savedAnswers.value.filter((answer) =>
+				valid.has(answer.question_name)
+			)
+			attemptedQuestions.value = questions.value.flatMap((q, index) =>
+				savedAnswers.value.some((answer) => answer.question_name === q.question)
+					? [index + 1]
+					: []
+			)
 		}
-	},
-	transform(data: QuizAttempt[]) {
-		data.forEach((submission, index) => {
-			submission.creation = timeAgo(submission.creation)
-			submission.idx = index + 1
-		})
-	},
-})
+	)
+
 
 // --- Per-attempt report from the history table (#27) -----------------------
 // The table lists the current user's own submissions only (member filter),
@@ -1396,6 +1492,10 @@ const quizSubmission = createResource<QuizSubmissionResult>({
 			violation_count: values?.violation_count ?? violationCount.value,
 			submission_reason: values?.submission_reason ?? 'manual',
 			violation_events: serialiseViolationLog(),
+			// The questions this attempt was offered, answered or not (#32):
+			// the server sizes the attempt's denominator by them, so an offered
+			// question the learner skipped still counts against the score.
+			question_pool: JSON.stringify(questions.value.map((row) => row.question)),
 		}
 	},
 })
@@ -1479,6 +1579,10 @@ watch(
 			// start card with neither a Start button nor the exceeded-attempts
 			// message, both of which read attempts.data?.length.
 			attempts.reset()
+			// The credits belong to the quiz being left; reload or the retake
+			// would filter by another quiz's credited set (#32).
+			creditedQuestions.reset()
+			creditedQuestions.reload()
 			// A submission already in flight is NOT aborted: the POST has reached the
 			// server and the attempt is spent either way, so cancelling the client
 			// would only hide the result. It is ignored instead, by submittedQuiz.
@@ -1875,6 +1979,9 @@ const createSubmission = (reason: SubmissionReason = 'manual'): void => {
 				}
 				markLessonProgress()
 				if (quiz.data && quiz.data.max_attempts) attempts.reload()
+				// The attempt just spent may have credited answers; refetch so a
+				// retake offered from here asks only what remains (#32).
+				if (!props.preview) creditedQuestions.reload()
 				stopTimer()
 			},
 			onError(err: FrappeResourceError) {

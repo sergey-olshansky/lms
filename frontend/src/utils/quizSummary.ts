@@ -36,11 +36,13 @@ export const attemptsAllowedLabel = (maxAttempts: number): string =>
 // post-submit attempt summary shows it (#27). The order matters:
 //
 // - An open-ended answer that actually carries content has no verdict until an
-//   instructor grades it, so it must read as pending review, never as
-//   incorrect, even though the server stores `is_correct = 0` at submit time.
+// instructor grades it, so it must read as pending review, never as
+// incorrect, even though the server stores `is_correct = 0` at submit time —
+// unless the grade already sits at full marks, which is exactly what
+// "credited" means once a full-mark answer is carried into a retake (#32).
 // - An empty answer is a skipped question whatever its type — the server
-//   normalises skipped answers to "", and a blank open-ended answer has nothing
-//   to review, so "pending" would promise a review of nothing.
+// normalises skipped answers to "", and a blank open-ended answer has nothing
+// to review, so "pending" would promise a review of nothing.
 // - Only then does the stored binary verdict decide correct vs incorrect.
 //
 // The answer is the learner's own response; nothing here can see the key.
@@ -48,9 +50,15 @@ export const attemptRowStatus = (row: {
 	question_type?: QuizQuestionType | string | null
 	answer?: string | null
 	is_correct?: 0 | 1 | boolean | null
+	marks?: number | null
+	marks_out_of?: number | null
 }): QuizAttemptRowStatus => {
 	const answered = !!(row.answer ?? '').trim()
-	if (row.question_type == 'Open Ended' && answered) return 'pending'
+	if (row.question_type == 'Open Ended' && answered) {
+		const marks = row.marks ?? 0
+		const marksOutOf = row.marks_out_of ?? 0
+		return marksOutOf > 0 && marks >= marksOutOf ? 'correct' : 'pending'
+	}
 	if (!answered) return 'skipped'
 	return row.is_correct ? 'correct' : 'incorrect'
 }
