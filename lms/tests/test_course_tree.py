@@ -16,7 +16,7 @@ import zipfile
 from pathlib import Path
 
 import frappe
-from frappe.tests.utils import IntegrationTestCase
+from frappe.tests import IntegrationTestCase
 
 from lms.lms.api import delete_chapter, move_section, upsert_chapter, update_section_index
 from lms.lms.course_import_export import import_course_zip
