@@ -12,6 +12,7 @@
   "column_break_3",
   "course",
   "course_title",
+  "parent_section",
   "scorm_section",
   "is_scorm_package",
   "scorm_package",
@@ -105,6 +106,13 @@
    "fieldtype": "Data",
    "label": "Course Title",
    "read_only": 1
+  },
+  {
+   "description": "Leave empty for a top-level section. Nested sections are optional and counted up to 4 levels below the course.",
+   "fieldname": "parent_section",
+   "fieldtype": "Link",
+   "label": "Parent Section",
+   "options": "Course Chapter"
   }
  ],
  "grid_page_length": 50,
@@ -116,7 +124,7 @@
    "link_fieldname": "chapter"
   }
  ],
- "modified": "2026-09-20 00:00:00.000000",
+ "modified": "2026-10-20 04:00:00.000000",
  "modified_by": "Administrator",
  "module": "LMS",
  "name": "Course Chapter",

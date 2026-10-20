@@ -55,7 +55,11 @@ export const routes = [
 		],
 	},
 	{
-		path: '/courses/:courseName/learn/:chapterNumber-:lessonNumber',
+		// The chapter segment is a dash-joined section path ("2" legacy, "2-1-3"
+		// nested); the character-class pattern keeps the split at the LAST dash so
+		// the lesson segment stays the trailing number. Legacy URLs resolve
+		// identically.
+		path: '/courses/:courseName/learn/:chapterNumber([0-9-]+)-:lessonNumber([0-9]+)',
 		name: 'Lesson',
 		component: () => import('@/pages/Lesson.vue'),
 		props: true,

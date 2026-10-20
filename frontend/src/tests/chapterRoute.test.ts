@@ -83,7 +83,7 @@ vi.mock('@/components/Controls/BooleanSwitch.vue', () => ({
 vi.mock('vuedraggable', () => ({
 	default: { props: ['list'], template: `<div />` },
 }))
-vi.mock('@/components/ChapterRow.vue', () => ({
+vi.mock('@/components/SectionRow.vue', () => ({
 	default: { template: `<div />` },
 }))
 
@@ -190,7 +190,13 @@ const dismissDialog = async (
 	router: Router
 ): Promise<void> => {
 	const navigated = nextNavigation(router)
-	wrapper.findComponent({ name: 'Dialog' }).vm.$emit('update:open', false)
+	// CourseOutline now carries its own (closed) section dialogs, so "the
+	// Dialog" is no longer unique — close the one that is actually open.
+	const dialog = wrapper
+		.findAllComponents({ name: 'Dialog' })
+		.find((d) => d.props('open'))
+	expect(dialog).toBeDefined()
+	dialog!.vm.$emit('update:open', false)
 	await navigated
 	await flushPromises()
 }
@@ -241,6 +247,43 @@ describe('the chapter route', () => {
 		expect(router.resolve('/courses/COURSE-1/certification').name).toBe(
 			'CourseCertification'
 		)
+	})
+
+	// Task 28: the chapter segment of a lesson URL is a dash-joined section
+	// path ("2" legacy, "2-1-3" nested). The route's custom regex must keep the
+	// split at the LAST dash — the default greedy split would hand the nested
+	// path's tail to the lesson param — while legacy two-segment URLs keep
+	// resolving with identical params.
+	describe('nested section paths in the lesson route', () => {
+		it('splits a nested path at the last dash', () => {
+			const router = makeRouter()
+			const resolved = router.resolve('/courses/COURSE-1/learn/2-1-3-2')
+			expect(resolved.name).toBe('Lesson')
+			expect(resolved.params.chapterNumber).toBe('2-1-3')
+			expect(resolved.params.lessonNumber).toBe('2')
+		})
+
+		it('keeps legacy two-segment URLs byte-identical', () => {
+			const router = makeRouter()
+			const resolved = router.resolve('/courses/COURSE-1/learn/3-12')
+			expect(resolved.params.chapterNumber).toBe('3')
+			expect(resolved.params.lessonNumber).toBe('12')
+		})
+
+		it('builds a nested URL from params and re-parses it', () => {
+			const router = makeRouter()
+			const location = router.resolve({
+				name: 'Lesson',
+				params: {
+					courseName: 'COURSE-1',
+					chapterNumber: '2-1',
+					lessonNumber: '4',
+				},
+			})
+			expect(location.href).toContain('/learn/2-1-4')
+			expect(location.params.chapterNumber).toBe('2-1')
+			expect(location.params.lessonNumber).toBe('4')
+		})
 	})
 
 	// C2. CourseDetail keeps its active tab in route.hash and CourseEditor keeps

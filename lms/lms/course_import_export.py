@@ -13,7 +13,7 @@ from frappe.utils import escape_html, validate_email_address
 from frappe.utils.file_manager import is_safe_path
 
 from lms.lms.utils import create_user as create_lms_user
-from lms.lms.utils import get_editorjs_blocks, has_moderator_role
+from lms.lms.utils import get_editorjs_blocks, get_outline_sections, has_moderator_role
 
 # What a course legitimately embeds. Active-document types (.html, .xhtml, .js, .xsl)
 # would be written to /files/ and served inline, which is stored XSS on the LMS origin;
@@ -78,6 +78,14 @@ def get_chapters_for_export(chapters: list):
 	for row in chapters:
 		chapter = frappe.get_doc("Course Chapter", row.chapter)
 		chapters_list.append(chapter)
+	# Nested sections travel too: their docs carry parent_section, and their
+	# child rows carry the section links that rebuild the tree on import. A
+	# flat course exports exactly the root chapters, as before.
+	seen = {chapter.name for chapter in chapters_list}
+	for row in get_outline_sections([chapter.name for chapter in chapters_list]):
+		if row.name not in seen:
+			seen.add(row.name)
+			chapters_list.append(frappe.get_doc("Course Chapter", row.name))
 	return chapters_list
 
 
@@ -382,10 +390,10 @@ def import_course_zip(zip_file_path):
 		create_user_for_instructors(zip_file)
 		create_evaluator(zip_file)
 		course_doc = create_course_doc(course_data)
-		chapter_docs = create_chapter_docs(zip_file, course_doc.name)
+		chapter_docs, chapter_info = create_chapter_docs(zip_file, course_doc.name)
 		create_assessment_docs(zip_file)
 		create_lesson_docs(zip_file, course_doc.name, chapter_docs)
-		save_course_structure(zip_file, course_doc, chapter_docs)
+		save_course_structure(zip_file, course_doc, chapter_docs, chapter_info)
 		return course_doc.name
 
 
@@ -611,18 +619,28 @@ def exclude_meta_fields(data):
 
 def create_chapter_docs(zip_file, course_name):
 	chapter_docs = []
+	chapter_info = []
 	for file in zip_file.namelist():
 		if file.startswith("chapters/") and file.endswith(".json"):
 			chapter_data = read_json_from_zip(zip_file, file)
+			old_name = chapter_data.get("name")
+			parent_old = chapter_data.get("parent_section")
 			chapter_data = exclude_meta_fields(chapter_data)
 			if chapter_data:
 				chapter_doc = frappe.new_doc("Course Chapter")
 				chapter_data.pop("lessons", None)
+				# parent_section names a doc of the source site; the link is
+				# remapped and re-attached once every chapter exists.
+				chapter_data.pop("parent_section", None)
 				drop_scorm_fields(chapter_data)
 				chapter_doc.update(chapter_data)
 				chapter_doc.course = course_name
 				chapter_doc.insert(ignore_permissions=True)
 				chapter_docs.append(chapter_doc)
+				chapter_info.append(
+					{"old_name": old_name, "parent_old": parent_old, "doc": chapter_doc}
+				)
+	return chapter_docs, chapter_info
 	return chapter_docs
 
 
@@ -1019,33 +1037,87 @@ def get_lesson_title(zip_file, lesson_name):
 	return None
 
 
-def add_lessons_to_chapters(zip_file, course_name, chapter_docs):
+def add_lessons_to_chapters(zip_file, course_name, chapter_docs, chapter_info):
+	"""Rebuild each section's single order of mixed children and the nesting.
+
+	Rows are appended in archive order, so the exported interleaving of lessons
+	and nested sections survives. Chapters then save parents-first, which is
+	what lets CourseChapter.validate walk a complete parent chain: a tree that
+	claims more than 4 section levels is refused here, rolling the whole import
+	back with it.
+	"""
+	old_to_new = {info["old_name"]: info["doc"].name for info in chapter_info}
+	info_by_old = {info["old_name"]: info for info in chapter_info}
+
+	depth_by_old = {}
+
+	def imported_depth(info):
+		depth = depth_by_old.get(info["old_name"])
+		if depth is not None:
+			return depth
+		depth = 1
+		seen = set()
+		parent_old = info["parent_old"]
+		while parent_old:
+			if parent_old in seen or parent_old not in info_by_old:
+				break
+			seen.add(parent_old)
+			depth += 1
+			parent_old = info_by_old[parent_old]["parent_old"]
+		depth_by_old[info["old_name"]] = depth
+		return depth
+
 	for file in zip_file.namelist():
 		if file.startswith("chapters/") and file.endswith(".json"):
 			chapter_data = read_json_from_zip(zip_file, file)
-			chapter_doc = next((c for c in chapter_docs if c.title == chapter_data.get("title")), None)
-			if not chapter_doc:
+			info = next((i for i in chapter_info if i["doc"].title == chapter_data.get("title")), None)
+			if not info:
 				continue
-			for lesson in chapter_data.get("lessons", []):
-				lesson_title = get_lesson_title(zip_file, lesson["lesson"])
-				lesson_name = frappe.db.get_value(
-					"Course Lesson", {"title": lesson_title, "course": course_name}, "name"
+			chapter_doc = info["doc"]
+			for child in chapter_data.get("lessons", []):
+				if child.get("lesson"):
+					lesson_title = get_lesson_title(zip_file, child["lesson"])
+					lesson_name = frappe.db.get_value(
+						"Course Lesson", {"title": lesson_title, "course": course_name}, "name"
+					)
+					if lesson_name:
+						chapter_doc.append("lessons", {"lesson": lesson_name})
+				elif child.get("section"):
+					new_section = old_to_new.get(child["section"])
+					if new_section:
+						chapter_doc.append("lessons", {"section": new_section})
+			if imported_depth(info) > 4:
+				frappe.throw(
+					_("Cannot save: this would exceed 4 section levels"),
+					frappe.ValidationError,
 				)
-				if lesson_name:
-					chapter_doc.append("lessons", {"lesson": lesson_name})
-			chapter_doc.save(ignore_permissions=True)
+
+	# Parents first: a child's validate() reads its parent chain from the
+	# database, so every ancestor is persisted before any descendant saves.
+	for info in sorted(chapter_info, key=imported_depth):
+		doc = info["doc"]
+		if info["parent_old"]:
+			doc.parent_section = old_to_new.get(info["parent_old"])
+		doc.save(ignore_permissions=True)
 
 
-def add_chapter_to_course(course_doc, chapter_docs):
+def add_chapter_to_course(course_doc, chapter_docs, chapter_info):
 	course_doc.reload()
+	old_to_new = {info["old_name"]: info["doc"].name for info in chapter_info}
+	info_by_old = {info["old_name"]: info for info in chapter_info}
 	for chapter_doc in chapter_docs:
+		info = next((i for i in chapter_info if i["doc"].name == chapter_doc.name), None)
+		# Only sections without a surviving parent become level-1 sections of
+		# the course; nested ones are attached by their parent's child rows.
+		if info and info["parent_old"] and info["parent_old"] in info_by_old:
+			continue
 		course_doc.append("chapters", {"chapter": chapter_doc.name})
 	course_doc.save(ignore_permissions=True)
 
 
-def save_course_structure(zip_file, course_doc, chapter_docs):
-	add_chapter_to_course(course_doc, chapter_docs)
-	add_lessons_to_chapters(zip_file, course_doc.name, chapter_docs)
+def save_course_structure(zip_file, course_doc, chapter_docs, chapter_info):
+	add_chapter_to_course(course_doc, chapter_docs, chapter_info)
+	add_lessons_to_chapters(zip_file, course_doc.name, chapter_docs, chapter_info)
 
 
 def validate_zip_file(zip_file_path):

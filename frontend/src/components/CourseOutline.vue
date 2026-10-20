@@ -26,12 +26,12 @@
 			class="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center text-ink-gray-5 h-full"
 		>
 			<span class="lucide-book-open size-8" />
-			<div class="text-sm">{{ __('No chapters yet') }}</div>
+			<div class="text-sm">{{ __('No sections yet') }}</div>
 			<Button @click="openChapterForm()">
 				<template #prefix>
 					<span class="lucide-plus size-4" />
 				</template>
-				{{ __('Create chapter') }}
+				{{ __('Create section') }}
 			</Button>
 		</div>
 		<div
@@ -49,14 +49,18 @@
 			>
 				<template #item="{ element: chapter }">
 					<div class="chapter-item">
-						<ChapterRow
-							:chapter="chapter"
+						<SectionRow
+							:section="chapter"
+							:level="1"
+							:ancestorPath="''"
+							:position="chapterIndex(chapter)"
+							:siblingCount="outline.data?.length ?? 1"
 							:courseName="courseName"
 							:allowEdit="allowEdit"
 							:inlineSelect="inlineSelect"
 							:editorLinks="editorLinks"
 							:selectedLessonNumber="selectedLessonNumber"
-							:creatingLesson="creatingLessonChapter === chapter.name"
+							:creatingLessonChapter="creatingLessonChapter === chapter.name"
 							@select-lesson="(payload) => emit('select-lesson', payload)"
 							@edit-chapter="openChapterForm"
 							@rename-chapter="renameChapter"
@@ -68,11 +72,26 @@
 							"
 							@move-lesson="updateOutline"
 							@create-lesson="createLessonInline"
+							@add-section="openAddSection"
+							@move-section="openMoveSection"
+							@reorder-section="reorderSection"
 						/>
 					</div>
 				</template>
 			</Draggable>
 		</div>
+		<SectionFormModal
+			v-if="allowEdit"
+			ref="sectionForm"
+			:courseName="courseName"
+			:outline="outline"
+		/>
+		<MoveSectionModal
+			v-if="allowEdit"
+			ref="moveForm"
+			:courseName="courseName"
+			:outline="outline"
+		/>
 	</div>
 </template>
 
@@ -80,12 +99,19 @@
 import { Button, createResource, toast } from 'frappe-ui'
 import type { FrappeResourceError } from 'frappe-ui'
 import { resourceErrorMessage } from '@/utils/resource'
-import { ref, watch } from 'vue'
+import { getCurrentInstance, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Draggable from 'vuedraggable'
 
-import ChapterRow from '@/components/ChapterRow.vue'
+import SectionRow from '@/components/SectionRow.vue'
+import SectionFormModal from '@/components/Modals/SectionFormModal.vue'
+import MoveSectionModal from '@/components/Modals/MoveSectionModal.vue'
 import { openFormRoute } from '@/composables/useFormRoute'
+import {
+	flattenLessons,
+	forEachLesson,
+	parseLessonNumber,
+} from '@/utils/courseOutline'
 import type { OutlineChapter, OutlineLesson, Resource } from '@/types'
 
 interface DraggableEvent {
@@ -107,10 +133,9 @@ type DialogFn = (opts: {
 	actions: DialogAction[]
 }) => void
 
-import { getCurrentInstance } from 'vue'
 const router = useRouter()
 const route = useRoute()
-// True while a ChapterRow is in inline-rename mode; locks chapter drag.
+// True while a SectionRow is in inline-rename mode; locks section drag.
 const chapterRenaming = ref<boolean>(false)
 const { $dialog } = getCurrentInstance()!.appContext.config
 	.globalProperties as {
@@ -126,9 +151,10 @@ const emit = defineEmits<{
 	'chapter-deleted': [{ chapter: string }]
 }>()
 
-// The lesson currently being named inline (its docname), and the chapter whose
-// "Add Lesson" button is mid-create (for the button spinner).
+// The chapter whose "Add Lesson" button is mid-create (for the button spinner).
 const creatingLessonChapter = ref<string>('')
+const sectionForm = ref<InstanceType<typeof SectionFormModal> | null>(null)
+const moveForm = ref<InstanceType<typeof MoveSectionModal> | null>(null)
 
 const props = withDefaults(
 	defineProps<{
@@ -178,13 +204,9 @@ watch(
 	() => props.completedLesson,
 	(lessonName) => {
 		if (!lessonName || !outline.data) return
-		for (const chapter of outline.data) {
-			const found = chapter.lessons?.find((l) => l.name === lessonName)
-			if (found) {
-				found.is_complete = true
-				break
-			}
-		}
+		forEachLesson(outline.data, (lesson) => {
+			if (lesson.name === lessonName) lesson.is_complete = true
+		})
 	}
 )
 
@@ -226,6 +248,17 @@ const updateChapterIndex = createResource({
 	onSuccess() {
 		outline.reload()
 		toast.success(__('Chapter moved successfully'))
+	},
+})
+
+const updateSectionIndex = createResource({
+	url: 'lms.lms.api.update_section_index',
+	makeParams(values: { section: string; parent: string; idx: number }) {
+		return values
+	},
+	onSuccess() {
+		outline.reload()
+		toast.success(__('Order updated'))
 	},
 })
 
@@ -291,9 +324,9 @@ function createLessonInline(payload: {
 			onSuccess(lessonName: string) {
 				creatingLessonChapter.value = ''
 				outline.reload().then(() => {
-					const created = (outline.data ?? [])
-						.flatMap((c) => c.lessons ?? [])
-						.find((l) => l.name === lessonName)
+					const created = flattenLessons(outline.data).find(
+						(l) => l.name === lessonName
+					)
 					if (created) navigateToLesson(created)
 				})
 			},
@@ -306,7 +339,7 @@ function createLessonInline(payload: {
 }
 
 function navigateToLesson(lesson: OutlineLesson) {
-	const [chapterNumber, lessonNumber] = lesson.number.split('-')
+	const { chapterNumber, lessonNumber } = parseLessonNumber(lesson.number)
 	if (props.inlineSelect) {
 		emit('select-lesson', { chapterNumber, lessonNumber })
 		return
@@ -347,12 +380,44 @@ function trashLesson(lessonName: string, chapterName: string) {
 	})
 }
 
+function chapterIndex(chapter: OutlineChapter): number {
+	return outline.data?.findIndex((c) => c.name === chapter.name) ?? 0
+}
+
+// Subtree counts for the delete confirmation (design §4.7): nested sections
+// and lessons going with the section, zero parts omitted.
+function subtreeCounts(chapterName: string): { sections: number; lessons: number } {
+	const section = (outline.data ?? []).find((c) => c.name === chapterName)
+	if (!section) return { sections: 0, lessons: 0 }
+	const collect = (nodes: OutlineChapter[], sections: number, lessons: number) => {
+		for (const node of nodes) {
+			sections += 1
+			lessons += node.lessons?.length ?? 0
+			;[sections, lessons] = collect(node.sections ?? [], sections, lessons)
+		}
+		return [sections, lessons] as const
+	}
+	const [sections, lessons] = collect(section.sections ?? [], 0, 0)
+	return { sections, lessons }
+}
+
 function trashChapter(chapterName: string) {
+	const { sections, lessons } = subtreeCounts(chapterName)
+	const parts: string[] = []
+	if (sections) {
+		parts.push(`${sections} ${__('sections')}`)
+	}
+	if (lessons) {
+		parts.push(`${lessons} ${lessons === 1 ? __('lesson') : __('lessons')}`)
+	}
+	const message = parts.length
+		? __('Will be deleted: {0}, including student progress on those lessons').format(
+				parts.join(' and ')
+		  )
+		: __('This section is empty.')
 	$dialog({
-		title: __('Delete this chapter?'),
-		message: __(
-			'Deleting this chapter will also delete all its lessons and permanently remove it from the course. This action cannot be undone. Are you sure you want to continue?'
-		),
+		title: __('Delete section?'),
+		message,
 		actions: [
 			{
 				label: __('Delete'),
@@ -389,6 +454,55 @@ function openChapterForm(chapter: OutlineChapter | null = null) {
 		},
 		hash: route.hash,
 		query: { ...route.query },
+	})
+}
+
+// The create-section dialog's context line: the titles from the first
+// level-1 section down to the parent (design §4.3).
+function openAddSection(parent: OutlineChapter) {
+	const ancestors = findAncestorsByName(parent.name)
+	sectionForm.value?.open(parent, ancestors.map((a) => a.title))
+}
+
+function findAncestorsByName(name: string): OutlineChapter[] {
+	const walk = (nodes: OutlineChapter[], path: OutlineChapter[]): OutlineChapter[] | null => {
+		for (const node of nodes) {
+			const next = [...path, node]
+			if (node.name === name) return next
+			const found = walk(node.sections ?? [], next)
+			if (found) return found
+		}
+		return null
+	}
+	return walk(outline.data ?? [], []) ?? []
+}
+
+function openMoveSection(section: OutlineChapter) {
+	moveForm.value?.open(section)
+}
+
+// Выше/Ниже for a section: level-1 sections reorder within the course's
+// chapter list (the same order the top-level drag writes); a nested section
+// swaps with its previous/next child row of the parent, whatever kind it is.
+function reorderSection(payload: { section: OutlineChapter; direction: 'up' | 'down' }) {
+	const { section, direction } = payload
+	const ancestors = findAncestorsByName(section.name)
+	const parent = ancestors.length > 1 ? ancestors[ancestors.length - 2] : null
+	const delta = direction === 'up' ? -1 : 1
+	if (!parent) {
+		const index = chapterIndex(section)
+		updateChapterIndex.submit({
+			chapter: section.name,
+			course: props.courseName,
+			idx: Math.max(0, index + delta),
+		})
+		return
+	}
+	const rowIndex = (section.position ?? 1) - 1
+	updateSectionIndex.submit({
+		section: section.name,
+		parent: parent.name,
+		idx: Math.max(0, rowIndex + delta),
 	})
 }
 

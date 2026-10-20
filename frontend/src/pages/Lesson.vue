@@ -378,6 +378,11 @@ import { useSidebar } from '@/stores/sidebar'
 import { useSettings } from '@/stores/settings'
 import { useScreenSize } from '@/utils/composables'
 import {
+	flattenLessons,
+	lessonAncestors,
+	parseLessonNumber,
+} from '@/utils/courseOutline'
+import {
 	resolveDwellSeconds,
 	isVideoComplete,
 	shouldStartDwellTimer,
@@ -723,6 +728,33 @@ const breadcrumbs = computed(() => {
 		label: lesson?.data?.course_title,
 		route: { name: 'CourseDetail', params: { courseName: props.courseName } },
 	})
+	// Section-path breadcrumbs appear ONLY deeper than level 1 (design §5.2):
+	// a legacy depth-1 lesson gets no new UI element.
+	const ancestors = lessonAncestors(
+		outline.data,
+		`${props.chapterNumber}-${props.lessonNumber}`
+	)
+	if (ancestors.length > 1) {
+		for (const ancestor of ancestors) {
+			const firstLesson = flattenLessons([ancestor])[0]
+			if (!firstLesson) continue
+			const { chapterNumber, lessonNumber } = parseLessonNumber(
+				firstLesson.number
+			)
+			crumbs.push({
+				label: ancestor.title,
+				route: {
+					name: 'Lesson',
+					params: {
+						courseName: props.courseName,
+						chapterNumber,
+						lessonNumber,
+					},
+					query: studentViewQuery.value,
+				},
+			})
+		}
+	}
 	crumbs.push({
 		label: lesson?.data?.title,
 		route: {
@@ -757,9 +789,7 @@ watch(
 )
 
 const lessonNumbers = computed<string[]>(() =>
-	(outline.data ?? []).flatMap(
-		(c: OutlineChapter) => c.lessons?.map((l) => l.number) ?? []
-	)
+	flattenLessons(outline.data).map((l) => l.number)
 )
 const currentIndex = computed(() =>
 	lessonNumbers.value.indexOf(`${props.chapterNumber}-${props.lessonNumber}`)
@@ -772,9 +802,7 @@ const hasPrev = computed(() => currentIndex.value > 0)
 const hasNext = computed(
 	() => currentIndex.value >= 0 && currentIndex.value < lessonTotal.value - 1
 )
-const outlineLessons = computed(() =>
-	(outline.data ?? []).flatMap((c: OutlineChapter) => c.lessons ?? [])
-)
+const outlineLessons = computed(() => flattenLessons(outline.data))
 const nextLessonLocked = computed(
 	() => !!outlineLessons.value[currentIndex.value + 1]?.locked
 )
@@ -793,7 +821,9 @@ const goToLessonNumber = (
 	{ replace = false }: { replace?: boolean } = {}
 ): void => {
 	trackVideoWatchDuration()
-	const [chapterNumber, lessonNumber] = number.split('-')
+	// "2-1-3-2": everything before the last dash is the section path, the last
+	// segment is the lesson's position inside its own section.
+	const { chapterNumber, lessonNumber } = parseLessonNumber(number)
 	const target = {
 		name: 'Lesson',
 		params: {
@@ -827,18 +857,17 @@ const goNext = () => {
 const switchLesson = (direction: 'prev' | 'next'): void => {
 	if (direction === 'next' && !canGoNext.value) return
 	trackVideoWatchDuration()
-	let target =
-		direction === 'prev'
-			? lesson.data.prev.split('.')
-			: lesson.data.next.split('.')
-
-	const [chapterNumber, lessonNumber] = target
+	// Neighbours arrive as dash-path numbers ("2-1-3-2"), the same form as
+	// outline numbers; parse them instead of assuming the old two-segment split.
+	const target = parseLessonNumber(
+		direction === 'prev' ? lesson.data.prev : lesson.data.next
+	)
 	router.push({
 		name: 'Lesson',
 		params: {
 			courseName: props.courseName,
-			chapterNumber,
-			lessonNumber,
+			chapterNumber: target.chapterNumber,
+			lessonNumber: target.lessonNumber,
 		},
 		query: studentViewQuery.value,
 	})

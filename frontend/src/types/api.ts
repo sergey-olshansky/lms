@@ -86,15 +86,29 @@ export interface OutlineLesson {
 	icon?: string
 	is_complete?: boolean
 	locked?: 0 | 1
+	/** Position of the child-table row that places this lesson inside its
+	 * section's single manual order of mixed lessons and sections. */
+	position?: number
 }
 
 export interface OutlineChapter {
 	name: string
 	title: string
 	idx: number
+	/** Structural depth of the section, 1..4; the course root is not counted. */
+	level?: number
+	/** Position of the child-table row that places this section inside its
+	 * parent's single manual order of mixed lessons and sections. */
+	position?: number
 	is_scorm_package?: 0 | 1
 	scorm_package?: { file_name: string; file_size: number } | null
 	lessons?: OutlineLesson[]
+	sections?: OutlineChapter[]
+	/** Direct child counts. */
+	lesson_count?: number
+	section_count?: number
+	/** Every lesson in this section's subtree (the learner-facing badge). */
+	total_lesson_count?: number
 }
 
 export interface CertificationInfo {
