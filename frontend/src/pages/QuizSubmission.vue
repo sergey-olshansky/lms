@@ -1,6 +1,14 @@
 <template>
 	<PageHeader :breadcrumbs="breadcrumbs">
 		<template #actions>
+			<!-- The PDF of this very report (#33): the same renderer the
+			     completion email attaches, behind the same review rights. Own
+			     attempt or not, downloading the report is a read, not a grade. -->
+			<HeaderButton
+				:label="__('Download PDF')"
+				icon="lucide-file-down"
+				@click="downloadPdf"
+			/>
 			<!-- The sentence is why the Save button is missing, so it has to stay
 			     reachable on a phone. A tooltip would not do it: there is no hover on
 			     a touch screen, so the header spells it out where it fits and hands
@@ -82,107 +90,43 @@
 					{{ submissionDetails.doc.quiz_title }}
 				</h1>
 
-				<!-- An attempt cut short by the violation limit can be submitted before
-				     a single answer is given, and an empty column beside a populated
-				     sidebar reads as a page that failed to load. -->
-				<p
-					v-if="!submissionDetails.doc.result?.length"
-					class="px-5 text-base leading-6 text-ink-gray-5"
-				>
-					{{ __('No questions were attempted in this submission.') }}
-				</p>
-
-				<div v-else class="divide-y">
-					<div
-						v-for="(row, index) in submissionDetails.doc.result"
-						:key="row.name"
-						class="flex flex-col gap-3 px-5 py-3 lg:grid lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start lg:gap-10 lg:pe-10"
+				<!-- The report itself is the learner's per-attempt report (#31):
+				     the same shared body, question-for-question and label-for-label,
+				     so the two cannot drift apart. What stays this page's own is the
+				     grader's hand: pending marks are editable in place, and the strict
+				     verdicts of the attempt's grading stay exactly as stored. -->
+				<div class="px-5 pb-5 lg:pe-10">
+					<QuizAttemptReport
+						:results="submissionDetails.doc.result || []"
+						:questions-by-name="questionsByName"
+						:can-view-correct-answers="true"
+						:correct-answers="correctAnswers"
 					>
-						<div class="min-w-0 space-y-3">
-							<!-- The number runs inline with the question rather than beside
-							     it. As a flex sibling it made the text its own column, so
-							     every wrapped line hung under the first word and indented
-							     away from the answer beneath it.
-							     Editor content arrives wrapped in <p>: dropped to inline so
-							     it stays on the number's line, and stripped of the UA margin
-							     this layout never asked for. -->
-							<div class="flex items-start gap-2">
-								<div
-									class="min-w-0 flex-1 text-base leading-6 text-ink-gray-9 [&_p]:m-0 [&_p]:inline"
-								>
-									<!-- A margin, not whitespace: Vue's `condense` strips a
-									     whitespace-only node between two elements when it spans
-									     a newline, so the gap has to be a real style. -->
-									<span class="me-2 text-ink-gray-4">
-										{{ __('Q{0}:').format(index + 1) }}
-									</span>
-									<span v-safe-html:rich="row.question" />
-								</div>
+						<template #marks="{ row, resultRow }">
+							<div class="ms-auto flex shrink-0 items-center gap-1.5">
 								<span
-									class="mt-2 size-1.5 shrink-0 rounded-full"
-									:class="markStatusClass(row)"
+									class="text-xs font-medium uppercase tracking-wide text-ink-gray-4 lg:hidden"
+								>
+									{{ __('Marks:') }}
+								</span>
+								<FormControl
+									v-if="row.status === 'pending'"
+									v-model="resultRow.marks"
+									type="number"
+									class="w-20"
 								/>
-							</div>
-							<!-- Same shape as the question above: the label runs inline with
-							     the text it introduces, so a wrapped answer returns to the
-							     left edge instead of hanging under its first word. -->
-							<div
-								class="text-base leading-6 text-ink-gray-6 [&_p]:m-0 [&_p]:inline"
-							>
-								<span
-									class="me-2 text-xs font-medium uppercase tracking-wide text-ink-gray-4"
-								>
-									{{ __('Answer:') }}
-								</span>
-								<span v-safe-html:rich="row.answer" />
-							</div>
-							<!-- Tutor customization: show the correct answer next to the
-						     learner's answer while grading. -->
-							<div
-								class="text-base leading-6 text-ink-gray-6 [&_p]:m-0 [&_p]:inline"
-							>
-								<span
-									class="me-2 text-xs font-medium uppercase tracking-wide text-ink-gray-4"
-								>
-									{{ __('Correct Answer:') }}
-								</span>
-								<span class="leading-5" v-if="correctAnswers.loading">…</span>
-								<span v-else-if="correctAnswers.error" class="text-ink-red-5">
-									{{ __('Could not load correct answers') }}
-								</span>
 								<span
 									v-else
-									v-safe-html:rich="correctAnswer(row.question_name)"
-								/>
+									class="text-sm font-medium text-ink-gray-7 lg:w-20 lg:text-end"
+								>
+									{{ row.marks }}
+								</span>
+								<span class="text-sm text-ink-gray-5">
+									/ {{ row.marks_out_of }}
+								</span>
 							</div>
-						</div>
-						<!-- Only an open-ended answer is a judgement call; a choice was
-						     already marked when it was submitted. -->
-						<!-- Stacked, the marks are another labelled line under the answer
-						     rather than a figure adrift at the far edge of the screen. -->
-						<div class="flex shrink-0 items-center gap-1.5">
-							<span
-								class="text-xs font-medium uppercase tracking-wide text-ink-gray-4 lg:hidden"
-							>
-								{{ __('Marks:') }}
-							</span>
-							<FormControl
-								v-if="isOpenEnded"
-								v-model="row.marks"
-								type="number"
-								class="w-20"
-							/>
-							<span
-								v-else
-								class="text-sm font-medium text-ink-gray-7 lg:w-20 lg:text-end"
-							>
-								{{ row.marks }}
-							</span>
-							<span class="text-sm text-ink-gray-5">
-								/ {{ row.marks_out_of }}
-							</span>
-						</div>
-					</div>
+						</template>
+					</QuizAttemptReport>
 				</div>
 			</div>
 
@@ -382,10 +326,12 @@ import {
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useDebounceFn, useMediaQuery } from '@vueuse/core'
 import { safeUrl } from '@/utils/safeUrl'
+import { openExternal } from '@/utils/openExternal'
 import PageHeader from '@/components/Layouts/pages/PageHeader.vue'
 import PageBody from '@/components/Layouts/pages/PageBody.vue'
 import HeaderButton from '@/components/HeaderButton.vue'
 import ShortcutTooltip from '@/components/ShortcutTooltip.vue'
+import QuizAttemptReport from '@/components/Assessment/QuizAttemptReport.vue'
 import {
 	useKeyboardShortcuts,
 	saveShortcut,
@@ -437,6 +383,41 @@ const correctAnswers = createResource({
 	auto: true,
 })
 
+// Live question data of the quiz, for the report's question-text resolver
+// (#31): the stored snapshot of a row can be empty or stale, and the full
+// assignment body — wording and task imagery — is what a review needs. Staff
+// review rights are what the page already checked the caller for.
+const quizQuestions = createResource({
+	url: 'lms.lms.utils.get_quiz_with_questions',
+	makeParams() {
+		// The endpoint requires the quiz; without it every fetch throws and
+		// the report falls back to the stored snapshots alone.
+		return { quiz: submissionDetails.doc?.quiz }
+	},
+	auto: false,
+})
+
+watch(
+	() => submissionDetails.doc?.quiz,
+	(quiz) => {
+		if (quiz) quizQuestions.fetch()
+	},
+	{ immediate: true }
+)
+
+const questionsByName = computed(
+	() => quizQuestions.data?.questions_by_name || {}
+)
+
+// The PDF of this attempt (#33): the teacher-only download endpoint renders
+// the same report server-side. Opened through the shared helper, so the URL
+// clears the same allowlist every external window of the app does.
+const downloadPdf = () => {
+	openExternal(
+		`/api/method/lms.lms.doctype.lms_quiz.quiz_attempt_report.download_attempt_report_pdf?submission=${encodeURIComponent(props.submission)}`
+	)
+}
+
 const violationLog = createResource({
 	url: 'lms.lms.doctype.lms_quiz.lms_quiz.get_quiz_violation_logs',
 	makeParams() {
@@ -444,21 +425,6 @@ const violationLog = createResource({
 	},
 	auto: true,
 })
-
-const correctAnswer = (questionName) => {
-	const answers = correctAnswers.data?.[questionName] || []
-	return answers.length ? answers.join(', ') : '—'
-}
-
-const openEndedCheck = createResource({
-	url: 'lms.lms.doctype.lms_quiz.lms_quiz.is_open_ended_submission',
-	makeParams() {
-		return { submission: props.submission }
-	},
-	auto: true,
-})
-
-const isOpenEnded = computed(() => !!openEndedCheck.data)
 
 // Said in two places — the header spells it out, the popover carries it on a
 // phone — so it is written once.
@@ -532,11 +498,6 @@ watch(isDesktop, (desktop) => {
 // milder of them rather than surfacing a raw value.
 const severityLabel = (severity) =>
 	severity === 'violation' ? __('Violation') : __('Warning')
-
-const markStatusClass = (row) => {
-	if (row.marks == row.marks_out_of) return 'bg-surface-green-6'
-	return row.marks > 0 ? 'bg-surface-orange-6' : 'bg-surface-red-6'
-}
 
 // The header renders before the doc lands, so this must not read `.quiz` off an
 // undefined doc. Matches the list page: no quiz crumb, and no `?quiz=` back,

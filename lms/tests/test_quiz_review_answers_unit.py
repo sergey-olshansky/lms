@@ -52,9 +52,10 @@ class TestQuizReviewAnswers(unittest.TestCase):
 				"_can_review_submission",
 				"_submission_owner_may_view_answers",
 				"get_submission_correct_answers",
+				"_correct_answers_for_questions",
 			}
 		]
-		self.assertEqual(len(functions), 3)
+		self.assertEqual(len(functions), 4)
 		for function in functions:
 			function.decorator_list = []
 		self.ns = {

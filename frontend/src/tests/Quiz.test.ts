@@ -8,8 +8,9 @@ import Quiz from '@/components/Quiz.vue'
 const resourceState = vi.hoisted(() => ({
 	cache: new Map<string, any>(),
 	request: vi.fn(),
-	// Every resource submit, by url. `request` only records reads.
-	submits: [] as string[],
+	// Every resource submit, by url with its params. `request` only records
+	// reads.
+	submits: [] as [string, unknown][],
 	response: null as any,
 	// Per-option verdict check_answer returns: 1 correct, 2 partial, 0 wrong.
 	checkAnswer: [] as unknown[] | number,
@@ -18,11 +19,16 @@ const resourceState = vi.hoisted(() => ({
 	// Answer keys get_submission_correct_answers resolves with, keyed by
 	// question name; an Error simulates a denied or failed key request.
 	correctAnswers: {} as Record<string, string[]> | Error,
+	// Question names the learner has already credited (#32); the retake pool
+	// is the quiz's questions minus these.
+	creditedQuestions: [] as string[],
 	// Submission docs keyed by name for frappe.client.get, the shape
 	// frappe.client.get returns: the graded rows ride in `result`.
 	submissionDocs: {} as Record<string, any>,
 	// What submit_quiz resolves with; null falls back to a passing default.
 	submitResponse: null as any,
+	// A server-side submission rejection, if this test needs to model one.
+	submitError: null as any,
 }))
 
 vi.mock('frappe-ui', async () => {
@@ -68,6 +74,13 @@ vi.mock('frappe-ui', async () => {
 				}
 			}
 
+			if (
+				options.url ===
+				'lms.lms.doctype.lms_quiz.lms_quiz.get_quiz_credited_questions'
+			) {
+				resource.data = structuredClone(resourceState.creditedQuestions)
+			}
+
 			if (options.url === 'frappe.client.get') {
 				const params = options.makeParams?.()
 				const raw = structuredClone(
@@ -96,8 +109,12 @@ vi.mock('frappe-ui', async () => {
 			reload,
 			fetch: reload,
 			submit: vi.fn((values?: any, handlers?: any) => {
-				resourceState.submits.push(options.url)
+				resourceState.submits.push([options.url, options.makeParams?.(values)])
 				if (options.url === 'lms.lms.doctype.lms_quiz.lms_quiz.submit_quiz') {
+					if (resourceState.submitError) {
+						handlers?.onError?.(resourceState.submitError)
+						return
+					}
 					const raw = structuredClone(
 						resourceState.submitResponse ?? {
 							percentage: 100,
@@ -279,8 +296,10 @@ beforeEach(() => {
 	resourceState.checkAnswer = []
 	resourceState.attempts = []
 	resourceState.correctAnswers = {}
+	resourceState.creditedQuestions = []
 	resourceState.submissionDocs = {}
 	resourceState.submitResponse = null
+	resourceState.submitError = null
 	localStorage.clear()
 })
 
@@ -294,16 +313,25 @@ describe('Quiz remount', () => {
 		expect(first.text()).not.toContain(
 			'This quiz has no questions available yet.'
 		)
-		expect(resourceState.request).toHaveBeenCalledTimes(1)
+		// The quiz and the learner's credited set (#32) — one request each.
+		expect(resourceState.request).toHaveBeenCalledTimes(2)
 		first.unmount()
 
 		const second = mountQuiz()
 		await flushPromises()
 
-		expect(resourceState.request).toHaveBeenCalledTimes(2)
+		expect(resourceState.request).toHaveBeenCalledTimes(4)
 		expect(resourceState.request.mock.calls).toEqual([
 			['lms.lms.utils.get_quiz_with_questions', { quiz: 'QUIZ-1' }],
+			[
+				'lms.lms.doctype.lms_quiz.lms_quiz.get_quiz_credited_questions',
+				{ quiz: 'QUIZ-1' },
+			],
 			['lms.lms.utils.get_quiz_with_questions', { quiz: 'QUIZ-1' }],
+			[
+				'lms.lms.doctype.lms_quiz.lms_quiz.get_quiz_credited_questions',
+				{ quiz: 'QUIZ-1' },
+			],
 		])
 		expect(second.text()).toContain('1 question')
 		expect(second.text()).toContain('Start')
@@ -319,7 +347,7 @@ describe('Quiz remount', () => {
 		await flushPromises()
 
 		expect(second.text()).toContain('Visible question body')
-		expect(resourceState.request).toHaveBeenCalledTimes(2)
+		expect(resourceState.request).toHaveBeenCalledTimes(4)
 		second.unmount()
 	})
 })
@@ -407,9 +435,9 @@ describe('Quiz in an author preview', () => {
 			await vi.advanceTimersByTimeAsync(1000)
 			await flushPromises()
 
-			expect(resourceState.submits).not.toContain(
-				'lms.lms.doctype.lms_quiz.lms_quiz.submit_quiz'
-			)
+			expect(
+				resourceState.submits.some(([url]) => url === 'lms.lms.doctype.lms_quiz.lms_quiz.submit_quiz')
+			).toBe(false)
 			wrapper.unmount()
 		} finally {
 			vi.useRealTimers()
@@ -504,9 +532,9 @@ describe('Quiz completion and checked-answer persistence', () => {
 		await finish!.trigger('click')
 		await flushPromises()
 
-		expect(resourceState.submits).toContain(
-			'lms.lms.doctype.lms_quiz.lms_quiz.submit_quiz'
-		)
+		expect(
+			resourceState.submits.some(([url]) => url === 'lms.lms.doctype.lms_quiz.lms_quiz.submit_quiz')
+		).toBe(true)
 		wrapper.unmount()
 	})
 
@@ -807,7 +835,7 @@ describe('Quiz question dots', () => {
 
 		const tryAgain = wrapper
 			.findAll('button')
-			.find((button) => button.text() === 'Try Again')
+			.find((button) => button.text() === 'Retake')
 		expect(tryAgain).toBeDefined()
 		await tryAgain!.trigger('click')
 		await flushPromises()
@@ -873,7 +901,7 @@ describe('Quiz result screen after submission', () => {
 		expect(wrapper.text()).toContain(
 			'You got 100% correct answers with a score of 1 out of 1'
 		)
-		expect(wrapper.text()).toContain('Try Again')
+		expect(wrapper.text()).toContain('Retake')
 		// The per-question rows are gone from the result screen; the graded
 		// submission is not even fetched on the learner's behalf anymore.
 		expect(wrapper.find('[data-testid="quiz-summary-row"]').exists()).toBe(
@@ -883,6 +911,90 @@ describe('Quiz result screen after submission', () => {
 			([url]) => url === 'frappe.client.get'
 		)
 		expect(submissionReads).toHaveLength(0)
+		wrapper.unmount()
+	})
+
+	it('shows the retake action only while attempts remain', async () => {
+		const response = choicesQuizResponse(2)
+		response.quiz.max_attempts = 2
+		resourceState.response = response
+		resourceState.attempts = [
+			{
+				name: 'SUBM-1',
+				creation: '2026-10-08 10:00:00',
+				score: 0,
+				score_out_of: 2,
+				percentage: 0,
+				passing_percentage: 70,
+			},
+		]
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await startQuiz(wrapper)
+		await submitWithoutLiveChecking(wrapper)
+
+		const retakeLabel = 'Retake'
+		expect(wrapper.text()).toContain(retakeLabel)
+
+		// Simulate the server history now including this attempt: the result
+		// remains visible, but the action must disappear at the configured limit.
+		resourceState.attempts = [
+			...resourceState.attempts,
+			{
+				name: 'SUBM-2',
+				creation: '2026-10-09 10:00:00',
+				score: 1,
+				score_out_of: 2,
+				percentage: 50,
+				passing_percentage: 70,
+			},
+		]
+		await wrapper.vm.attempts.reload()
+		await flushPromises()
+		expect(wrapper.text()).toContain('Quiz Summary')
+		expect(wrapper.text()).not.toContain(retakeLabel)
+		wrapper.unmount()
+	})
+
+	it('closes the active form when the server rejects the last attempt', async () => {
+		const response = choicesQuizResponse(2)
+		response.quiz.max_attempts = 2
+		resourceState.response = response
+		resourceState.attempts = [
+			{
+				name: 'SUBM-1',
+				creation: '2026-10-08 10:00:00',
+				score: 0,
+				score_out_of: 2,
+				percentage: 0,
+				passing_percentage: 70,
+			},
+		]
+		resourceState.submitError = {
+			message: 'MaximumAttemptsExceededError',
+			messages: ["You've used all 2 attempts"],
+		}
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await startQuiz(wrapper)
+
+		// Another tab spent the last attempt while this form was open.
+		resourceState.attempts = [
+			...resourceState.attempts,
+			{
+				name: 'SUBM-2',
+				creation: '2026-10-09 10:00:00',
+				score: 1,
+				score_out_of: 2,
+				percentage: 50,
+				passing_percentage: 70,
+			},
+		]
+		await submitWithoutLiveChecking(wrapper)
+
+		expect(wrapper.text()).toContain("You've used all 2 attempts")
+		expect(wrapper.text()).not.toContain('Finish Quiz')
+		expect(wrapper.text()).not.toContain('Retake')
 		wrapper.unmount()
 	})
 
@@ -982,7 +1094,7 @@ describe('Quiz result screen after submission', () => {
 
 		const tryAgain = wrapper
 			.findAll('button')
-			.find((button) => button.text() === 'Try Again')
+			.find((button) => button.text() === 'Retake')
 		expect(tryAgain).toBeDefined()
 		await tryAgain!.trigger('click')
 		await flushPromises()
@@ -1347,5 +1459,140 @@ describe('owner R5 written-answer check action', () => {
 		expect(restored.vm.possibleAnswer).toBe('Retained written answer')
 		expect(restored.find('[data-testid="quiz-feedback"]').text()).toContain(verdict ? 'Correct' : 'Incorrect')
 		restored.unmount()
+	})
+})
+
+describe('Quiz retake credit (#32)', () => {
+	it('offers only the never-credited questions and says what carries over', async () => {
+		resourceState.response = choicesQuizResponse(3)
+		resourceState.creditedQuestions = ['Q1']
+		const wrapper = mountQuiz()
+		await flushPromises()
+
+		// Q1 stays out of the offered pool; the card counts what is left.
+		expect(wrapper.text()).toContain('2 questions')
+		expect(wrapper.text()).toContain('1 credited answer')
+		expect(wrapper.text()).toContain('remaining 2 questions')
+
+		await startQuiz(wrapper)
+		expect(wrapper.text()).toContain('Question body 2')
+		expect(wrapper.text()).not.toContain('Question body 1')
+		wrapper.unmount()
+	})
+
+	it('answers every question of the quiz as credited with a finished banner, no empty start', async () => {
+		resourceState.response = choicesQuizResponse(2)
+		resourceState.creditedQuestions = ['Q1', 'Q2']
+		const wrapper = mountQuiz()
+		await flushPromises()
+
+		expect(
+			wrapper.find('[data-testid="quiz-schedule-blocked"]').exists()
+		).toBe(false)
+		expect(wrapper.text()).toContain(
+			'You have already answered every question of this quiz correctly.'
+		)
+		expect(
+			wrapper.findAll('button').find((button) => button.text() === 'Start Quiz')
+		).toBeUndefined()
+		wrapper.unmount()
+	})
+
+	it('keeps the offered pool whole in an author preview', async () => {
+		resourceState.response = choicesQuizResponse(3)
+		resourceState.creditedQuestions = ['Q1']
+		const wrapper = mountQuiz({ preview: true })
+		await flushPromises()
+
+		expect(wrapper.text()).toContain('3 questions')
+		await startQuiz(wrapper)
+		expect(wrapper.text()).toContain('Question body 1')
+		wrapper.unmount()
+	})
+
+	it('drops a restored draft answer for a question the retake no longer asks', async () => {
+		resourceState.response = choicesQuizResponse(3)
+		resourceState.creditedQuestions = ['Q1']
+		// A draft saved while attempt one was mid-flight, carrying an answer
+		// for the question that attempt later credited.
+		localStorage.setItem(
+			'lms-quiz-draft:learner@example.com:QUIZ-1',
+			JSON.stringify({
+				version: 2,
+				questions: ['Q1', 'Q2', 'Q3'],
+				answers: [
+					{ question_name: 'Q1', answer: ['First option 1'] },
+					{ question_name: 'Q2', answer: ['First option 2'] },
+				],
+				activeQuestion: 'Q2',
+				reviewQuestions: [],
+				verdicts: {},
+				deadline: null,
+			})
+		)
+		const wrapper = mountQuiz()
+		await flushPromises()
+
+		const answers = (wrapper.vm as any).savedAnswers as {
+			question_name: string
+		}[]
+		expect(answers.map((answer) => answer.question_name)).toEqual(['Q2'])
+		wrapper.unmount()
+	})
+})
+
+describe('Quiz retake credit after a submit (#32)', () => {
+	it('refetches the credited set so the next retake drops newly credited questions', async () => {
+		resourceState.response = choicesQuizResponse(3)
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await startQuiz(wrapper)
+		await submitWithoutLiveChecking(wrapper)
+
+		const creditedCalls = resourceState.request.mock.calls.filter(
+			([url]) =>
+				url === 'lms.lms.doctype.lms_quiz.lms_quiz.get_quiz_credited_questions'
+		)
+		expect(creditedCalls).toHaveLength(2)
+		wrapper.unmount()
+	})
+
+	it('rebuilds the offered pool around the freshly credited answers', async () => {
+		resourceState.response = choicesQuizResponse(3)
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await startQuiz(wrapper)
+		expect((wrapper.vm as any).questions).toHaveLength(3)
+
+		// What the server answers once this attempt is graded: Q1 credited.
+		resourceState.creditedQuestions = ['Q1']
+		await submitWithoutLiveChecking(wrapper)
+
+		expect((wrapper.vm as any).questions).toHaveLength(2)
+		expect(
+			(wrapper.vm as any).questions.map((row: { question: string }) => row.question)
+		).toEqual(['Q2', 'Q3'])
+		wrapper.unmount()
+	})
+})
+
+describe('Quiz submit declares its offered pool (#32)', () => {
+	it('submits the offered questions with the results, retake-filtered', async () => {
+		resourceState.response = choicesQuizResponse(3)
+		resourceState.creditedQuestions = ['Q1']
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await startQuiz(wrapper)
+		wrapper.vm.possibleAnswer = null
+		await submitWithoutLiveChecking(wrapper)
+
+		const submit = resourceState.submits.find(
+			([url]) => url === 'lms.lms.doctype.lms_quiz.lms_quiz.submit_quiz'
+		)
+		expect(submit).toBeDefined()
+		// The retake offered Q2 and Q3 only — the server sizes this attempt's
+		// denominator by the declaration, skipped questions included.
+		expect(JSON.parse((submit![1] as any).question_pool)).toEqual(['Q2', 'Q3'])
+		wrapper.unmount()
 	})
 })

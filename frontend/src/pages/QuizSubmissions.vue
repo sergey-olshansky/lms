@@ -136,14 +136,17 @@ const submissions = createListResource<LMSQuizSubmission>({
 	orderBy: 'creation desc',
 	pageLength: 24,
 	filters: activeFilters(),
-	auto: false,
-	transform(data: LMSQuizSubmission[]) {
-		return data.map((row) => ({
-			...row,
-			creation: dayjs(row.creation).format('DD MMM YYYY'),
-		}))
-	},
-})
+		auto: false,
+		transform(data: LMSQuizSubmission[]) {
+			return data.map((row) => ({
+				...row,
+				// The submission moment, not just its day (#30): grading and
+				// retakes are same-day questions, so the time of submission is
+				// what tells two attempts of one learner apart.
+				creation: dayjs(row.creation).format('DD MMM YYYY HH:mm'),
+			}))
+		},
+	})
 
 function activeFilters(): Record<string, string> {
 	const active: Record<string, string> = {}
@@ -192,31 +195,42 @@ const listOptions: ListViewOptions = {
 }
 
 const columns = computed<ListColumn[]>(() => [
-	{ label: __('Member'), key: 'member_name', width: 2, icon: 'lucide-user' },
+	{
+		label: __('Member'),
+		key: 'member_name',
+		// Compact (#30): the member and the quiz identify the row, the numeric
+		// columns beside them only qualify it, so the identifiers take the
+		// width the numbers give up.
+		width: 1.5,
+		icon: 'lucide-user',
+	},
 	{
 		label: __('Quiz'),
 		key: 'quiz_title',
 		width: 2,
 		icon: 'lucide-help-circle',
+		// A quiz name is the row's second identity (#30): wraps on the desk row
+		// and the phone card alike rather than ellipsizing away.
+		wrap: true,
 	},
 	{
 		label: __('Score'),
 		key: 'score',
-		width: 1,
+		width: 0.75,
 		align: 'center',
 		icon: 'lucide-hash',
 	},
 	{
 		label: __('Percentage'),
 		key: 'percentage',
-		width: 0.75,
+		width: 0.5,
 		align: 'center',
 		icon: 'lucide-percent',
 	},
 	{
 		label: __('Submitted On'),
 		key: 'creation',
-		width: 1,
+		width: 1.25,
 		align: 'right',
 		icon: 'lucide-clock',
 	},

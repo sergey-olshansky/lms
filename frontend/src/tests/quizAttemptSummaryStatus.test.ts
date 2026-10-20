@@ -83,6 +83,38 @@ describe('attemptRowStatus', () => {
 		).toBe('pending')
 	})
 
+	it('marks a full-mark open-ended grade correct — that is what credited means (#32)', () => {
+		// An instructor's full-mark grade, and the carried credit of a retake,
+		// read as correct; a partial or ungraded grade stays pending.
+		expect(
+			attemptRowStatus({
+				question_type: 'Open Ended',
+				answer: '<p>My essay</p>',
+				is_correct: 0,
+				marks: 5,
+				marks_out_of: 5,
+			})
+		).toBe('correct')
+		expect(
+			attemptRowStatus({
+				question_type: 'Open Ended',
+				answer: '<p>My essay</p>',
+				is_correct: 0,
+				marks: 2,
+				marks_out_of: 5,
+			})
+		).toBe('pending')
+		expect(
+			attemptRowStatus({
+				question_type: 'Open Ended',
+				answer: '<p>My essay</p>',
+				is_correct: 0,
+				marks: 0,
+				marks_out_of: 5,
+			})
+		).toBe('pending')
+	})
+
 	it('marks a blank open-ended question skipped — nothing to review', () => {
 		expect(
 			attemptRowStatus({

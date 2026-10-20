@@ -391,8 +391,8 @@ describe('Quiz.vue submit and reset on a reused instance', () => {
 		wrapper.unmount()
 	})
 
-	it('keeps the start screen usable after Try Again', async () => {
-		// resetQuiz() is the Try Again handler. Clearing `attempts` there left the
+	it('keeps the start screen usable after the retake action', async () => {
+		// resetQuiz() is the retake handler. Clearing `attempts` there left the
 		// start card with neither a Start button nor the exceeded message, both of
 		// which read attempts.data?.length.
 		const wrapper = mountQuiz('quiz-a')
