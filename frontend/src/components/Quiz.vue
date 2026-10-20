@@ -150,15 +150,10 @@
 								)
 							}}
 						</FeedbackBanner>
-						<!-- Tutor customization (#27): the same read-only per-question
-						     summary on the card the learner sees once every attempt is
-						     spent, summarising the most recent attempt. -->
-						<QuizSummaryRows
-							:rows="summaryRows"
-							:loading="summaryRowsLoading"
-							:error="submissionResults.error"
-							@retry="retrySummaryRows"
-						/>
+						<!-- No automatic report here either (#1102/#1103 item 2):
+						     the per-question summary is never displayed on its own; the
+						     history table below carries the «Report» action that opens
+						     the modal for any finished attempt. -->
 						<Button v-if="inVideo" @click="props.backToVideo()">{{
 							__('Resume Video')
 						}}</Button>
@@ -577,15 +572,10 @@
 							}}
 						</p>
 					</div>
-					<!-- Tutor customization (#27): a read-only summary of every
-					     question in the attempt's order — the learner's own answer
-					     and its textual verdict, never the answer key. -->
-					<QuizSummaryRows
-						:rows="summaryRows"
-						:loading="summaryRowsLoading"
-						:error="submissionResults.error"
-						@retry="retrySummaryRows"
-					/>
+					<!-- No automatic per-question report on the result screen
+					     (#1102/#1103 item 2): reports open only from the «Report» action
+					     of a history-table row, never on their own after a submission.
+					     The score line above and the table below stay. -->
 					<div
 						v-if="
 							!quiz.data.max_attempts ||
@@ -908,24 +898,15 @@ import AssessmentCardHeader from '@/components/Assessment/AssessmentCardHeader.v
 import OptionRow from '@/components/Assessment/OptionRow.vue'
 import FeedbackBanner from '@/components/Assessment/FeedbackBanner.vue'
 import QuizStats from '@/components/Assessment/QuizStats.vue'
-import QuizSummaryRows from '@/components/Assessment/QuizSummaryRows.vue'
 import QuizAttemptReportModal from '@/components/Assessment/QuizAttemptReportModal.vue'
-import {
-	attemptsLeftLabel,
-	attemptRowStatus,
-	formatQuizSubtitle,
-	resolveAttemptQuestionText,
-} from '@/utils/quizSummary'
+import { attemptsLeftLabel, formatQuizSubtitle } from '@/utils/quizSummary'
 import type {
 	AnswerVerdict,
 	QuizAttempt,
-	QuizAttemptRowStatus,
 	QuizDetails,
 	QuizQuestionDetails,
 	QuizQuestionRow,
-	QuizResultRow,
 	QuizSubmissionResult,
-	QuizSummaryRow,
 	QuizWithQuestions,
 	SavedAnswer,
 	SessionUser,
@@ -1260,8 +1241,6 @@ const attemptsExhausted = computed(
 		(attempts.data?.length ?? 0) >= quiz.data.max_attempts
 )
 
-const latestAttemptName = computed(() => attempts.data?.[0]?.name)
-
 const { scheduleBlockReason, scheduleBlocked, scheduleMessage } =
 	useAssessmentSchedule(() => quiz.data, {
 		opensOn: (date) => __('This quiz opens on {0}.').format(date),
@@ -1333,40 +1312,11 @@ const reportShowsCorrectAnswers = computed(
 		!!quiz.data?.show_answers
 )
 
-// Graded rows of one of the learner's own submissions, for the read-only
-// per-question summary after the quiz is over (#27). Read the whole submission
-// doc: the graded rows are its child table, and the submission doctype's rules
-// already restrict `frappe.client.get` to the learner's own submissions (and
-// their instructors'), so unlike check_answer there is no gate to open here.
-// The rows are needed for every quiz, regardless of show_answers: that
-// setting gates only the live in-question verdicts, never this summary.
-const submissionResults = createResource<QuizResultRow[]>({
-	url: 'frappe.client.get',
-	makeParams() {
-		return {
-			doctype: 'LMS Quiz Submission',
-			name: quizSubmission.data?.submission ?? latestAttemptName.value,
-		}
-	},
-	transform(doc: { result?: QuizResultRow[] } | null) {
-		return doc?.result ?? []
-	},
-})
-
-// The exhausted-attempts card has no submission of its own; it summarises the
-// most recent attempt, so the rows have to load before the card can show
-// them. No `immediate`: attempts land asynchronously after mount, which
-// triggers this watch on the component's normal paths.
-watch(latestAttemptName, (name) => {
-	if (name && attemptsExhausted.value && !quizSubmission.data) {
-		submissionResults.fetch()
-	}
-})
-
 // --- Question dot verdicts -------------------------------------------------
 // During an attempt the dots track the learner's own checked answers. With
 // show_answers off, the dots stay plain navigation and never colour; the
-// post-submit verdicts live in the summary rows below instead (#27).
+// per-question verdicts live in the report modal opened from the history
+// table, never on the result screen (#1102/#1103).
 type DotState = 'active' | 'attempted' | 'untouched' | 'correct' | 'wrong'
 
 const dotStateClass: Record<DotState, string> = {
@@ -1421,98 +1371,18 @@ const buildDots = (verdictFor: (index: number) => AnswerVerdict | undefined) =>
 
 const attemptDots = computed(() => buildDots(liveDotVerdict))
 
-// --- Post-submit per-question summary rows (#27) ---------------------------
-// One row per question in the attempt's order: the question text, the
-// learner's own answer and its textual verdict. Correct answers, keys and
-// explanations are never part of this surface — not gated, absent.
+// --- Result screen (#1102/#1103 item 2) ------------------------------------
+// No per-question report is rendered automatically after a submission or on
+// the exhausted-attempts card: the owner decision is explicit — reports open
+// only from the «Report» action of a history-table row, which mounts the
+// per-attempt modal. The result screen keeps the overall score line and the
+// pending-review notice below; the mechanics (score, retry, history) are
+// unchanged.
 
-// A graded row's stored `question` text is a copy the backend takes from the
-// quiz's own question row (LMS Quiz Question.question_detail, filled by
-// fetch_from when the quiz is authored in the form). That copy can be empty —
-// a quiz authored or migrated outside the form never fills it — and the
-// summary then replayed graded rows, the incorrect ones first of all, without
-// their assignment (#27 owner report: the question itself went missing when
-// the answer was wrong). The live quiz data holds the very text the learner
-// answered — questions_by_name is what the in-quiz body renders — so the
-// summary falls back to it whenever the stored copy carries no text. The
-// resolver is shared with the per-attempt report modal; both empty is the
-// explicit unavailable state, never a silent blank. Options, keys and
-// explanations are other fields of that map and are never read here.
-const rowQuestionText = (row: QuizResultRow): string =>
-	resolveAttemptQuestionText(row, questionsByName.value)
-
-const summaryRow = (number: number, row: QuizResultRow): QuizSummaryRow => ({
-	number,
-	questionName: row.question_name ?? '',
-	question: rowQuestionText(row),
-	answer: row.answer ?? '',
-	status: attemptRowStatus(row),
-})
-
-const summaryRows = computed<QuizSummaryRow[] | null>(() => {
-	const results = submissionResults.data
-	// null, not [], until the graded rows have actually arrived: rendering a
-	// partial verdict early would flash a false status, and [] also means "an
-	// attempt with nothing to grade", which renders no section at all.
-	if (!Array.isArray(results)) return null
-	const byName = new Map<string, QuizResultRow>()
-	for (const row of results) {
-		if (row?.question_name) byName.set(row.question_name, row)
-	}
-	const ordered: QuizSummaryRow[] = []
-	const matched = new Set<string>()
-	for (const question of questions.value) {
-		matched.add(question.question)
-		const row = byName.get(question.question)
-		if (row) {
-			ordered.push(summaryRow(ordered.length + 1, row))
-		} else {
-			// No graded row: the question was never attempted, so nothing was
-			// answered or graded for it. It still gets its row (#27: one row per
-			// question), read as skipped, with no answer to show.
-			ordered.push({
-				number: ordered.length + 1,
-				questionName: question.question,
-				question: questionsByName.value[question.question]?.question ?? '',
-				answer: '',
-				status: 'skipped',
-			})
-		}
-	}
-	// Rows whose question no longer matches the quiz (edited after the
-	// attempt) are appended in submission order rather than dropped, so a
-	// graded answer is never silently lost from the summary.
-	for (const row of results) {
-		if (!row?.question_name || matched.has(row.question_name)) continue
-		ordered.push(summaryRow(ordered.length + 1, row))
-	}
-	return ordered
-})
-
-// True while the rows are on their way and nothing has failed yet; the
-// summary keeps its Questions section as skeletons instead of flashing
-// verdicts it does not have.
-const summaryRowsLoading = computed(
-	() => !Array.isArray(submissionResults.data) && !submissionResults.error
-)
-
-const retrySummaryRows = () => {
-	// fetch() clears the error on a real resource; clear it here too so the
-	// section swaps back to its loading shape instead of staying on the retry
-	// line until the response lands.
-	submissionResults.error = null
-	submissionResults.fetch()
-}
-
-// Written answers wait for an instructor. Once the rows have landed this is
-// row-accurate (a blank open-ended answer is skipped, not pending); before
-// that — or if the rows cannot load — the submission's own quiz-level flag is
-// the honest provisional answer.
-const hasPendingReview = computed(() => {
-	const rows = summaryRows.value
-	if (rows) return rows.some((row) => row.status === 'pending')
-	return !!quizSubmission.data?.is_open_ended
-})
+// Written answers wait for an instructor; the submission's quiz-level flag is
+// the result screen's honest answer (the per-question reading lives in the
+// report modal, which the learner opens from the history table).
+const hasPendingReview = computed(() => !!quizSubmission.data?.is_open_ended)
 
 const quizSubmission = createResource<QuizSubmissionResult>({
 	url: 'lms.lms.doctype.lms_quiz.lms_quiz.submit_quiz',
@@ -1657,10 +1527,9 @@ watch(
 	(submission) => {
 		if (!submission) return
 		storedViolationLog.fetch()
-		// The result screen replays the submission's graded rows in the
-		// read-only per-question summary, so they load with the rest of the
-		// result — for every quiz, regardless of show_answers (#27).
-		submissionResults.fetch()
+		// No graded-row fetch here anymore (#1102/#1103 item 2): the result
+		// screen shows only the overall outcome; the per-question report is
+		// the modal the learner opens from the history table's Report action.
 		nextTick(() => summaryHeading.value?.focus())
 	}
 )
@@ -2048,7 +1917,6 @@ const resetQuiz = () => {
 	checkedVerdicts.value = {}
 	deadline.value = null
 	quizSubmission.reset()
-	submissionResults.reset()
 	violationCount.value = 0
 	proctoringActive.value = false
 	cameraReady.value = false

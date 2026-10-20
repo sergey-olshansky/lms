@@ -175,8 +175,9 @@ describe('QuizAttemptReportModal', () => {
 		expect(rows).toHaveLength(2)
 
 		// Q1 keeps its attempt position — not its index in the filtered list —
-		// so the numbers match what the learner sat.
-		expect(rows[0].text()).toContain('Question body 1')
+		// so the numbers match what the learner sat. The body is the live
+		// question text, the same field the quiz itself renders.
+		expect(rows[0].text()).toContain('Live question 1')
 		expect(rows[0].text()).toContain('Q1:')
 		expect(
 			rows[0].find('[data-testid="attempt-report-status"]')!.text()
@@ -190,7 +191,7 @@ describe('QuizAttemptReportModal', () => {
 		).toBe('Pending review')
 
 		// The skipped Q2 is absent from the list and counted in the footnote.
-		expect(rows.map((row) => row.text())).not.toContain('Question body 2')
+		expect(rows.map((row) => row.text())).not.toContain('Live question 2')
 		expect(wrapper.find('[data-testid="attempt-report-skipped"]').text()).toBe(
 			'1 skipped questions are not included in this report.'
 		)
@@ -230,6 +231,143 @@ describe('QuizAttemptReportModal', () => {
 				.findAll('[data-testid="attempt-report-question-unavailable"]')
 				.length
 		).toBe(0)
+		wrapper.unmount()
+	})
+
+	// #27 owner correction: the stored copy is a fetch_from snapshot that can
+	// sit stale beside a live question (authored before the image or the new
+	// wording). The report must show the body the quiz itself renders — the
+	// live text, markup and embedded task image included — never the stale
+	// snapshot when both exist.
+	it('prefers the live question body over a stale stored snapshot, task image included', async () => {
+		const doc = defaultDoc()
+		doc.result = [
+			{
+				question_name: 'Q1',
+				question: 'Old wording without any image',
+				answer: 'First option 1',
+				question_type: 'Choices',
+				is_correct: 1,
+				marks: 1,
+				marks_out_of: 1,
+			},
+		]
+		const live = questionsByName()
+		live.Q1.question =
+			'<p>Label the <strong>task diagram</strong>.</p><img src="/files/task-diagram.png" alt="Task diagram">'
+		const wrapper = mountModal({ questionsByName: live }, doc)
+		await flushPromises()
+
+		const row = wrapper.find('[data-testid="attempt-report-row"]')
+		// The live body wins: its wording and formatting render…
+		expect(row.text()).toContain('Label the')
+		expect(row.text()).toContain('task diagram')
+		// …the stale snapshot does not.
+		expect(row.text()).not.toContain('Old wording without any image')
+		// The embedded task image is present, src and alt intact — rich
+		// markup is not stripped by the sanitizer on its way in.
+		const img = row.find('img')
+		expect(img.exists()).toBe(true)
+		expect(img.attributes('src')).toBe('/files/task-diagram.png')
+		expect(img.attributes('alt')).toBe('Task diagram')
+		expect(row.find('strong').text()).toBe('task diagram')
+		// The verdict and the learner's own answer stay on the row.
+		expect(row.find('[data-testid="attempt-report-status"]').text()).toBe(
+			'Correct'
+		)
+		expect(row.text()).toContain('First option 1')
+		wrapper.unmount()
+	})
+
+	// The owner's live shape: quizzes authored outside the form never fill the
+	// stored copy, so the graded row arrives with no question at all — the
+	// report must still carry the body and its imagery from the live data.
+	it('renders the question text and embedded image from live data when the stored copy is empty', async () => {
+		const doc = defaultDoc()
+		doc.result = [
+			{
+				question_name: 'Q1',
+				question: '',
+				answer: 'Second option 1',
+				question_type: 'Choices',
+				is_correct: 0,
+				marks: 0,
+				marks_out_of: 1,
+			},
+		]
+		const live = questionsByName()
+		live.Q1.question =
+			'<p>Which shape has <em>three</em> sides?</p><img src="/files/shapes.png" alt="Shapes">'
+		const wrapper = mountModal({ questionsByName: live }, doc)
+		await flushPromises()
+
+		const row = wrapper.find('[data-testid="attempt-report-row"]')
+		expect(row.text()).toContain('Which shape has')
+		expect(row.text()).toContain('three')
+		const img = row.find('img')
+		expect(img.exists()).toBe(true)
+		expect(img.attributes('src')).toBe('/files/shapes.png')
+		expect(
+			row.find('[data-testid="attempt-report-question-unavailable"]').exists()
+		).toBe(false)
+		// Status and the learner's own answer remain beside the imagery.
+		expect(row.find('[data-testid="attempt-report-status"]').text()).toBe(
+			'Incorrect'
+		)
+		expect(row.text()).toContain('Second option 1')
+		wrapper.unmount()
+	})
+
+	// The live map is the quiz as it stands now; a question the quiz no
+	// longer carries still has its graded answer, and the stored snapshot is
+	// the only copy left of what was asked.
+	it('falls back to the stored snapshot when the live quiz no longer carries the question', async () => {
+		const doc = defaultDoc()
+		doc.result = [
+			{
+				question_name: 'REMOVED',
+				question: 'Snapshot of a question the quiz dropped',
+				answer: 'An answer to it',
+				question_type: 'Choices',
+				is_correct: 1,
+			},
+		]
+		const wrapper = mountModal({}, doc)
+		await flushPromises()
+
+		const row = wrapper.find('[data-testid="attempt-report-row"]')
+		expect(row.text()).toContain('Snapshot of a question the quiz dropped')
+		expect(row.text()).toContain('An answer to it')
+		expect(
+			row.find('[data-testid="attempt-report-question-unavailable"]').exists()
+		).toBe(false)
+		wrapper.unmount()
+	})
+
+	// Rich rendering stays behind v-safe-html:rich — imagery yes, raw
+	// unsanitized markup never.
+	it('keeps the question body sanitized, scripts out and images in', async () => {
+		const doc = defaultDoc()
+		doc.result = [
+			{
+				question_name: 'Q1',
+				question: '',
+				answer: 'First option 1',
+				question_type: 'Choices',
+				is_correct: 1,
+			},
+		]
+		const live = questionsByName()
+		live.Q1.question =
+			'<img src="/files/diagram.png" alt="Diagram"><script>window.pwned = 1</script><p>Text</p>'
+		const wrapper = mountModal({ questionsByName: live }, doc)
+		await flushPromises()
+
+		const row = wrapper.find('[data-testid="attempt-report-row"]')
+		expect(row.find('img').exists()).toBe(true)
+		expect(row.find('script').exists()).toBe(false)
+		expect(row.html()).not.toContain('window.pwned')
+		expect(row.text()).toContain('Text')
 		wrapper.unmount()
 	})
 
@@ -314,7 +452,7 @@ describe('QuizAttemptReportModal', () => {
 
 		expect(wrapper.text()).not.toContain('Correct Answer:')
 		expect(wrapper.findAll('[data-testid="attempt-report-row"]')).toHaveLength(2)
-		expect(wrapper.text()).toContain('Question body 1')
+		expect(wrapper.text()).toContain('Live question 1')
 		wrapper.unmount()
 	})
 

@@ -63,14 +63,17 @@
 					>
 						<!-- Q{n} runs inline with the question, as the review page
 						     renders it; the number is the row's position within the
-						     whole attempt, not within this filtered list. -->
+						     whole attempt, not within this filtered list. The body renders
+						     through v-safe-html:rich like the in-quiz question, and images
+						     shrink to the modal (max-width:100%; height:auto) instead of
+						     overflowing it or being clipped away. -->
 						<div class="flex items-start gap-2">
 							<span class="me-1 shrink-0 text-sm-semibold text-ink-gray-8">
 								{{ __('Q{0}:').format(row.number) }}
 							</span>
 							<div
 								v-if="row.question"
-								class="min-w-0 flex-1 text-p-base text-ink-gray-8"
+								class="min-w-0 flex-1 break-words text-p-base text-ink-gray-8 [&_img]:h-auto [&_img]:max-w-full"
 								v-safe-html:rich="row.question"
 							/>
 							<!-- Both resolver branches empty: an explicit state,

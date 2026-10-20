@@ -66,11 +66,19 @@ export const attemptRowStatusLabel = (status: QuizAttemptRowStatus): string =>
 		pending: __('Pending review'),
 	})[status]
 
-// The resolved question text of one graded row, shared by the post-submit
-// summary and the per-attempt report modal (#27). The stored copy the
-// submission carries is tried first; when it is empty — quizzes authored or
-// migrated outside the form never fill it — the live question text is used,
-// the very text the quiz body rendered and the learner answered. Both empty
+// The resolved question body of one graded row, shared by the per-attempt
+// report modal (#27). The LIVE question text from questions_by_name comes
+// first — it is the very field the in-quiz body renders
+// (v-safe-html:rich="questions_by_name[name].question"), so it is the only
+// copy guaranteed complete: rich markup and embedded task images included,
+// and current with the question the learner can still read in the quiz. The
+// submission's stored copy (LMS Quiz Result.question, filled from the quiz
+// question row's question_detail fetch_from snapshot at grading time) is the
+// fallback for questions the live map no longer carries — a quiz edited
+// after the attempt — because that snapshot can be empty (quizzes authored
+// or migrated outside the form never fill it) or stale (authored before the
+// question gained its image or wording), which is exactly how the report
+// lost the question body and its task imagery (#27 owner report). Both empty
 // resolves to "", which the callers must render as the explicit unavailable
 // state, never as a silently blank line. Other fields of questionsByName
 // (options, keys, explanations) are never read here.
@@ -78,6 +86,6 @@ export const resolveAttemptQuestionText = (
 	row: { question?: string | null; question_name?: string | null },
 	questionsByName: Record<string, { question?: string | null }>
 ): string =>
-	(row.question ?? '').trim() ||
 	(questionsByName[row.question_name ?? '']?.question ?? '').trim() ||
+	(row.question ?? '').trim() ||
 	''

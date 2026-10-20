@@ -86,23 +86,15 @@ export interface QuizResultRow {
 	marks_out_of?: number
 }
 
-/** The verdict of one row of the post-submit attempt summary (#27). */
+/** The verdict of one graded row of an attempt (#27), as the per-attempt
+ * report modal shows it. */
 export type QuizAttemptRowStatus = 'correct' | 'incorrect' | 'skipped' | 'pending'
 
-/** One rendered row of the post-submit attempt summary (#27): the question
- * text, the learner's own answer and its verdict — never the answer key. */
-export interface QuizSummaryRow {
-	number: number
-	questionName: string
-	question: string
-	answer: string
-	status: QuizAttemptRowStatus
-}
-
-/** One rendered row of the per-attempt report modal (#27): a summary row plus
- * the marks the attempt's row carries. The answer key is never part of the
- * row — it is rendered separately, and only for viewers the server
- * authorises. */
+/** One rendered row of the per-attempt report modal (#27): the question
+ * body (resolved live first, stored copy as fallback), the learner's own
+ * answer, its verdict and the marks the attempt's row carries. The answer
+ * key is never part of the row — it is rendered separately, and only for
+ * viewers the server authorises. */
 export interface QuizReportRow {
 	number: number
 	questionName: string
