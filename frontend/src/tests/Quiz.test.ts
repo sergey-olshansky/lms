@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'
+import { defineComponent, h } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import Quiz from '@/components/Quiz.vue'
@@ -14,6 +15,9 @@ const resourceState = vi.hoisted(() => ({
 	checkAnswer: [] as unknown[] | number,
 	// Attempts list rows for frappe.client.get_list, newest first.
 	attempts: [] as any[],
+	// Answer keys get_submission_correct_answers resolves with, keyed by
+	// question name; an Error simulates a denied or failed key request.
+	correctAnswers: {} as Record<string, string[]> | Error,
 	// Submission docs keyed by name for frappe.client.get, the shape
 	// frappe.client.get returns: the graded rows ride in `result`.
 	submissionDocs: {} as Record<string, any>,
@@ -51,6 +55,17 @@ vi.mock('frappe-ui', async () => {
 
 			if (options.url === 'lms.lms.doctype.lms_quiz.lms_quiz.check_answer') {
 				options.onSuccess?.(resourceState.checkAnswer)
+			}
+
+			if (
+				options.url ===
+				'lms.lms.doctype.lms_quiz.lms_quiz.get_submission_correct_answers'
+			) {
+				if (resourceState.correctAnswers instanceof Error) {
+					resource.error = resourceState.correctAnswers
+				} else {
+					resource.data = structuredClone(resourceState.correctAnswers)
+				}
 			}
 
 			if (options.url === 'frappe.client.get') {
@@ -141,9 +156,12 @@ vi.mock('frappe-ui', async () => {
 			template:
 				'<button type="button" class="radio-option" @click="pickRadio(value)"><slot name="label" /></button>',
 		},
+		// Renders the body slot, the title and the footer actions, so a
+		// mounted dialog's buttons are reachable the way frappe-ui draws them.
 		Dialog: {
-			props: ['open'],
-			template: '<div v-if="open"><slot /></div>',
+			props: ['open', 'title', 'actions'],
+			template:
+				'<div v-if="open" data-testid="dialog-stub"><slot />{{ title }}<button v-for="(action, index) in actions" :key="index" type="button" @click="action.onClick">{{ action.label }}</button></div>',
 		},
 		FormControl: empty,
 		LoadingIndicator: empty,
@@ -156,8 +174,39 @@ vi.mock('frappe-ui/experimental', () => ({
 	ListView: { template: '<div><slot /></div>' },
 }))
 
+// The submission history renders through ResponsiveListView, whose real
+// implementation leans on frappe-ui/experimental list internals the mock
+// above does not provide. The stub keeps the contract Quiz.vue's template
+// relies on — one cell slot per column per row — so the #27 report action is
+// exercised at the Quiz level; the real list keeps its own test file.
+vi.mock('@/components/ResponsiveListView.vue', () => ({
+	default: {
+		name: 'ResponsiveListView',
+		props: ['columns', 'rows', 'rowKey', 'titleKey', 'options'],
+		template: `
+			<div data-testid="submission-history">
+				<div v-for="row in rows" :key="row[rowKey]" data-testid="attempt-row">
+					<template v-for="column in columns" :key="column.key">
+						<slot name="cell" :column="column" :row="row" :value="row[column.key]" />
+					</template>
+				</div>
+			</div>
+		`,
+	},
+}))
+
 vi.mock('@/components/ProgressBar.vue', () => ({
 	default: { template: '<div />' },
+}))
+
+// The rich text editor drags in ProseMirror and its upload composable, and
+// the open-ended summaries here read stored rows, not live editor content.
+vi.mock('@/components/RichTextEditor.vue', () => ({
+	default: defineComponent({
+		name: 'RichTextEditor',
+		emits: ['change'],
+		render: () => h('div', { class: 'editor' }),
+	}),
 }))
 
 vi.mock('@/utils/sanitizeRichHTML', () => ({
@@ -205,13 +254,19 @@ const quizResponse = () => ({
 
 let mountedQuizzes = 0
 
-// A distinct idPrefix per mount, as mountBlock gives each lesson block.
-const mountQuiz = (props: Record<string, unknown> = {}) =>
+// A distinct idPrefix per mount, as mountBlock gives each lesson block. The
+// session user defaults to the learner; the report tests pass a staff shape.
+const mountQuiz = (
+	props: Record<string, unknown> = {},
+	options = {},
+	sessionUser: Record<string, unknown> = { name: 'learner@example.com' }
+) =>
 	mount(Quiz, {
+		...options,
 		props: { quizName: 'QUIZ-1', ...props },
 		global: {
 			config: { idPrefix: `quiz-${++mountedQuizzes}` },
-			provide: { $user: { data: { name: 'learner@example.com' } } },
+			provide: { $user: { data: sessionUser } },
 			mocks: { __: (value: string) => value },
 		},
 	})
@@ -223,6 +278,7 @@ beforeEach(() => {
 	resourceState.response = quizResponse()
 	resourceState.checkAnswer = []
 	resourceState.attempts = []
+	resourceState.correctAnswers = {}
 	resourceState.submissionDocs = {}
 	resourceState.submitResponse = null
 	localStorage.clear()
@@ -304,6 +360,19 @@ const startQuiz = async (wrapper: VueWrapper<any>) => {
 		.find((button) => button.text() === 'Start Quiz')
 	expect(start).toBeDefined()
 	await start!.trigger('click')
+	await flushPromises()
+}
+
+// Submitting on a quiz without live checking defers the POST by 500ms so the
+// last answer can reach localStorage first (see submitQuiz in Quiz.vue).
+const submitWithoutLiveChecking = async (wrapper: VueWrapper<any>) => {
+	vi.useFakeTimers()
+	try {
+		;(wrapper.vm as any).submitQuiz()
+		await vi.advanceTimersByTimeAsync(1000)
+	} finally {
+		vi.useRealTimers()
+	}
 	await flushPromises()
 }
 describe('Quiz in an author preview', () => {
@@ -456,8 +525,8 @@ describe('Quiz completion and checked-answer persistence', () => {
 		await finish!.trigger('click')
 		await flushPromises()
 
-		// The Dialog stub renders the slot, not its title prop; the body text
-		// only exists inside the confirmation dialog.
+		// The confirmation is not auto-submitted: the dialog is open with its
+		// body text, and nothing has been submitted until its action is used.
 		expect(wrapper.text()).toContain('You have 2 unattempted questions')
 		expect(resourceState.submits).not.toContain(
 			'lms.lms.doctype.lms_quiz.lms_quiz.submit_quiz'
@@ -788,18 +857,118 @@ describe('Quiz question dots', () => {
 	})
 })
 
-describe('Quiz result screen verdict dots', () => {
-	it('replays the submission verdicts, marking unattempted questions wrong', async () => {
-		const response = choicesQuizResponse(3)
+describe('Quiz result screen after submission', () => {
+	// #1102/#1103 item 2: no per-question report is displayed automatically
+	// after a quiz is answered — the learner opens reports only from each
+	// attempt's «Report» button in the history table. The overall score line,
+	// the pending notice and the retry/history mechanics stay untouched.
+	it('keeps the overall score and shows no automatic per-question report', async () => {
+		resourceState.response = choicesQuizResponse(2)
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await startQuiz(wrapper)
+		await submitWithoutLiveChecking(wrapper)
+
+		expect(wrapper.text()).toContain('Quiz Summary')
+		expect(wrapper.text()).toContain(
+			'You got 100% correct answers with a score of 1 out of 1'
+		)
+		expect(wrapper.text()).toContain('Try Again')
+		// The per-question rows are gone from the result screen; the graded
+		// submission is not even fetched on the learner's behalf anymore.
+		expect(wrapper.find('[data-testid="quiz-summary-row"]').exists()).toBe(
+			false
+		)
+		const submissionReads = resourceState.request.mock.calls.filter(
+			([url]) => url === 'frappe.client.get'
+		)
+		expect(submissionReads).toHaveLength(0)
+		wrapper.unmount()
+	})
+
+	it('keeps the pending-review notice for open-ended attempts without a per-question report', async () => {
+		const response = choicesQuizResponse(2)
+		response.questions_by_name.Q2.type = 'Open Ended'
+		resourceState.response = response
+		resourceState.submitResponse = {
+			pass: false,
+			submission: 'SUBM-1',
+			is_open_ended: 1,
+			percentage: 50,
+			score: 0.5,
+			score_out_of: 2,
+		}
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await startQuiz(wrapper)
+		await submitWithoutLiveChecking(wrapper)
+
+		// The overall outcome stays, with the review notice beside it.
+		expect(wrapper.text()).toContain(
+			'You got 50% correct answers with a score of 0.5 out of 2'
+		)
+		expect(wrapper.text()).toContain(
+			'Open-ended answers are pending instructor review.'
+		)
+		// The per-question reading, pending included, is the report modal's
+		// to show — never the result screen's.
+		expect(wrapper.find('[data-testid="quiz-summary-row"]').exists()).toBe(
+			false
+		)
+		const submissionReads = resourceState.request.mock.calls.filter(
+			([url]) => url === 'frappe.client.get'
+		)
+		expect(submissionReads).toHaveLength(0)
+		wrapper.unmount()
+	})
+
+	it('drops the pending notice when the submission is not open-ended', async () => {
+		resourceState.response = choicesQuizResponse(1)
+		resourceState.submitResponse = {
+			pass: true,
+			submission: 'SUBM-1',
+			is_open_ended: 0,
+			percentage: 100,
+			score: 1,
+			score_out_of: 1,
+		}
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await startQuiz(wrapper)
+		await submitWithoutLiveChecking(wrapper)
+
+		expect(wrapper.text()).not.toContain(
+			'Open-ended answers are pending instructor review.'
+		)
+		expect(wrapper.find('[data-testid="quiz-summary-row"]').exists()).toBe(
+			false
+		)
+		wrapper.unmount()
+	})
+
+	it('focuses the summary heading after submitting', async () => {
+		resourceState.response = choicesQuizResponse(1)
+		const wrapper = mountQuiz({}, { attachTo: document.body })
+		await flushPromises()
+		await startQuiz(wrapper)
+		await submitWithoutLiveChecking(wrapper)
+
+		const heading = wrapper.find('h2[tabindex="-1"]')
+		expect(heading.exists()).toBe(true)
+		expect(heading.text()).toContain('Quiz Summary')
+		// Moving focus announces the summary instead of staying on Finish.
+		expect(document.activeElement?.textContent).toContain('Quiz Summary')
+		// The result line is announced politely once it appears.
+		expect(
+			wrapper.find('[role="status"][aria-live="polite"]').exists()
+		).toBe(true)
+		wrapper.unmount()
+	})
+
+	it('lets the learner try again without a report in between', async () => {
+		const response = choicesQuizResponse(2)
 		response.quiz.show_answers = 1
 		resourceState.response = response
-		resourceState.submissionDocs['SUBM-1'] = {
-			name: 'SUBM-1',
-			result: [
-				{ question_name: 'Q1', is_correct: 1 },
-				{ question_name: 'Q2', is_correct: 0 },
-			],
-		}
 		const wrapper = mountQuiz()
 		await flushPromises()
 		await startQuiz(wrapper)
@@ -809,46 +978,29 @@ describe('Quiz result screen verdict dots', () => {
 			.find((button) => button.text() === 'Finish Quiz')
 		await finish!.trigger('click')
 		await flushPromises()
-
 		expect(wrapper.text()).toContain('Quiz Summary')
-		const graded = wrapper.findAll(`nav[aria-label="Question results"] span`)
-		expect(graded).toHaveLength(3)
-		expect(graded[0].classes()).toContain('bg-surface-green-6')
-		expect(graded[0].attributes('aria-label')).toBe('Question 1: Correct')
-		expect(graded[1].classes()).toContain('bg-surface-red-6')
-		expect(graded[1].attributes('aria-label')).toBe('Question 2: Incorrect')
-		// No row for Q3: it counts as wrong, not as a missing dot.
-		expect(graded[2].classes()).toContain('bg-surface-red-6')
+
+		const tryAgain = wrapper
+			.findAll('button')
+			.find((button) => button.text() === 'Try Again')
+		expect(tryAgain).toBeDefined()
+		await tryAgain!.trigger('click')
+		await flushPromises()
+
+		// Back on the start card: a new attempt can begin, no report shown.
+		expect(wrapper.text()).toContain('Start Quiz')
+		expect(wrapper.find('[data-testid="quiz-summary-row"]').exists()).toBe(
+			false
+		)
 		wrapper.unmount()
-	})
-
-	it('shows no graded dots when show_answers is off', async () => {
-		vi.useFakeTimers()
-		try {
-			resourceState.response = choicesQuizResponse(1)
-			const wrapper = mountQuiz()
-			await flushPromises()
-			await startQuiz(wrapper)
-			;(wrapper.vm as any).submitQuiz()
-			await vi.advanceTimersByTimeAsync(1000)
-			await flushPromises()
-
-			expect(wrapper.text()).toContain('Quiz Summary')
-			expect(wrapper.find('nav[aria-label="Question results"]').exists()).toBe(
-				false
-			)
-			wrapper.unmount()
-		} finally {
-			vi.useRealTimers()
-		}
 	})
 })
 
-describe('Quiz exhausted attempts verdict dots', () => {
-	it('verdicts the latest attempt on the card that blocks new ones', async () => {
+describe('Quiz exhausted attempts card', () => {
+	it('blocks new attempts without an automatic report, keeping the Report action', async () => {
 		const response = choicesQuizResponse(2)
-		response.quiz.show_answers = 1
 		response.quiz.max_attempts = 2
+		response.quiz.show_submission_history = 1
 		resourceState.response = response
 		resourceState.attempts = [
 			{
@@ -871,22 +1023,302 @@ describe('Quiz exhausted attempts verdict dots', () => {
 		resourceState.submissionDocs['SUBM-2'] = {
 			name: 'SUBM-2',
 			result: [
-				{ question_name: 'Q1', is_correct: 1 },
-				{ question_name: 'Q2', is_correct: 0 },
+				{
+					question_name: 'Q1',
+					question: null,
+					answer: 'First option 1',
+					question_type: 'Choices',
+					is_correct: 1,
+				},
 			],
 		}
 		const wrapper = mountQuiz()
 		await flushPromises()
 
 		expect(wrapper.text()).toContain("You've used all 2 attempts")
-		const graded = wrapper.findAll('nav[aria-label="Question results"] span')
-		expect(graded).toHaveLength(2)
-		expect(graded[0].classes()).toContain('bg-surface-green-6')
-		expect(graded[1].classes()).toContain('bg-surface-red-6')
+		// Nothing replays the latest attempt on its own — not the rows, not
+		// even a fetch of the submission doc.
+		expect(wrapper.find('[data-testid="quiz-summary-row"]').exists()).toBe(
+			false
+		)
+		expect(resourceState.request.mock.calls.filter(
+			([url]) => url === 'frappe.client.get'
+		)).toHaveLength(0)
+		// The history table is the one way in: its Report action opens the
+		// modal for the attempt the learner picks.
+		const buttons = wrapper.findAll('[data-testid="attempt-report-button"]')
+		expect(buttons).toHaveLength(2)
+		await buttons[0].trigger('click')
+		await flushPromises()
+		expect(wrapper.find('[data-testid="attempt-report-row"]').exists()).toBe(
+			true
+		)
 		wrapper.unmount()
 	})
 })
 
+describe('Quiz submission history report action', () => {
+	// A quiz whose history table shows: max_attempts makes the card load the
+	// attempts list, show_submission_history makes it render them (#27).
+	const historyQuizResponse = () => {
+		const response = choicesQuizResponse(2)
+		response.quiz.max_attempts = 5
+		response.quiz.show_submission_history = 1
+		return response
+	}
+
+	const twoAttempts = () => [
+		{
+			name: 'SUBM-2',
+			creation: '2026-10-08 10:00:00',
+			score: 1,
+			score_out_of: 2,
+			percentage: 50,
+			passing_percentage: 70,
+		},
+		{
+			name: 'SUBM-1',
+			creation: '2026-10-07 10:00:00',
+			score: 0,
+			score_out_of: 2,
+			percentage: 0,
+			passing_percentage: 70,
+		},
+	]
+
+	const gradedRows = () => [
+		{
+			question_name: 'Q1',
+			question: 'Question body 1',
+			answer: 'Second option 1',
+			question_type: 'Choices',
+			is_correct: 0,
+			marks: 0,
+			marks_out_of: 1,
+		},
+		{
+			question_name: 'Q2',
+			question: 'Question body 2',
+			answer: '',
+			question_type: 'Choices',
+			is_correct: 0,
+			marks: 0,
+			marks_out_of: 1,
+		},
+	]
+
+	const keyReads = () =>
+		resourceState.request.mock.calls.filter(
+			([url]) =>
+				url === 'lms.lms.doctype.lms_quiz.lms_quiz.get_submission_correct_answers'
+		)
+
+	beforeEach(() => {
+		resourceState.response = historyQuizResponse()
+		resourceState.attempts = twoAttempts()
+		resourceState.submissionDocs['SUBM-2'] = {
+			name: 'SUBM-2',
+			result: gradedRows(),
+		}
+		resourceState.submissionDocs['SUBM-1'] = {
+			name: 'SUBM-1',
+			result: gradedRows().slice(0, 1),
+		}
+	})
+
+	it('opens the report of exactly the clicked attempt', async () => {
+		const wrapper = mountQuiz()
+		await flushPromises()
+
+		const buttons = wrapper.findAll('[data-testid="attempt-report-button"]')
+		expect(buttons).toHaveLength(2)
+		// Newest first: the list numbers the newest attempt 1; the label names
+		// the attempt so N identical buttons stay distinguishable.
+		expect(buttons[0].attributes('aria-label')).toBe('Report for attempt 1')
+		expect(buttons[1].attributes('aria-label')).toBe('Report for attempt 2')
+
+		await buttons[1].trigger('click')
+		await flushPromises()
+
+		// The older row opened its own submission, not the latest one.
+		expect(resourceState.request).toHaveBeenCalledWith('frappe.client.get', {
+			doctype: 'LMS Quiz Submission',
+			name: 'SUBM-1',
+		})
+		const rows = wrapper.findAll('[data-testid="attempt-report-row"]')
+		expect(rows).toHaveLength(1)
+		expect(rows[0].text()).toContain('Question body 1')
+		expect(
+			rows[0].find('[data-testid="attempt-report-status"]')!.text()
+		).toBe('Incorrect')
+		// The metadata line carries the attempt, not another one.
+		expect(wrapper.find('[data-testid="attempt-report-meta"]').text()).toContain(
+			'2026-10-07 10:00:00'
+		)
+		wrapper.unmount()
+	})
+
+	// #27 owner correction: the modal must carry the question body itself —
+	// text and embedded task image — not only the verdict chips. The live
+	// quiz data is the resolver's first source, and a graded row whose stored
+	// copy was never filled (quizzes authored outside the form) still shows
+	// the complete body the learner answered.
+	it('renders the question text and its task image from the live quiz data', async () => {
+		const response = historyQuizResponse()
+		response.questions_by_name.Q1.question =
+			'<p>Study the <strong>diagram</strong> below.</p><img src="/files/task-diagram.png" alt="Task diagram">'
+		resourceState.response = response
+		resourceState.submissionDocs['SUBM-2'] = {
+			name: 'SUBM-2',
+			result: [
+				{
+					question_name: 'Q1',
+					question: null,
+					answer: 'Second option 1',
+					question_type: 'Choices',
+					is_correct: 0,
+					marks: 0,
+					marks_out_of: 1,
+				},
+			],
+		}
+		const wrapper = mountQuiz()
+		await flushPromises()
+
+		await wrapper.findAll('[data-testid="attempt-report-button"]')[0].trigger('click')
+		await flushPromises()
+
+		const row = wrapper.find('[data-testid="attempt-report-row"]')
+		expect(row.exists()).toBe(true)
+		// The question text renders beside its number, not only a verdict.
+		expect(row.text()).toContain('Study the')
+		expect(row.text()).toContain('diagram')
+		expect(row.find('strong').text()).toBe('diagram')
+		// The embedded task image is present, src and alt intact.
+		const img = row.find('img')
+		expect(img.exists()).toBe(true)
+		expect(img.attributes('src')).toBe('/files/task-diagram.png')
+		expect(img.attributes('alt')).toBe('Task diagram')
+		// Verdict and the learner's own answer remain on the row.
+		expect(row.find('[data-testid="attempt-report-status"]').text()).toBe(
+			'Incorrect'
+		)
+		expect(row.text()).toContain('Second option 1')
+		wrapper.unmount()
+	})
+
+	it('shows no report action when the quiz hides the submission history', async () => {
+		const response = historyQuizResponse()
+		response.quiz.show_submission_history = 0
+		resourceState.response = response
+		const wrapper = mountQuiz()
+		await flushPromises()
+
+		expect(wrapper.find('[data-testid="submission-history"]').exists()).toBe(
+			false
+		)
+		expect(
+			wrapper.find('[data-testid="attempt-report-button"]').exists()
+		).toBe(false)
+		wrapper.unmount()
+	})
+
+	it('keeps answer keys from the learner while the quiz hides answers', async () => {
+		const response = historyQuizResponse()
+		response.quiz.show_answers = 0
+		resourceState.response = response
+		const wrapper = mountQuiz()
+		await flushPromises()
+
+		await wrapper.findAll('[data-testid="attempt-report-button"]')[0].trigger('click')
+		await flushPromises()
+
+		// The report itself renders — answered rows, verdicts, no keys: neither
+		// the request nor the section may exist (#1088: show_answers off).
+		expect(wrapper.find('[data-testid="attempt-report-row"]').text()).toContain(
+			'Question body 1'
+		)
+		expect(keyReads()).toHaveLength(0)
+		expect(wrapper.text()).not.toContain('Correct Answer:')
+		// The option the learner missed is a key; it must not surface.
+		expect(wrapper.text()).not.toContain('First option 1')
+		wrapper.unmount()
+	})
+
+	it('shows the correct answers to the attempt owner when the quiz shows answers', async () => {
+		const response = historyQuizResponse()
+		response.quiz.show_answers = 1
+		resourceState.response = response
+		resourceState.correctAnswers = { Q1: ['First option 1'] }
+		const wrapper = mountQuiz()
+		await flushPromises()
+
+		await wrapper.findAll('[data-testid="attempt-report-button"]')[0].trigger('click')
+		await flushPromises()
+
+		expect(keyReads()).toEqual([
+			[
+				'lms.lms.doctype.lms_quiz.lms_quiz.get_submission_correct_answers',
+				{ submission: 'SUBM-2' },
+			],
+		])
+		expect(wrapper.text()).toContain('Correct Answer:')
+		// The key comes from the key endpoint, not from the learner's answer.
+		expect(wrapper.text()).toContain('First option 1')
+		// The skipped question stays out of the report; the footnote counts it.
+		expect(wrapper.find('[data-testid="attempt-report-row"]').exists()).toBe(true)
+		expect(wrapper.findAll('[data-testid="attempt-report-row"]')).toHaveLength(1)
+		expect(
+			wrapper.find('[data-testid="attempt-report-skipped"]').text()
+		).toContain('1 skipped questions are not included in this report.')
+		wrapper.unmount()
+	})
+
+	it('always asks staff for the answer keys, whatever the quiz flag', async () => {
+		const response = historyQuizResponse()
+		response.quiz.show_answers = 0
+		resourceState.response = response
+		resourceState.correctAnswers = { Q1: ['First option 1'] }
+		const wrapper = mountQuiz({}, {}, { name: 'teacher@example.com', is_instructor: true })
+		await flushPromises()
+
+		await wrapper.findAll('[data-testid="attempt-report-button"]')[0].trigger('click')
+		await flushPromises()
+
+		expect(keyReads()).toHaveLength(1)
+		expect(wrapper.text()).toContain('Correct Answer:')
+		expect(wrapper.text()).toContain('First option 1')
+		wrapper.unmount()
+	})
+
+	it('closes the report and can open another attempt afterwards', async () => {
+		const wrapper = mountQuiz()
+		await flushPromises()
+
+		await wrapper.findAll('[data-testid="attempt-report-button"]')[0].trigger('click')
+		await flushPromises()
+		expect(wrapper.find('[data-testid="attempt-report-row"]').exists()).toBe(true)
+
+		const close = wrapper
+			.findAll('button')
+			.find((button) => button.text() === 'Close')
+		expect(close).toBeDefined()
+		await close!.trigger('click')
+		await flushPromises()
+		expect(wrapper.find('[data-testid="attempt-report-row"]').exists()).toBe(false)
+
+		// Reopening targets the other submission: the modal is keyed by name,
+		// so it remounts with fresh resources rather than showing stale rows.
+		await wrapper.findAll('[data-testid="attempt-report-button"]')[1].trigger('click')
+		await flushPromises()
+		expect(resourceState.request).toHaveBeenCalledWith('frappe.client.get', {
+			doctype: 'LMS Quiz Submission',
+			name: 'SUBM-1',
+		})
+		expect(wrapper.find('[data-testid="attempt-report-row"]').exists()).toBe(true)
+		wrapper.unmount()
+	})
+})
 
 describe('owner R5 written-answer check action', () => {
 	it.each([0, 1])('keeps native User Input check, draft and verdict %i with secondary Check / primary Finish', async (verdict) => {
