@@ -727,14 +727,37 @@ def _can_review_submission(quiz: str) -> bool:
 	return any(can_modify_batch(batch) for batch in assessment_batches)
 
 
+def _submission_owner_may_view_answers(submission_doc) -> bool:
+	"""Whether the submission's own owner may read its answer keys.
+
+	The quiz's "Show Answers" checkbox is the one switch the owner chose
+	(#1088): a learner sees the correct answers of a finished attempt exactly
+	when the quiz already shows live answer verdicts, and never otherwise.
+	Ownership is checked against the submission's member, so the flag can never
+	unlock someone else's attempt.
+	"""
+	if not frappe.session.user or frappe.session.user == "Guest":
+		return False
+	if submission_doc.member != frappe.session.user:
+		return False
+	return bool(frappe.db.get_value("LMS Quiz", submission_doc.quiz, "show_answers"))
+
+
 @frappe.whitelist()
 def get_submission_correct_answers(submission: str) -> dict[str, list[str]]:
-	"""Return answer keys for an instructor's review of one quiz submission."""
+	"""Answer keys for one submission's review.
+
+	Staff pass _can_review_submission as before; the submission's owner is
+	additionally authorised when the quiz's show_answers is on (#1088). Nobody
+	else — including other learners — receives keys.
+	"""
 	if not isinstance(submission, str) or not submission:
 		frappe.throw(_("Invalid quiz submission."), frappe.ValidationError)
 
 	submission_doc = frappe.get_doc("LMS Quiz Submission", submission)
-	if not _can_review_submission(submission_doc.quiz):
+	if not _can_review_submission(submission_doc.quiz) and not _submission_owner_may_view_answers(
+		submission_doc
+	):
 		frappe.throw(
 			_("You are not authorized to view correct quiz answers."),
 			frappe.PermissionError,

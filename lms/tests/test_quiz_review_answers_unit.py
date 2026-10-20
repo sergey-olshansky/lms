@@ -30,10 +30,15 @@ class TestQuizReviewAnswers(unittest.TestCase):
 		self.frappe.db.get_value.return_value = Row(owner="teacher", course=None)
 		self.doc = SimpleNamespace(
 			quiz="quiz",
+			member="learner@example.com",
 			result=[Row(question_name="q1"), Row(question_name="q2")],
 			check_permission=Mock(),
 		)
 		self.frappe.get_doc.return_value = self.doc
+		# The quiz's show_answers switch, as the owner branch reads it. Routed
+		# per test through _route_quiz_get_value; the staff gate's [owner, course]
+		# read keeps the setUp default.
+		self.show_answers = 0
 		self.course_access = Mock(return_value=False)
 		self.batch_access = Mock(return_value=False)
 		path = Path(__file__).parents[1] / "lms/doctype/lms_quiz/lms_quiz.py"
@@ -42,9 +47,14 @@ class TestQuizReviewAnswers(unittest.TestCase):
 			node
 			for node in tree.body
 			if isinstance(node, ast.FunctionDef)
-			and node.name in {"_can_review_submission", "get_submission_correct_answers"}
+			and node.name
+			in {
+				"_can_review_submission",
+				"_submission_owner_may_view_answers",
+				"get_submission_correct_answers",
+			}
 		]
-		self.assertEqual(len(functions), 2)
+		self.assertEqual(len(functions), 3)
 		for function in functions:
 			function.decorator_list = []
 		self.ns = {
@@ -61,6 +71,17 @@ class TestQuizReviewAnswers(unittest.TestCase):
 	@staticmethod
 	def raise_error(message, error):
 		raise error(message)
+
+	def _route_quiz_get_value(self):
+		"""Answer db.get_value by fieldname: the staff gate's [owner, course]
+		read keeps its setUp default; the show_answers read follows the test."""
+
+		def quiz_value(_doctype, _name, fieldname, **_kwargs):
+			if isinstance(fieldname, (list, tuple)):
+				return Row(owner="teacher", course=None)
+			return self.show_answers
+
+		self.frappe.db.get_value.side_effect = quiz_value
 
 	def review(self):
 		return self.ns["get_submission_correct_answers"]("submission")
@@ -108,6 +129,52 @@ class TestQuizReviewAnswers(unittest.TestCase):
 		with self.assertRaises(PermissionError):
 			self.review()
 		self.frappe.get_all.assert_not_called()
+
+	# --- Owner branch (#1088): the submission's owner may read the keys of
+	# their own finished attempt exactly when the quiz's show_answers
+	# checkbox is on. Nobody else's attempt, and no keys when it is off.
+
+	def test_owner_reads_keys_when_quiz_shows_answers(self):
+		self.frappe.session.user = "learner@example.com"
+		self.show_answers = 1
+		self._route_quiz_get_value()
+		self.frappe.get_all.return_value = [
+			Row(name="q1", type="Choices", option_1="right", is_correct_1=1),
+			Row(name="q2", type="User Input", possibility_1="12"),
+		]
+		self.assertEqual(self.review(), {"q1": ["right"], "q2": ["12"]})
+		# The owner still passes the document read gate, like every other path.
+		self.doc.check_permission.assert_called_once()
+
+	def test_owner_is_denied_when_quiz_hides_answers(self):
+		self.frappe.session.user = "learner@example.com"
+		self.show_answers = 0
+		self._route_quiz_get_value()
+		with self.assertRaises(PermissionError):
+			self.review()
+		self.assertFalse(
+			any(call.args[0] == "LMS Question" for call in self.frappe.get_all.call_args_list)
+		)
+
+	def test_show_answers_does_not_unlock_another_learners_submission(self):
+		self.frappe.session.user = "someone-else@example.com"
+		self.show_answers = 1
+		self._route_quiz_get_value()
+		with self.assertRaises(PermissionError):
+			self.review()
+		self.assertFalse(
+			any(call.args[0] == "LMS Question" for call in self.frappe.get_all.call_args_list)
+		)
+
+	def test_staff_keys_do_not_depend_on_show_answers(self):
+		# The owner decision (#1088) widened the gate for the submission owner
+		# only; the staff branch behaves exactly as before, whatever the quiz's
+		# show_answers state.
+		self.frappe.session.user = "teacher"
+		self.show_answers = 0
+		self._route_quiz_get_value()
+		self.assertEqual(self.review(), {})
+		self.doc.check_permission.assert_called_once()
 
 	def test_keys_include_all_ten_fields_and_exclude_wrong_options(self):
 		self.frappe.session.user = "teacher"

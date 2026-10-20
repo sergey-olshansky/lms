@@ -150,32 +150,10 @@
 								)
 							}}
 						</FeedbackBanner>
-						<!-- Tutor customization: the same read-only verdict replay on
-						     the card the learner sees once every attempt is spent,
-						     verdicting the most recent attempt. -->
-						<div
-							v-if="quiz.data.show_answers"
-							class="rounded-6 border border-outline-gray-2 p-3.5"
-						>
-							<div class="text-sm-semibold text-ink-gray-9">
-								{{ __('Questions') }}
-							</div>
-							<nav
-								:aria-label="__('Question results')"
-								class="mt-2 flex flex-wrap items-center gap-2"
-							>
-								<span
-									v-for="dot in gradedDots"
-									:key="dot.number"
-									:aria-label="dot.label"
-									:title="dot.label"
-									class="flex h-6 w-6 items-center justify-center rounded-full text-sm"
-									:class="dotStateClass[dot.state]"
-								>
-									{{ dot.number }}
-								</span>
-							</nav>
-						</div>
+						<!-- No automatic report here either (#1102/#1103 item 2):
+						     the per-question summary is never displayed on its own; the
+						     history table below carries the «Report» action that opens
+						     the modal for any finished attempt. -->
 						<Button v-if="inVideo" @click="props.backToVideo()">{{
 							__('Resume Video')
 						}}</Button>
@@ -550,63 +528,54 @@
 					</p>
 				</div>
 				<div class="space-y-3 p-3.5">
-					<div class="text-base-semibold text-ink-gray-9">
+					<h2
+						ref="summaryHeading"
+						tabindex="-1"
+						class="text-base-semibold text-ink-gray-9 outline-none"
+					>
 						{{ __('Quiz Summary') }}
-					</div>
+					</h2>
+					<!-- Tutor customization (#27): the saved verdict of the attempt,
+					     shown for every quiz type. show_answers gates only the live
+					     in-question verdicts, never this summary; nothing here can
+					     reveal the answer key, because the payload carries only the
+					     learner's own responses. -->
 					<div
-						class="flex items-start gap-2 rounded-6 border border-outline-gray-2 bg-surface-gray-1 p-3"
+						role="status"
+						aria-live="polite"
+						class="space-y-2 rounded-6 border border-outline-gray-2 bg-surface-gray-1 p-3"
 					>
-						<span
-							class="lucide-check-circle mt-0.5 size-4 shrink-0 text-ink-gray-6"
-						/>
-						<p
-							v-if="quizSubmission.data.is_open_ended"
-							class="text-p-base text-ink-gray-7"
-						>
-							{{
-								__(
-									"Your submission has been successfully saved. The instructor will review and grade it shortly, and you'll be notified of your final result."
-								)
-							}}
-						</p>
-						<p v-else class="text-p-base text-ink-gray-7">
-							{{
-								__(
-									'You got {0}% correct answers with a score of {1} out of {2}'
-								).format(
-									Math.ceil(quizSubmission.data.percentage),
-									quizSubmission.data.score,
-									quizSubmission.data.score_out_of
-								)
-							}}
-						</p>
-					</div>
-					<!-- Tutor customization: a read-only verdict replay of the
-					     questions in the attempt's order, only when the quiz
-					     was configured to show answers. -->
-					<div
-						v-if="quiz.data.show_answers"
-						class="rounded-6 border border-outline-gray-2 p-3.5"
-					>
-						<div class="text-sm-semibold text-ink-gray-9">
-							{{ __('Questions') }}
-						</div>
-						<nav
-							:aria-label="__('Question results')"
-							class="mt-2 flex flex-wrap items-center gap-2"
-						>
+						<div class="flex items-start gap-2">
 							<span
-								v-for="dot in gradedDots"
-								:key="dot.number"
-								:aria-label="dot.label"
-								:title="dot.label"
-								class="flex h-6 w-6 items-center justify-center rounded-full text-sm"
-								:class="dotStateClass[dot.state]"
-							>
-								{{ dot.number }}
-							</span>
-						</nav>
+								class="lucide-check-circle mt-0.5 size-4 shrink-0 text-ink-gray-6"
+							/>
+							<p class="text-p-base text-ink-gray-7">
+								{{
+									__(
+										'You got {0}% correct answers with a score of {1} out of {2}'
+									).format(
+										Math.ceil(quizSubmission.data.percentage),
+										quizSubmission.data.score,
+										quizSubmission.data.score_out_of
+									)
+								}}
+							</p>
+						</div>
+						<p
+							v-if="hasPendingReview"
+							class="ps-6 text-p-base text-ink-gray-6"
+						>
+							{{
+								__(
+									'Open-ended answers are pending instructor review.'
+								)
+							}}
+						</p>
 					</div>
+					<!-- No automatic per-question report on the result screen
+					     (#1102/#1103 item 2): reports open only from the «Report» action
+					     of a history-table row, never on their own after a submission.
+					     The score line above and the table below stay. -->
 					<div
 						v-if="
 							!quiz.data.max_attempts ||
@@ -783,7 +752,26 @@
 				row-key="name"
 				title-key="creation"
 				:options="getSubmissionOptions()"
-			/>
+			>
+				<!-- One action per row (#27): open this attempt's report modal. The
+				     slot intercepts every column, so the others keep their default
+				     text. -->
+				<template #cell="{ column, row, value }">
+					<Button
+						v-if="column.key === 'report'"
+						variant="subtle"
+						size="sm"
+						data-testid="attempt-report-button"
+						:aria-label="
+							__('Report for attempt {0}').format(row.idx)
+						"
+						@click="openAttemptReport(row)"
+					>
+						{{ __('Report') }}
+					</Button>
+					<template v-else>{{ value }}</template>
+				</template>
+			</ResponsiveListView>
 		</div>
 	</div>
 	<Dialog
@@ -857,6 +845,19 @@
 			</div>
 		</template>
 	</Dialog>
+
+	<!-- The per-attempt report (#27), opened from the history table's Report
+	     action. Keyed by submission so opening a different attempt always
+	     remounts with fresh resources. -->
+	<QuizAttemptReportModal
+		v-if="reportAttempt"
+		:key="reportAttempt.name"
+		:submission-name="reportAttempt.name"
+		:attempt="reportAttempt"
+		:questions-by-name="questionsByName"
+		:can-view-correct-answers="reportShowsCorrectAnswers"
+		@close="reportAttempt = null"
+	/>
 </template>
 <script setup lang="ts">
 import {
@@ -874,6 +875,7 @@ import type { FrappeResourceError } from 'frappe-ui'
 import {
 	computed,
 	inject,
+	nextTick,
 	onMounted,
 	onUnmounted,
 	reactive,
@@ -896,6 +898,7 @@ import AssessmentCardHeader from '@/components/Assessment/AssessmentCardHeader.v
 import OptionRow from '@/components/Assessment/OptionRow.vue'
 import FeedbackBanner from '@/components/Assessment/FeedbackBanner.vue'
 import QuizStats from '@/components/Assessment/QuizStats.vue'
+import QuizAttemptReportModal from '@/components/Assessment/QuizAttemptReportModal.vue'
 import { attemptsLeftLabel, formatQuizSubtitle } from '@/utils/quizSummary'
 import type {
 	AnswerVerdict,
@@ -903,7 +906,6 @@ import type {
 	QuizDetails,
 	QuizQuestionDetails,
 	QuizQuestionRow,
-	QuizResultRow,
 	QuizSubmissionResult,
 	QuizWithQuestions,
 	SavedAnswer,
@@ -1239,8 +1241,6 @@ const attemptsExhausted = computed(
 		(attempts.data?.length ?? 0) >= quiz.data.max_attempts
 )
 
-const latestAttemptName = computed(() => attempts.data?.[0]?.name)
-
 const { scheduleBlockReason, scheduleBlocked, scheduleMessage } =
 	useAssessmentSchedule(() => quiz.data, {
 		opensOn: (date) => __('This quiz opens on {0}.').format(date),
@@ -1291,44 +1291,32 @@ const attempts = createResource<QuizAttempt[]>({
 	},
 })
 
-// Verdict rows of one of the learner's own submissions, for the read-only
-// question-dot rows after the quiz is over. Read the whole submission doc:
-// the graded rows are its child table, and the submission doctype's rules
-// already restrict `frappe.client.get` to the learner's own submissions (and
-// their instructors'), so unlike check_answer there is no gate to open here.
-const submissionResults = createResource<QuizResultRow[]>({
-	url: 'frappe.client.get',
-	makeParams() {
-		return {
-			doctype: 'LMS Quiz Submission',
-			name: quizSubmission.data?.submission ?? latestAttemptName.value,
-		}
-	},
-	transform(doc: { result?: QuizResultRow[] } | null) {
-		return doc?.result ?? []
-	},
-})
+// --- Per-attempt report from the history table (#27) -----------------------
+// The table lists the current user's own submissions only (member filter),
+// so every Report action opens the caller's own attempt.
+const reportAttempt = ref<QuizAttempt | null>(null)
 
-// The exhausted-attempts card has no submission of its own; it verdicts the
-// most recent attempt, so the rows have to load before the card can colour.
-// No `immediate`: attempts land asynchronously after mount, which triggers
-// this watch on the component's normal paths.
-watch(latestAttemptName, (name) => {
-	if (
-		name &&
-		quiz.data?.show_answers &&
-		attemptsExhausted.value &&
-		!quizSubmission.data
-	) {
-		submissionResults.fetch()
-	}
-})
+const openAttemptReport = (attempt: QuizAttempt): void => {
+	reportAttempt.value = attempt
+}
+
+// Correct answers in the report (owner decision #1088): staff always; the
+// attempt owner — which every listed row is — only when the quiz's «Show
+// Answers» checkbox is on. The server re-validates both branches on every
+// call; this only keeps the client from requesting keys it would be denied.
+const reportShowsCorrectAnswers = computed(
+	() =>
+		!!user.data?.is_instructor ||
+		!!user.data?.is_moderator ||
+		!!user.data?.is_system_manager ||
+		!!quiz.data?.show_answers
+)
 
 // --- Question dot verdicts -------------------------------------------------
-// The same dot row means three different things across the card's states:
-// during an attempt it tracks the learner's own checked answers, and once the
-// quiz is over it replays the graded rows of the latest submission. With
-// show_answers off, the dots stay plain navigation and never colour.
+// During an attempt the dots track the learner's own checked answers. With
+// show_answers off, the dots stay plain navigation and never colour; the
+// per-question verdicts live in the report modal opened from the history
+// table, never on the result screen (#1102/#1103).
 type DotState = 'active' | 'attempted' | 'untouched' | 'correct' | 'wrong'
 
 const dotStateClass: Record<DotState, string> = {
@@ -1351,26 +1339,6 @@ const liveDotVerdict = (index: number): AnswerVerdict | undefined => {
 	)
 		return undefined
 	return verdicts.some((verdict) => verdict == 0 || verdict == 2) ? 0 : 1
-}
-
-// The stored verdict is binary (is_correct 1/0). No row means the question
-// was never attempted, which the submission marks incorrect in its place.
-const gradedVerdictByName = computed(() => {
-	const map = new Map<string, AnswerVerdict>()
-	for (const row of submissionResults.data ?? []) {
-		if (!row?.question_name) continue
-		map.set(row.question_name, row.is_correct ? 1 : 0)
-	}
-	return map
-})
-
-const gradedDotVerdict = (index: number): AnswerVerdict | undefined => {
-	// null data means the graded rows have not loaded yet; colouring every
-	// dot red in the meantime would flash a false verdict on the result screen.
-	if (!Array.isArray(submissionResults.data)) return undefined
-	const name = questions.value[index - 1]?.question
-	if (!name) return undefined
-	return gradedVerdictByName.value.get(name) ?? 0
 }
 
 const dotState = (
@@ -1402,7 +1370,19 @@ const buildDots = (verdictFor: (index: number) => AnswerVerdict | undefined) =>
 	})
 
 const attemptDots = computed(() => buildDots(liveDotVerdict))
-const gradedDots = computed(() => buildDots(gradedDotVerdict))
+
+// --- Result screen (#1102/#1103 item 2) ------------------------------------
+// No per-question report is rendered automatically after a submission or on
+// the exhausted-attempts card: the owner decision is explicit — reports open
+// only from the «Report» action of a history-table row, which mounts the
+// per-attempt modal. The result screen keeps the overall score line and the
+// pending-review notice below; the mechanics (score, retry, history) are
+// unchanged.
+
+// Written answers wait for an instructor; the submission's quiz-level flag is
+// the result screen's honest answer (the per-question reading lives in the
+// report modal, which the learner opens from the history table).
+const hasPendingReview = computed(() => !!quizSubmission.data?.is_open_ended)
 
 const quizSubmission = createResource<QuizSubmissionResult>({
 	url: 'lms.lms.doctype.lms_quiz.lms_quiz.submit_quiz',
@@ -1538,13 +1518,19 @@ const storedViolationLog = createResource<StoredViolationRow[]>({
 	},
 })
 
+// The summary's heading receives focus once the result screen appears, so
+// screen readers announce it rather than staying on the submitted quiz.
+const summaryHeading = ref<HTMLElement | null>(null)
+
 watch(
 	() => quizSubmission.data?.submission,
 	(submission) => {
-		if (submission) storedViolationLog.fetch()
-		// The result screen replays the submission's graded verdicts in the
-		// read-only question dots, so they load with the rest of the result.
-		if (submission && quiz.data?.show_answers) submissionResults.fetch()
+		if (!submission) return
+		storedViolationLog.fetch()
+		// No graded-row fetch here anymore (#1102/#1103 item 2): the result
+		// screen shows only the overall outcome; the per-question report is
+		// the modal the learner opens from the history table's Report action.
+		nextTick(() => summaryHeading.value?.focus())
 	}
 )
 
@@ -1931,7 +1917,6 @@ const resetQuiz = () => {
 	checkedVerdicts.value = {}
 	deadline.value = null
 	quizSubmission.reset()
-	submissionResults.reset()
 	violationCount.value = 0
 	proctoringActive.value = false
 	cameraReady.value = false
@@ -2002,6 +1987,17 @@ const getSubmissionColumns = () => {
 			label: __('Percentage'),
 			key: 'percentage',
 			align: 'left',
+			width: 1,
+		},
+		// #27: the row action that opens this attempt's report modal. An
+		// actions column renders outside the shrinking text cells — on the
+		// phone cards ResponsiveListView parks it beside the row — and carries
+		// no value of its own.
+		{
+			label: __('Report'),
+			key: 'report',
+			kind: 'actions',
+			align: 'right',
 			width: 1,
 		},
 	]
