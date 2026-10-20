@@ -2164,7 +2164,14 @@ def _gate_redirect(course: str) -> dict:
 
 @frappe.whitelist(allow_guest=True)  # nosemgrep: frappe-semgrep-rules.rules.security.guest-whitelisted-method
 @rate_limit(limit=500, seconds=60 * 60)
-def get_lesson(course: str, chapter, lesson) -> dict:
+def get_lesson(course: str, chapter: str, lesson: int) -> dict:
+	"""Serve one lesson over the whitelisted HTTP API.
+
+	`chapter` is the dash section path ("2" legacy, "2-1-3" nested) and `lesson`
+	is the 1-based position among the section's own lessons. Frappe v16 enforces
+	these annotations on HTTP dispatch — including the string `chapter`, which is
+	why it must NOT be `int` — and casts the query-string `lesson` to int.
+	"""
 	if not guest_access_allowed():
 		return {}
 
@@ -2298,7 +2305,7 @@ def get_video_details(lesson_name: str) -> list:
 	)
 
 
-def get_neighbour_lesson(course: str, chapter, lesson) -> dict:
+def get_neighbour_lesson(course: str, chapter: str, lesson: int) -> dict:
 	"""Prev/next lesson numbers in document (depth-first) order, dash-path form.
 
 	The old "{chapter}.{lesson}" dot pairs are gone: a neighbour may now live in a
@@ -2317,7 +2324,7 @@ def get_neighbour_lesson(course: str, chapter, lesson) -> dict:
 	}
 
 
-def resolve_section_by_path(course: str, chapter) -> tuple[str | None, str | None]:
+def resolve_section_by_path(course: str, chapter: str) -> tuple[str | None, str | None]:
 	"""Resolve a "2-1-3" style section path to (docname, title).
 
 	The first segment indexes the course's level-1 sections; every following

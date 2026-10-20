@@ -28,6 +28,7 @@ from lms.lms.utils import (
 	get_lesson_index,
 	get_neighbour_lesson,
 	get_ordered_lesson_rows,
+	resolve_section_by_path,
 )
 
 STUDENT = "tree-student@example.com"
@@ -301,6 +302,72 @@ class TestCourseSectionTree(BaseTestUtils):
 		for row in rows:
 			self.assertIsNone(row.section)
 			self.assertTrue(row.lesson)
+
+	# -- whitelisted HTTP dispatch (417 FrappeTypeError regression) --------
+
+	def test_whitelisted_lesson_api_is_fully_typed_for_http_dispatch(self):
+		"""Frappe v16 validates parameter annotations on every HTTP-dispatched
+		whitelisted call (hooks: require_type_annotated_api_methods = True). The
+		task-28 commit that dropped them broke every lesson request with 417
+		FrappeTypeError, so pin the exact contract the dispatcher enforces."""
+		import inspect
+
+		for func in (get_lesson, get_neighbour_lesson, resolve_section_by_path):
+			parameters = inspect.signature(func).parameters
+			unannotated = [
+				name for name, parameter in parameters.items() if parameter.annotation is parameter.empty
+			]
+			self.assertEqual(unannotated, [], f"{func.__name__} lost its type annotations")
+
+		# chapter is a dash section path ("2" legacy, "1-1-3" nested), never an
+		# int: the dispatcher would reject "1-1-3" against an int annotation.
+		# lesson is the plain position, cast from the query string by the
+		# dispatcher itself.
+		parameters = inspect.signature(get_lesson).parameters
+		self.assertIs(parameters["chapter"].annotation, str)
+		self.assertIs(parameters["lesson"].annotation, int)
+
+		# the enforcement hook that turned the omission into 417s must stay on
+		self.assertTrue(frappe.get_hooks("require_type_annotated_api_methods", app_name="lms"))
+
+	def test_get_lesson_http_dispatch_serves_legacy_and_nested_paths(self):
+		"""frappe.call is the exact execute_cmd dispatch path; query-string values
+		arrive as strings. Legacy "N-M" URLs and nested dash paths must both
+		resolve through it (the removed annotations raised FrappeTypeError before
+		the function body ever ran)."""
+		block = self.make_chapter("Dispatch Block")
+		self.attach_to_course(block, 1)
+		flat_two = self._create_chapter("Dispatch Flat Two", self.course.name)
+		self.attach_to_course(flat_two, 2)
+		nested = self.make_chapter("Dispatch Nested", parent_section=block.name)
+		self.attach_section_row(block, nested, 1)
+		nested_lesson = self._create_lesson("Dispatch Nested Lesson", nested.name, self.course.name)
+		self.attach_lesson_row(nested, nested_lesson, 1)
+		flat_lesson = self._create_lesson("Dispatch Flat Lesson", flat_two.name, self.course.name)
+		self.attach_lesson_row(flat_two, flat_lesson, 1)
+
+		legacy = frappe.call(
+			"lms.lms.utils.get_lesson", course=self.course.name, chapter="2", lesson="1"
+		)
+		self.assertEqual(legacy["name"], flat_lesson.name)
+		self.assertEqual(legacy["number"], "2-1")
+
+		nested_payload = frappe.call(
+			"lms.lms.utils.get_lesson", course=self.course.name, chapter="1-1", lesson="1"
+		)
+		self.assertEqual(nested_payload["name"], nested_lesson.name)
+		self.assertEqual(nested_payload["chapter_title"], "Dispatch Nested")
+
+	def test_get_lesson_http_dispatch_validates_the_path(self):
+		"""A chapter path that resolves nowhere lands on the redirect payload,
+		not an error: the API validates the section path itself."""
+		self.flat_course()
+		for chapter in ("9", "1-9", "abc", "1-", "", "-"):
+			with self.subTest(chapter=chapter):
+				payload = frappe.call(
+					"lms.lms.utils.get_lesson", course=self.course.name, chapter=chapter, lesson="1"
+				)
+				self.assertEqual(payload, {})
 
 	# -- section APIs -----------------------------------------------------
 
