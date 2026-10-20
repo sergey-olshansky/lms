@@ -65,3 +65,19 @@ export const attemptRowStatusLabel = (status: QuizAttemptRowStatus): string =>
 		skipped: __('Skipped'),
 		pending: __('Pending review'),
 	})[status]
+
+// The resolved question text of one graded row, shared by the post-submit
+// summary and the per-attempt report modal (#27). The stored copy the
+// submission carries is tried first; when it is empty — quizzes authored or
+// migrated outside the form never fill it — the live question text is used,
+// the very text the quiz body rendered and the learner answered. Both empty
+// resolves to "", which the callers must render as the explicit unavailable
+// state, never as a silently blank line. Other fields of questionsByName
+// (options, keys, explanations) are never read here.
+export const resolveAttemptQuestionText = (
+	row: { question?: string | null; question_name?: string | null },
+	questionsByName: Record<string, { question?: string | null }>
+): string =>
+	(row.question ?? '').trim() ||
+	(questionsByName[row.question_name ?? '']?.question ?? '').trim() ||
+	''

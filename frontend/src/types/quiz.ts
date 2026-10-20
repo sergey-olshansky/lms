@@ -99,6 +99,20 @@ export interface QuizSummaryRow {
 	status: QuizAttemptRowStatus
 }
 
+/** One rendered row of the per-attempt report modal (#27): a summary row plus
+ * the marks the attempt's row carries. The answer key is never part of the
+ * row — it is rendered separately, and only for viewers the server
+ * authorises. */
+export interface QuizReportRow {
+	number: number
+	questionName: string
+	question: string
+	answer: string
+	status: QuizAttemptRowStatus
+	marks?: number
+	marks_out_of?: number
+}
+
 /** 1 correct, 2 partially correct, 0 wrong; undefined for an untouched option. */
 export type AnswerVerdict = 0 | 1 | 2 | undefined
 

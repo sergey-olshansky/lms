@@ -762,7 +762,26 @@
 				row-key="name"
 				title-key="creation"
 				:options="getSubmissionOptions()"
-			/>
+			>
+				<!-- One action per row (#27): open this attempt's report modal. The
+				     slot intercepts every column, so the others keep their default
+				     text. -->
+				<template #cell="{ column, row, value }">
+					<Button
+						v-if="column.key === 'report'"
+						variant="subtle"
+						size="sm"
+						data-testid="attempt-report-button"
+						:aria-label="
+							__('Report for attempt {0}').format(row.idx)
+						"
+						@click="openAttemptReport(row)"
+					>
+						{{ __('Report') }}
+					</Button>
+					<template v-else>{{ value }}</template>
+				</template>
+			</ResponsiveListView>
 		</div>
 	</div>
 	<Dialog
@@ -836,6 +855,19 @@
 			</div>
 		</template>
 	</Dialog>
+
+	<!-- The per-attempt report (#27), opened from the history table's Report
+	     action. Keyed by submission so opening a different attempt always
+	     remounts with fresh resources. -->
+	<QuizAttemptReportModal
+		v-if="reportAttempt"
+		:key="reportAttempt.name"
+		:submission-name="reportAttempt.name"
+		:attempt="reportAttempt"
+		:questions-by-name="questionsByName"
+		:can-view-correct-answers="reportShowsCorrectAnswers"
+		@close="reportAttempt = null"
+	/>
 </template>
 <script setup lang="ts">
 import {
@@ -877,7 +909,13 @@ import OptionRow from '@/components/Assessment/OptionRow.vue'
 import FeedbackBanner from '@/components/Assessment/FeedbackBanner.vue'
 import QuizStats from '@/components/Assessment/QuizStats.vue'
 import QuizSummaryRows from '@/components/Assessment/QuizSummaryRows.vue'
-import { attemptsLeftLabel, attemptRowStatus, formatQuizSubtitle } from '@/utils/quizSummary'
+import QuizAttemptReportModal from '@/components/Assessment/QuizAttemptReportModal.vue'
+import {
+	attemptsLeftLabel,
+	attemptRowStatus,
+	formatQuizSubtitle,
+	resolveAttemptQuestionText,
+} from '@/utils/quizSummary'
 import type {
 	AnswerVerdict,
 	QuizAttempt,
@@ -1274,6 +1312,27 @@ const attempts = createResource<QuizAttempt[]>({
 	},
 })
 
+// --- Per-attempt report from the history table (#27) -----------------------
+// The table lists the current user's own submissions only (member filter),
+// so every Report action opens the caller's own attempt.
+const reportAttempt = ref<QuizAttempt | null>(null)
+
+const openAttemptReport = (attempt: QuizAttempt): void => {
+	reportAttempt.value = attempt
+}
+
+// Correct answers in the report (owner decision #1088): staff always; the
+// attempt owner — which every listed row is — only when the quiz's «Show
+// Answers» checkbox is on. The server re-validates both branches on every
+// call; this only keeps the client from requesting keys it would be denied.
+const reportShowsCorrectAnswers = computed(
+	() =>
+		!!user.data?.is_instructor ||
+		!!user.data?.is_moderator ||
+		!!user.data?.is_system_manager ||
+		!!quiz.data?.show_answers
+)
+
 // Graded rows of one of the learner's own submissions, for the read-only
 // per-question summary after the quiz is over (#27). Read the whole submission
 // doc: the graded rows are its child table, and the submission doctype's rules
@@ -1375,12 +1434,12 @@ const attemptDots = computed(() => buildDots(liveDotVerdict))
 // their assignment (#27 owner report: the question itself went missing when
 // the answer was wrong). The live quiz data holds the very text the learner
 // answered — questions_by_name is what the in-quiz body renders — so the
-// summary falls back to it whenever the stored copy carries no text. Options,
-// keys and explanations are other fields of that map and are never read here.
+// summary falls back to it whenever the stored copy carries no text. The
+// resolver is shared with the per-attempt report modal; both empty is the
+// explicit unavailable state, never a silent blank. Options, keys and
+// explanations are other fields of that map and are never read here.
 const rowQuestionText = (row: QuizResultRow): string =>
-	(row.question ?? '').trim() ||
-	questionsByName.value[row.question_name ?? '']?.question ||
-	''
+	resolveAttemptQuestionText(row, questionsByName.value)
 
 const summaryRow = (number: number, row: QuizResultRow): QuizSummaryRow => ({
 	number,
@@ -2060,6 +2119,17 @@ const getSubmissionColumns = () => {
 			label: __('Percentage'),
 			key: 'percentage',
 			align: 'left',
+			width: 1,
+		},
+		// #27: the row action that opens this attempt's report modal. An
+		// actions column renders outside the shrinking text cells — on the
+		// phone cards ResponsiveListView parks it beside the row — and carries
+		// no value of its own.
+		{
+			label: __('Report'),
+			key: 'report',
+			kind: 'actions',
+			align: 'right',
 			width: 1,
 		},
 	]

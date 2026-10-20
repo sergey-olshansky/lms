@@ -34,11 +34,20 @@
 				</div>
 				<!-- Only the question text and the learner's own answer are ever
 				     rendered here; the correct answer, keys and explanations stay
-				     out of this surface by construction (#27). -->
+				     out of this surface by construction (#27). An empty resolve is
+				     the explicit unavailable state, never a silent blank line. -->
 				<div
+					v-if="row.question"
 					class="mt-1.5 text-p-base text-ink-gray-8"
 					v-safe-html:rich="row.question"
 				/>
+				<p
+					v-else
+					data-testid="quiz-summary-question-unavailable"
+					class="mt-1.5 text-p-base text-ink-gray-5"
+				>
+					{{ __('Question text is not available') }}
+				</p>
 				<div
 					v-if="row.status !== 'skipped'"
 					class="mt-1.5 text-p-base text-ink-gray-7"
