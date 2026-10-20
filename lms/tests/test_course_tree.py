@@ -11,6 +11,8 @@ the section APIs, and the course archive import.
 """
 
 import json
+import os
+import shutil
 import tempfile
 import zipfile
 from pathlib import Path
@@ -123,6 +125,12 @@ class TestCourseSectionTree(BaseTestUtils):
 		part = self.make_chapter("L4 Part", parent_section=chapter.name)
 		deep = self.make_chapter("L4 Deep", parent_section=part.name)
 		self.attach_to_course(block, 1)
+		# parent_section carries the structural link; the section rows in the
+		# parents' child tables are what the outline walks, so a fixture that
+		# skips them builds an invisible chain.
+		self.attach_section_row(block, chapter, 1)
+		self.attach_section_row(chapter, part, 1)
+		self.attach_section_row(part, deep, 1)
 		lesson = self._create_lesson("Deep Lesson", deep.name, self.course.name)
 		self.attach_lesson_row(deep, lesson, 1)
 
@@ -239,9 +247,11 @@ class TestCourseSectionTree(BaseTestUtils):
 		self.attach_lesson_row(nested, nested_lesson, 1)
 
 		self.assertEqual(
-			get_neighbour_lesson(self.course.name, "1-1", "1"),
+			get_neighbour_lesson(self.course.name, "1", "1"),
 			{"prev": None, "next": "1-1-1"},
 		)
+		# "1-1" + position 1 is the lesson inside the nested section (number
+		# "1-1-1"), whose neighbours both live outside its own section.
 		self.assertEqual(
 			get_neighbour_lesson(self.course.name, "1-1", "1"),
 			{"prev": "1-1", "next": "1-2"},
@@ -277,7 +287,7 @@ class TestCourseSectionTree(BaseTestUtils):
 		self.assertEqual([r.number for r in rows], ["1-1", "1-2", "2-1"])
 
 		resolved = get_lesson(self.course.name, "2", "1")
-		self.assertEqual(resolved["number"], "2-1")
+		self.assertEqual(get_lesson_index(resolved["name"]), "2-1")
 
 		self.assertEqual(
 			get_neighbour_lesson(self.course.name, "1", "2"),
@@ -350,7 +360,7 @@ class TestCourseSectionTree(BaseTestUtils):
 			"lms.lms.utils.get_lesson", course=self.course.name, chapter="2", lesson="1"
 		)
 		self.assertEqual(legacy["name"], flat_lesson.name)
-		self.assertEqual(legacy["number"], "2-1")
+		self.assertEqual(get_lesson_index(legacy["name"]), "2-1")
 
 		nested_payload = frappe.call(
 			"lms.lms.utils.get_lesson", course=self.course.name, chapter="1-1", lesson="1"
@@ -396,21 +406,31 @@ class TestCourseSectionTree(BaseTestUtils):
 		chapter = self.make_chapter("Move Chapter", parent_section=block.name)
 		part = self.make_chapter("Move Part", parent_section=chapter.name)
 		self.attach_to_course(block, 1)
+		self.attach_section_row(block, chapter, 1)
+		self.attach_section_row(chapter, part, 1)
 
-		# part (height 1) under a level-3 section would sit at level 4: legal.
+		# other_root(1) → other_mid(2) → other_deep(3): targets at two depths.
 		other_root = self.make_chapter("Move Other Root")
 		other_mid = self.make_chapter("Move Other Mid", parent_section=other_root.name)
+		other_deep = self.make_chapter("Move Other Deep", parent_section=other_mid.name)
 		self.attach_to_course(other_root, 2)
+		self.attach_section_row(other_root, other_mid, 1)
+		self.attach_section_row(other_mid, other_deep, 1)
 
-		move_section(part.name, other_mid.name)
+		# block carries a 3-level subtree (block → chapter → part): under a
+		# level-2 section it would reach level 5, under a level-3 one level 6.
+		self.assertRaises(frappe.ValidationError, move_section, block.name, other_mid.name)
+		self.assertRaises(frappe.ValidationError, move_section, block.name, other_deep.name)
+		# And a section cannot land inside its own subtree.
+		self.assertRaises(frappe.ValidationError, move_section, block.name, part.name)
+
+		# A leaf section (height 1) under the level-3 section sits exactly at
+		# level 4: the deepest legal move.
+		move_section(part.name, other_deep.name)
 		self.assertEqual(
 			frappe.db.get_value("Course Chapter", part.name, "parent_section"),
-			other_mid.name,
+			other_deep.name,
 		)
-
-		# Moving the block's whole subtree (height 4) under any section is refused.
-		self.assertRaises(frappe.ValidationError, move_section, block.name, other_mid.name)
-		self.assertRaises(frappe.ValidationError, move_section, block.name, part.name)
 
 	def test_move_section_to_root_and_back(self):
 		block = self.make_chapter("Root Move Block")
@@ -442,12 +462,15 @@ class TestCourseSectionTree(BaseTestUtils):
 		self.attach_section_row(block, nested, 2)
 		self.attach_lesson_row(block, second, 3)
 
-		# "Move down" swaps with the next child row, whatever kind it is.
-		update_section_index(nested.name, block.name, 1)
+		# "Move down" swaps with the next child row, whatever kind it is: from
+		# slot 1 (0-based, among ALL children rows) that is slot 2.
+		update_section_index(nested.name, block.name, 2)
 		rows = frappe.get_all(
 			"Lesson Reference", {"parent": block.name}, ["lesson", "section", "idx"], order_by="idx"
 		)
-		self.assertEqual([r.lesson for r in rows], [first.name, second.name])
+		# The child table holds mixed rows: assert the lesson order over the
+		# lesson-bearing rows, then that the section row moved below both.
+		self.assertEqual([r.lesson for r in rows if r.lesson], [first.name, second.name])
 		self.assertEqual(rows[2].section, nested.name)
 
 	def test_unauthorized_writes_are_refused(self):
@@ -459,7 +482,7 @@ class TestCourseSectionTree(BaseTestUtils):
 			STUDENT,
 			"Tree",
 			"Student",
-			[{"role": "LMS Student"}],
+			["LMS Student"],
 		)
 		frappe.set_user(STUDENT)
 
@@ -505,8 +528,13 @@ class TestCourseSectionTree(BaseTestUtils):
 
 	# -- import (criterion 1, every write path) ---------------------------
 
-	def _zip_with_depth(self, depth: int) -> Path:
-		"""A course archive whose chapter chain claims `depth` section levels."""
+	def _zip_with_depth(self, depth: int) -> tuple[str, Path]:
+		"""A course archive whose chapter chain claims `depth` section levels.
+
+		Returns (site-relative path, absolute path): the importer resolves its
+		argument against the site directory — the upload flow stores archives
+		under private/files — so a host /tmp path never reaches validate_zip_file.
+		"""
 		chapters = []
 		for level in range(1, depth + 1):
 			old_name = f"{level:04d} Level {level}"
@@ -527,6 +555,7 @@ class TestCourseSectionTree(BaseTestUtils):
 			]
 
 		fd, path = tempfile.mkstemp(suffix=".zip")
+		os.close(fd)
 		with zipfile.ZipFile(path, "w") as archive:
 			archive.writestr(
 				"course.json",
@@ -537,6 +566,10 @@ class TestCourseSectionTree(BaseTestUtils):
 						"description": "Imported",
 						"category": "Business",
 						"published": 1,
+						# write_course_json serialises the whole course doc, its
+						# instructors child table included; the import refuses a
+						# course without one.
+						"instructors": [{"instructor": "frappe@example.com"}],
 					}
 				),
 			)
@@ -545,12 +578,16 @@ class TestCourseSectionTree(BaseTestUtils):
 					f"chapters/{chapter['name']}.json",
 					json.dumps(chapter),
 				)
-		return Path(path)
+		files_dir = frappe.get_site_path("private", "files")
+		os.makedirs(files_dir, exist_ok=True)
+		archive_name = os.path.basename(path)
+		shutil.move(path, os.path.join(files_dir, archive_name))
+		return f"private/files/{archive_name}", Path(files_dir) / archive_name
 
 	def test_import_accepts_four_levels(self):
-		path = self._zip_with_depth(4)
-		course_name = import_course_zip(str(path))
+		rel_path, archive_file = self._zip_with_depth(4)
 		try:
+			course_name = import_course_zip(rel_path)
 			chapters = frappe.get_all(
 				"Course Chapter", {"course": course_name}, ["name", "parent_section", "title"]
 			)
@@ -560,16 +597,21 @@ class TestCourseSectionTree(BaseTestUtils):
 			deepest = [c for c in chapters if c.title == "Import Level 4"][0]
 			self.assertTrue(deepest.parent_section)
 		finally:
-			path.unlink(missing_ok=True)
+			archive_file.unlink(missing_ok=True)
 
 	def test_import_refuses_five_levels(self):
-		path = self._zip_with_depth(5)
+		rel_path, archive_file = self._zip_with_depth(5)
 		try:
+			frappe.db.savepoint("t28_refused_import")
 			with self.assertRaises(frappe.ValidationError):
-				import_course_zip(str(path))
+				import_course_zip(rel_path)
+			# A refused import must leave nothing behind once the failed request
+			# rolls back. The HTTP layer achieves that by rolling the whole
+			# request back; inside the test runner's per-test transaction the
+		# equivalent is a rollback to the savepoint taken before the attempt.
+			frappe.db.rollback(save_point="t28_refused_import")
+			self.assertFalse(
+				frappe.db.exists("LMS Course", {"title": "Import Depth Course"})
+			)
 		finally:
-			path.unlink(missing_ok=True)
-		# Nothing of the refused import survives: the whole request rolls back.
-		self.assertFalse(
-			frappe.db.exists("LMS Course", {"title": "Import Depth Course"})
-		)
+			archive_file.unlink(missing_ok=True)

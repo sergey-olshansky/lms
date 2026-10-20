@@ -1193,11 +1193,20 @@ def move_section(section: str, target_parent: str = None, idx: int = None):
 
 	if not target_parent:
 		# To the course root: always legal, the subtree height is at most the cap.
-		frappe.db.delete("Lesson Reference", {"parent": old_parent, "section": section})
-		renumber_children(old_parent)
+		if old_parent:
+			frappe.db.delete("Lesson Reference", {"parent": old_parent, "section": section})
+			renumber_children(old_parent)
 		frappe.db.set_value("Course Chapter", section, "parent_section", None)
+		if not frappe.db.exists("Chapter Reference", {"chapter": section, "parent": section_doc.course}):
+			# A section that only ever lived under another section has no root
+			# reference yet. Attach it the way upsert_chapter does, or the moved
+			# section would vanish from the outline instead of becoming a
+			# top-level section of the course.
+			course_doc = frappe.get_doc("LMS Course", section_doc.course)
+			course_doc.append("chapters", {"chapter": section})
+			course_doc.save(ignore_permissions=True)
 		chapter_count = frappe.db.count("Chapter Reference", {"parent": section_doc.course})
-		slot = int(idx) if idx is not None else chapter_count
+		slot = int(idx) if idx is not None else max(chapter_count - 1, 0)
 		return update_chapter_index(section, section_doc.course, slot)
 
 	target = frappe.db.get_value(
@@ -1218,8 +1227,19 @@ def move_section(section: str, target_parent: str = None, idx: int = None):
 	if section_depth_of(target_parent) + height > MAX_SECTION_DEPTH:
 		frappe.throw(_("Cannot save: this would exceed 4 section levels"), frappe.ValidationError)
 
-	frappe.db.delete("Lesson Reference", {"parent": old_parent, "section": section})
-	renumber_children(old_parent)
+	if old_parent:
+		frappe.db.delete("Lesson Reference", {"parent": old_parent, "section": section})
+		renumber_children(old_parent)
+	else:
+		# A top-level section nested under another one stops being a chapter of
+		# the course: drop its root reference and keep the remaining root
+		# indexes contiguous, or the outline would list it twice.
+		frappe.db.delete("Chapter Reference", {"chapter": section, "parent": section_doc.course})
+		root_rows = frappe.get_all(
+			"Chapter Reference", {"parent": section_doc.course}, ["name"], order_by="idx"
+		)
+		for position, row in enumerate(root_rows, start=1):
+			frappe.db.set_value("Chapter Reference", row.name, "idx", position)
 
 	new_row = frappe.new_doc("Lesson Reference")
 	new_row.update(
