@@ -321,6 +321,7 @@ const MANIFEST: Record<string, Privacy[]> = {
 	// A literal `:private="true"` now that the flat prop replaced the
 	// `uploadArgs` computed object — no longer `computed`, still private.
 	'components/UploadPlugin.vue': ['private'],
+	'components/VideoArchiveBlock.vue': ['private'],
 	'pages/Forms/AssignmentForm.vue': ['undeclared'],
 	// Moved out of AnnouncementForm.vue when it adopted FormLayout: the
 	// `<RichTextEditor>` tag now lives in this reusable field adapter instead.
