@@ -1367,10 +1367,25 @@ const attemptDots = computed(() => buildDots(liveDotVerdict))
 // learner's own answer and its textual verdict. Correct answers, keys and
 // explanations are never part of this surface — not gated, absent.
 
+// A graded row's stored `question` text is a copy the backend takes from the
+// quiz's own question row (LMS Quiz Question.question_detail, filled by
+// fetch_from when the quiz is authored in the form). That copy can be empty —
+// a quiz authored or migrated outside the form never fills it — and the
+// summary then replayed graded rows, the incorrect ones first of all, without
+// their assignment (#27 owner report: the question itself went missing when
+// the answer was wrong). The live quiz data holds the very text the learner
+// answered — questions_by_name is what the in-quiz body renders — so the
+// summary falls back to it whenever the stored copy carries no text. Options,
+// keys and explanations are other fields of that map and are never read here.
+const rowQuestionText = (row: QuizResultRow): string =>
+	(row.question ?? '').trim() ||
+	questionsByName.value[row.question_name ?? '']?.question ||
+	''
+
 const summaryRow = (number: number, row: QuizResultRow): QuizSummaryRow => ({
 	number,
 	questionName: row.question_name ?? '',
-	question: row.question ?? '',
+	question: rowQuestionText(row),
 	answer: row.answer ?? '',
 	status: attemptRowStatus(row),
 })

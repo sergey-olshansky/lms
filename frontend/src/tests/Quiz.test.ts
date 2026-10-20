@@ -881,6 +881,66 @@ describe('Quiz result screen summary rows', () => {
 		wrapper.unmount()
 	})
 
+	// Regression (#27 owner report): the graded row's stored `question` text is
+	// a copy the backend takes from the quiz question row's fetch_from field,
+	// which quizzes authored outside the form never fill — so real submissions
+	// can carry graded rows with no question text at all. Both verdicts must
+	// still show the assignment itself, resolved from the same question text
+	// the quiz body rendered, while each row keeps its status and the learner's
+	// own answer and no key leaks.
+	it('keeps the question on graded rows whose stored text copy is empty', async () => {
+		resourceState.response = choicesQuizResponse(2)
+		resourceState.submissionDocs['SUBM-1'] = {
+			name: 'SUBM-1',
+			result: [
+				{
+					question_name: 'Q1',
+					question: null,
+					answer: 'First option 1',
+					question_type: 'Choices',
+					marks: 1,
+					marks_out_of: 1,
+					is_correct: 1,
+				},
+				{
+					question_name: 'Q2',
+					question: '   ',
+					answer: 'Second option 2',
+					question_type: 'Choices',
+					marks: 0,
+					marks_out_of: 1,
+					is_correct: 0,
+				},
+			],
+		}
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await startQuiz(wrapper)
+		await submitWithoutLiveChecking(wrapper)
+
+		const rows = wrapper.findAll('[data-testid="quiz-summary-row"]')
+		expect(rows).toHaveLength(2)
+
+		// Correct verdict: assignment, own answer and status all present.
+		expect(rows[0].text()).toContain('Question body 1')
+		expect(rows[0].text()).toContain('First option 1')
+		expect(
+				rows[0].find('[data-testid="quiz-summary-status"]')!.text()
+		).toBe('Correct')
+
+		// Incorrect verdict: the assignment is the point of the report — the
+		// question must appear, not only the badge and the wrong answer.
+		expect(rows[1].text()).toContain('Question body 2')
+		expect(rows[1].text()).toContain('Second option 2')
+		const wrong = rows[1].find('[data-testid="quiz-summary-status"]')!
+		expect(wrong.text()).toBe('Incorrect')
+		expect(wrong.classes()).toContain('bg-surface-red-6')
+
+		// The correct option stays an unseen key.
+		expect(wrapper.text()).not.toContain('First option 2')
+		wrapper.unmount()
+	})
+
 	it('shows the summary rows when show_answers is off', async () => {
 		resourceState.response = choicesQuizResponse(2)
 		resourceState.submissionDocs['SUBM-1'] = {
