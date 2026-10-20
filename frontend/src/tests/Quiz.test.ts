@@ -27,6 +27,8 @@ const resourceState = vi.hoisted(() => ({
 	submissionDocs: {} as Record<string, any>,
 	// What submit_quiz resolves with; null falls back to a passing default.
 	submitResponse: null as any,
+	// A server-side submission rejection, if this test needs to model one.
+	submitError: null as any,
 }))
 
 vi.mock('frappe-ui', async () => {
@@ -109,6 +111,10 @@ vi.mock('frappe-ui', async () => {
 			submit: vi.fn((values?: any, handlers?: any) => {
 				resourceState.submits.push([options.url, options.makeParams?.(values)])
 				if (options.url === 'lms.lms.doctype.lms_quiz.lms_quiz.submit_quiz') {
+					if (resourceState.submitError) {
+						handlers?.onError?.(resourceState.submitError)
+						return
+					}
 					const raw = structuredClone(
 						resourceState.submitResponse ?? {
 							percentage: 100,
@@ -293,6 +299,7 @@ beforeEach(() => {
 	resourceState.creditedQuestions = []
 	resourceState.submissionDocs = {}
 	resourceState.submitResponse = null
+	resourceState.submitError = null
 	localStorage.clear()
 })
 
@@ -828,7 +835,7 @@ describe('Quiz question dots', () => {
 
 		const tryAgain = wrapper
 			.findAll('button')
-			.find((button) => button.text() === 'Try Again')
+			.find((button) => button.text() === 'Retake only incorrect questions')
 		expect(tryAgain).toBeDefined()
 		await tryAgain!.trigger('click')
 		await flushPromises()
@@ -894,7 +901,7 @@ describe('Quiz result screen after submission', () => {
 		expect(wrapper.text()).toContain(
 			'You got 100% correct answers with a score of 1 out of 1'
 		)
-		expect(wrapper.text()).toContain('Try Again')
+		expect(wrapper.text()).toContain('Retake only incorrect questions')
 		// The per-question rows are gone from the result screen; the graded
 		// submission is not even fetched on the learner's behalf anymore.
 		expect(wrapper.find('[data-testid="quiz-summary-row"]').exists()).toBe(
@@ -904,6 +911,90 @@ describe('Quiz result screen after submission', () => {
 			([url]) => url === 'frappe.client.get'
 		)
 		expect(submissionReads).toHaveLength(0)
+		wrapper.unmount()
+	})
+
+	it('shows the retake action only while attempts remain', async () => {
+		const response = choicesQuizResponse(2)
+		response.quiz.max_attempts = 2
+		resourceState.response = response
+		resourceState.attempts = [
+			{
+				name: 'SUBM-1',
+				creation: '2026-10-08 10:00:00',
+				score: 0,
+				score_out_of: 2,
+				percentage: 0,
+				passing_percentage: 70,
+			},
+		]
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await startQuiz(wrapper)
+		await submitWithoutLiveChecking(wrapper)
+
+		const retakeLabel = 'Retake only incorrect questions'
+		expect(wrapper.text()).toContain(retakeLabel)
+
+		// Simulate the server history now including this attempt: the result
+		// remains visible, but the action must disappear at the configured limit.
+		resourceState.attempts = [
+			...resourceState.attempts,
+			{
+				name: 'SUBM-2',
+				creation: '2026-10-09 10:00:00',
+				score: 1,
+				score_out_of: 2,
+				percentage: 50,
+				passing_percentage: 70,
+			},
+		]
+		await wrapper.vm.attempts.reload()
+		await flushPromises()
+		expect(wrapper.text()).toContain('Quiz Summary')
+		expect(wrapper.text()).not.toContain(retakeLabel)
+		wrapper.unmount()
+	})
+
+	it('closes the active form when the server rejects the last attempt', async () => {
+		const response = choicesQuizResponse(2)
+		response.quiz.max_attempts = 2
+		resourceState.response = response
+		resourceState.attempts = [
+			{
+				name: 'SUBM-1',
+				creation: '2026-10-08 10:00:00',
+				score: 0,
+				score_out_of: 2,
+				percentage: 0,
+				passing_percentage: 70,
+			},
+		]
+		resourceState.submitError = {
+			message: 'MaximumAttemptsExceededError',
+			messages: ["You've used all 2 attempts"],
+		}
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await startQuiz(wrapper)
+
+		// Another tab spent the last attempt while this form was open.
+		resourceState.attempts = [
+			...resourceState.attempts,
+			{
+				name: 'SUBM-2',
+				creation: '2026-10-09 10:00:00',
+				score: 1,
+				score_out_of: 2,
+				percentage: 50,
+				passing_percentage: 70,
+			},
+		]
+		await submitWithoutLiveChecking(wrapper)
+
+		expect(wrapper.text()).toContain("You've used all 2 attempts")
+		expect(wrapper.text()).not.toContain('Finish Quiz')
+		expect(wrapper.text()).not.toContain('Retake only incorrect questions')
 		wrapper.unmount()
 	})
 
@@ -1003,7 +1094,7 @@ describe('Quiz result screen after submission', () => {
 
 		const tryAgain = wrapper
 			.findAll('button')
-			.find((button) => button.text() === 'Try Again')
+			.find((button) => button.text() === 'Retake only incorrect questions')
 		expect(tryAgain).toBeDefined()
 		await tryAgain!.trigger('click')
 		await flushPromises()

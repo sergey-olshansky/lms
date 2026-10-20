@@ -602,17 +602,18 @@
 						<Button v-if="inVideo" @click="props.backToVideo()">
 							{{ __('Resume Video') }}
 						</Button>
-						<Button
-							@click="resetQuiz()"
-							v-if="
-								!quiz.data.max_attempts ||
-								(attempts.data?.length ?? 0) < quiz.data.max_attempts
-							"
-						>
-							<span>
-								{{ __('Try Again') }}
-							</span>
-						</Button>
+					<!-- The retake action (#32): available only while the configured
+					     attempt count has room. The next pool contains uncredited
+					     questions; earlier correct answers keep their credit. -->
+					<Button
+						v-if="
+							!quiz.data.max_attempts ||
+							(attempts.data?.length ?? 0) < quiz.data.max_attempts
+						"
+						@click="resetQuiz()"
+					>
+						{{ __('Retake only incorrect questions') }}
+					</Button>
 					</div>
 				</div>
 			</div>
@@ -1281,6 +1282,25 @@ const attemptsExhausted = computed(
 		(attempts.data?.length ?? 0) >= quiz.data.max_attempts
 )
 
+// The server owns the attempt count (#32). When its history says the limit is
+// spent and this tab still holds an open, unsubmitted form — a draft restored
+// on reopen, or a race with a tab that spent the last attempt — that form is a
+// dead end: every submit would come back MaximumAttemptsExceededError. Close
+// it, draft included, and let the start card state the limit instead. A
+// submission that succeeded keeps its result screen; only the doomed form goes.
+watch(attemptsExhausted, (exhausted) => {
+	if (!exhausted || quizSubmission.data) return
+	if (activeQuestion.value <= 0) return
+	stopTimer()
+	try {
+		localStorage.removeItem(draftKey())
+	} catch {
+		// A storage that refuses changes nothing here: the form is closing
+		// regardless, and the watcher catches the next restore too.
+	}
+	resetQuiz()
+})
+
 const { scheduleBlockReason, scheduleBlocked, scheduleMessage } =
 	useAssessmentSchedule(() => quiz.data, {
 		opensOn: (date) => __('This quiz opens on {0}.').format(date),
@@ -1575,7 +1595,7 @@ watch(
 			stopTimer()
 			resetQuiz()
 			// Only on a genuine quiz switch, never from resetQuiz() itself — that is
-			// also the "Try Again" handler, and nulling attempts there leaves the
+			// also the retake action's handler, and nulling attempts there leaves the
 			// start card with neither a Start button nor the exceeded-attempts
 			// message, both of which read attempts.data?.length.
 			attempts.reset()
@@ -1593,6 +1613,9 @@ watch(
 
 const startQuiz = () => {
 	if (scheduleBlocked.value) return
+	// The server counts attempts and refuses past the limit; the local gate
+	// keeps the form from opening onto a submit the server would reject (#32).
+	if (attemptsExhausted.value) return
 	if (!quiz.data) return
 	if (quizSubmission.data) quizSubmission.reset()
 	savedAnswers.value = []
@@ -1989,9 +2012,17 @@ const createSubmission = (reason: SubmissionReason = 'manual'): void => {
 				if (errorTitle.includes('MaximumAttemptsExceededError')) {
 					const errorMessage = err.messages?.[0] || err.message
 					toast.error(__(errorMessage))
-					setTimeout(() => {
-						window.location.reload()
-					}, 3000)
+					// The server refused the submit: the attempt count is spent,
+					// whatever this tab's form still shows (another tab usually
+					// spent it). End the local attempt, take the server's count
+					// and history back, and let the start card state the limit —
+					// no reload, and no form left open to resubmit (#32).
+					stopTimer()
+					try {
+						localStorage.removeItem(submittedDraftKey)
+					} catch {}
+					resetQuiz()
+					if (quiz.data?.max_attempts) attempts.reload()
 				} else {
 					// Never re-submit automatically here. A failure can land after the
 					// server already created the submission — or its response can simply
