@@ -49,6 +49,7 @@
 				:handle="'.outline-drag-handle-level-1'"
 				:filter="'.outline-section-row, .outline-lesson-row, .scorm-section-row'"
 				:preventOnFilter="false"
+				@start="outlineDrag.start($event, null)"
 				@end="updateChapterOrder"
 			>
 				<template #item="{ element: chapter }">
@@ -108,7 +109,11 @@
 import { Button, createResource, toast } from 'frappe-ui'
 import type { FrappeResourceError } from 'frappe-ui'
 import { resourceErrorMessage } from '@/utils/resource'
-import { getCurrentInstance, ref, watch } from 'vue'
+import { getCurrentInstance, provide, ref, watch } from 'vue'
+import {
+	createCourseOutlineDrag,
+	courseOutlineDragKey,
+} from '@/composables/courseOutlineDrag'
 import { useRoute, useRouter } from 'vue-router'
 import Draggable from 'vuedraggable'
 
@@ -137,6 +142,7 @@ interface DraggableEvent {
 	from: { dataset: { chapter: string } }
 	to: { dataset: { chapter: string } }
 	newIndex: number
+	originalEvent?: Event
 }
 
 interface DialogAction {
@@ -256,6 +262,10 @@ const updateLessonIndex = createResource({
 		outline.reload()
 		toast.success(__('Lesson moved successfully'))
 	},
+	onError(error: FrappeResourceError) {
+		outline.reload()
+		toast.error(resourceErrorMessage(error, __('Error')))
+	},
 })
 
 const updateChapterIndex = createResource({
@@ -266,6 +276,10 @@ const updateChapterIndex = createResource({
 	onSuccess() {
 		outline.reload()
 		toast.success(__('Chapter moved successfully'))
+	},
+	onError(error: FrappeResourceError) {
+		outline.reload()
+		toast.error(resourceErrorMessage(error, __('Error')))
 	},
 })
 
@@ -278,7 +292,43 @@ const updateSectionIndex = createResource({
 		outline.reload()
 		toast.success(__('Order updated'))
 	},
+	onError(error: FrappeResourceError) {
+		outline.reload()
+		toast.error(resourceErrorMessage(error, __('Error')))
+	},
 })
+
+const dropSection = createResource({
+	url: 'lms.lms.api.move_section',
+	onSuccess() {
+		outline.reload()
+	},
+	onError(error: FrappeResourceError) {
+		outline.reload()
+		toast.error(resourceErrorMessage(error, __('Error')))
+	},
+})
+const outlineDrag = createCourseOutlineDrag({
+	getOutline: () => outline.data,
+	onCancel: () => outline.reload(),
+	onDrop({ item, sourceParent, targetParent, idx }) {
+		if (item.kind === 'section') {
+			dropSection.submit({
+				section: item.node.name,
+				target_parent: targetParent,
+				idx,
+			})
+		} else if (sourceParent) {
+			updateLessonIndex.submit({
+				lesson: item.lesson.name,
+				sourceChapter: sourceParent,
+				targetChapter: targetParent,
+				idx,
+			})
+		}
+	},
+})
+provide(courseOutlineDragKey, outlineDrag)
 
 const deleteChapter = createResource({
 	url: 'lms.lms.api.delete_chapter',
@@ -553,6 +603,7 @@ function updateOutline(e: DraggableEvent) {
 }
 
 function updateChapterOrder(e: DraggableEvent) {
+	if (outlineDrag.finish(e)) return
 	const chapter = e.item.__draggable_context.element as OutlineChapter
 	updateChapterIndex.submit({
 		chapter: chapter.name,

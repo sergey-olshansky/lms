@@ -30,7 +30,16 @@
 					/>
 					<div
 						class="min-w-0 flex-1 text-start"
-						:class="isScormSectionLocked ? 'cursor-not-allowed opacity-60' : ''"
+						:class="[
+							isScormSectionLocked ? 'cursor-not-allowed opacity-60' : '',
+							outlineDrag?.state.hoveredTarget === section.name
+								? 'rounded-4 bg-surface-blue-1 ring-2 ring-outline-blue-2'
+								: '',
+						]"
+						:data-section-drop="allowEdit ? section.name : undefined"
+						@dragover="outlineDrag?.over($event, section)"
+						@dragleave="outlineDrag && (outlineDrag.state.hoveredTarget = null)"
+						@drop="outlineDrag?.drop($event, section)"
 					>
 						<TextInput
 							v-if="isRenaming"
@@ -186,6 +195,7 @@
 				:filter="'.scorm-section-row'"
 				:preventOnFilter="false"
 				:data-chapter="section.name"
+				@start="outlineDrag?.start($event, section.name)"
 				@end="moveChild"
 			>
 				<template #item="{ element }">
@@ -279,15 +289,19 @@
 								/>
 								{{ element.lesson!.title }}
 								<div v-if="allowEdit" class="ms-auto flex items-center gap-2">
-									<span
-										@click.prevent="
+									<OutlineActionButton
+										:label="__('Delete Lesson')"
+										danger
+										@click.prevent.stop="
 											emit('delete-lesson', {
 												lesson: element.lesson!.name,
 												chapter: section.name,
 											})
 										"
-										class="lucide-trash-2 h-4 w-4 text-ink-red-5 invisible group-hover:visible [@media(hover:none)]:visible"
-									/>
+										class="invisible group-hover:visible group-focus-within:visible [@media(hover:none)]:visible"
+									>
+										<span class="lucide-trash-2 size-4" aria-hidden="true" />
+									</OutlineActionButton>
 								</div>
 								<template v-if="element.lesson!.locked">
 									<span
@@ -332,6 +346,7 @@ import SectionRow from '@/components/SectionRow.vue'
 import OutlineActionButton from '@/components/OutlineActionButton.vue'
 import type { OutlineChapter, OutlineLesson, SessionUser } from '@/types'
 import { parseLessonNumber } from '@/utils/courseOutline'
+import { courseOutlineDragKey } from '@/composables/courseOutlineDrag'
 
 interface DraggableEvent {
 	item: {
@@ -343,6 +358,7 @@ interface DraggableEvent {
 	to: { dataset: { chapter: string } }
 	newIndex: number
 	oldIndex?: number
+	originalEvent?: Event
 }
 
 interface MergedChild {
@@ -409,6 +425,7 @@ const emit = defineEmits<{
 const route = useRoute()
 const router = useRouter()
 const user = inject<SessionUser>('$user')!
+const outlineDrag = inject(courseOutlineDragKey, null)
 
 const isRenaming = ref<boolean>(false)
 const renameValue = ref<string>('')
@@ -602,6 +619,7 @@ function canTransferChild(
 }
 
 function moveChild(event: DraggableEvent) {
+	if (outlineDrag?.finish(event)) return
 	if (!Number.isInteger(event.newIndex)) return
 	if (event.from === event.to && event.oldIndex === event.newIndex) return
 	const child = event.item.__draggable_context.element
