@@ -76,27 +76,41 @@ export function createCourseOutlineDrag(options: {
 		})
 	}
 
+	function sectionAtPoint(event?: Event): OutlineChapter | undefined {
+		const original = event as (MouseEvent & Partial<TouchEvent>) | undefined
+		const point =
+			original?.touches?.[0] ?? original?.changedTouches?.[0] ?? original
+		if (!point || !Number.isFinite(point.clientX)) return
+		const element = document.elementFromPoint(point.clientX, point.clientY)
+		const name = element?.closest<HTMLElement>('[data-section-drop]')?.dataset
+			.sectionDrop
+		return flattenSections(options.getOutline()).find(
+			(section) => section.name === name
+		)
+	}
+
+	function move(_event: unknown, originalEvent: Event): boolean {
+		const target = sectionAtPoint(originalEvent)
+		if (!target || !state.item) {
+			state.hoveredTarget = null
+			return true
+		}
+		state.hoveredTarget = canDropIntoSection(state.item, target)
+			? target.name
+			: null
+		// Keep a title target in place. Sortable otherwise swaps the source into
+		// that row before mouseup, so the eventual drop lands on the source itself.
+		return false
+	}
+
 	function finish(event: { originalEvent?: Event }): boolean {
 		// Sortable's touch fallback has no native drop event. Resolve the release
 		// point against the same title targets used by mouse/HTML drag-and-drop.
-		const original = event.originalEvent as
-			| (MouseEvent & Partial<TouchEvent>)
-			| undefined
-		const point = original?.changedTouches?.[0] ?? original
-		if (
-			!state.handled &&
-			state.item &&
-			point &&
-			Number.isFinite(point.clientX)
-		) {
-			const element = document.elementFromPoint(point.clientX, point.clientY)
-			const name = element?.closest<HTMLElement>('[data-section-drop]')?.dataset
-				.sectionDrop
-			const target = flattenSections(options.getOutline()).find(
-				(section) => section.name === name
-			)
+		if (!state.handled && state.item) {
+			const target = sectionAtPoint(event.originalEvent)
 			if (target) {
-				if (canDropIntoSection(state.item, target)) drop(original!, target)
+				if (canDropIntoSection(state.item, target))
+					drop(event.originalEvent!, target)
 				else {
 					state.handled = true
 					options.onCancel()
@@ -110,7 +124,7 @@ export function createCourseOutlineDrag(options: {
 		return handled
 	}
 
-	return { state, start, over, drop, finish }
+	return { state, start, over, drop, move, finish }
 }
 
 export const courseOutlineDragKey: InjectionKey<

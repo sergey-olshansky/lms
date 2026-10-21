@@ -198,6 +198,7 @@
 				}']`"
 				:filter="'.scorm-section-row'"
 				:preventOnFilter="false"
+				:move="outlineDrag?.move"
 				:data-chapter="section.name"
 				@start="outlineDrag?.start($event, section.name)"
 				@end="moveChild"

@@ -31,6 +31,31 @@ const start = (element: unknown) => ({
 afterEach(() => vi.restoreAllMocks())
 
 describe('dropping outline items into section titles', () => {
+	it('keeps a title target stationary so sibling sorting cannot replace it before drop', () => {
+		const target = section('TARGET')
+		const title = document.createElement('div')
+		title.dataset.sectionDrop = target.name
+		const elementFromPoint = vi.fn((): Element | null => title)
+		Object.defineProperty(document, 'elementFromPoint', {
+			configurable: true,
+			value: elementFromPoint,
+		})
+		const drag = createCourseOutlineDrag({
+			getOutline: () => [target],
+			onDrop: vi.fn(),
+			onCancel: vi.fn(),
+		})
+		drag.start(start(section('SOURCE')), null)
+		expect(
+			drag.move({}, new MouseEvent('dragover', { clientX: 20, clientY: 30 }))
+		).toBe(false)
+		expect(drag.state.hoveredTarget).toBe(target.name)
+		elementFromPoint.mockReturnValue(null)
+		expect(
+			drag.move({}, new MouseEvent('dragover', { clientX: 0, clientY: 0 }))
+		).toBe(true)
+		expect(drag.state.hoveredTarget).toBeNull()
+	})
 	it('rejects cycles, SCORM and subtrees exceeding four levels', () => {
 		const child = section('CHILD', 2)
 		const root = section('ROOT', 1, [child])

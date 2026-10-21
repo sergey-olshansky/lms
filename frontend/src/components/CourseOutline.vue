@@ -49,6 +49,7 @@
 				:handle="'.outline-drag-handle-level-1'"
 				:filter="'.outline-section-row, .outline-lesson-row, .scorm-section-row'"
 				:preventOnFilter="false"
+				:move="outlineDrag.move"
 				@start="outlineDrag.start($event, null)"
 				@end="updateChapterOrder"
 			>
