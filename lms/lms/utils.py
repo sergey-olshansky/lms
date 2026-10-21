@@ -3214,11 +3214,34 @@ def calculate_discount_amount(base_amount: float, coupon: dict) -> float:
 
 
 @frappe.whitelist()
-def get_lesson_creation_details(course: str, chapter: int, lesson: int) -> dict:
-	frappe.only_for(["Moderator", "Course Creator"])
-	chapter_name = frappe.db.get_value("Chapter Reference", {"parent": course, "idx": chapter}, "chapter")
-	lesson_name = frappe.db.get_value("Lesson Reference", {"parent": chapter_name, "idx": lesson}, "lesson")
+def get_lesson_creation_details(course: str, chapter: str, lesson: int) -> dict:
+	"""Resolve an editor lesson by its section path, including nested sections.
 
+	The student and outline routes use numbers such as ``1-2-1`` for a lesson
+	inside nested sections. The editor sends the section path (``1-2``) and the
+	lesson's position in that section (``1``); treating those as root-table
+	indices made a newly created nested lesson appear missing, so its title could
+	never autosave.
+	"""
+	frappe.only_for(["Moderator", "Course Creator"])
+	chapter_name, chapter_title = resolve_section_by_path(course, chapter)
+
+	lesson_name = None
+	try:
+		lesson_position = int(lesson)
+	except (TypeError, ValueError):
+		lesson_position = 0
+	if chapter_name and lesson_position > 0:
+		lesson_names = frappe.get_all(
+			"Lesson Reference",
+			{"parent": chapter_name, "lesson": ["is", "set"]},
+			pluck="lesson",
+			order_by="idx",
+		)
+		if lesson_position <= len(lesson_names):
+			lesson_name = lesson_names[lesson_position - 1]
+
+	lesson_details = None
 	if lesson_name:
 		lesson_details = frappe.db.get_value(
 			"Course Lesson",
@@ -3239,8 +3262,8 @@ def get_lesson_creation_details(course: str, chapter: int, lesson: int) -> dict:
 
 	return {
 		"course_title": frappe.db.get_value("LMS Course", course, "title"),
-		"chapter": frappe.db.get_value("Course Chapter", chapter_name, ["title", "name"], as_dict=True),
-		"lesson": lesson_details if lesson_name else None,
+		"chapter": {"name": chapter_name, "title": chapter_title} if chapter_name else None,
+		"lesson": lesson_details,
 	}
 
 

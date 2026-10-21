@@ -45,10 +45,17 @@
 				:disabled="!allowEdit || chapterRenaming"
 				item-key="name"
 				group="chapters"
+				:draggable="'.chapter-item'"
+				:handle="'.outline-drag-handle[data-sortable-level=\"1\"]'"
+				:filter="'.outline-section-row, .outline-lesson-row, .scorm-section-row'"
+				:preventOnFilter="false"
 				@end="updateChapterOrder"
 			>
 				<template #item="{ element: chapter }">
-					<div class="chapter-item">
+					<div
+						class="chapter-item"
+						:class="chapter.is_scorm_package ? 'scorm-section-row' : ''"
+					>
 						<SectionRow
 							:section="chapter"
 							:level="1"
@@ -57,6 +64,7 @@
 							:siblingCount="outline.data?.length ?? 1"
 							:courseName="courseName"
 							:allowEdit="allowEdit"
+							:dragDisabled="chapterRenaming"
 							:inlineSelect="inlineSelect"
 							:editorLinks="editorLinks"
 							:selectedLessonNumber="selectedLessonNumber"
@@ -115,7 +123,15 @@ import {
 import type { OutlineChapter, OutlineLesson, Resource } from '@/types'
 
 interface DraggableEvent {
-	item: { __draggable_context: { element: OutlineChapter | OutlineLesson } }
+	item: {
+		__draggable_context: {
+			element:
+				| OutlineChapter
+				| OutlineLesson
+				| { kind: 'section'; node?: OutlineChapter }
+				| { kind: 'lesson'; lesson?: OutlineLesson }
+		}
+	}
 	from: { dataset: { chapter: string } }
 	to: { dataset: { chapter: string } }
 	newIndex: number
@@ -484,8 +500,21 @@ function openMoveSection(section: OutlineChapter) {
 // Выше/Ниже for a section: level-1 sections reorder within the course's
 // chapter list (the same order the top-level drag writes); a nested section
 // swaps with its previous/next child row of the parent, whatever kind it is.
-function reorderSection(payload: { section: OutlineChapter; direction: 'up' | 'down' }) {
-	const { section, direction } = payload
+function reorderSection(
+	payload:
+		| { section: OutlineChapter; direction: 'up' | 'down' }
+		| { section: OutlineChapter; parent: string; idx: number }
+) {
+	const { section } = payload
+	if ('parent' in payload) {
+		updateSectionIndex.submit({
+			section: section.name,
+			parent: payload.parent,
+			idx: payload.idx,
+		})
+		return
+	}
+	const { direction } = payload
 	const ancestors = findAncestorsByName(section.name)
 	const parent = ancestors.length > 1 ? ancestors[ancestors.length - 2] : null
 	const delta = direction === 'up' ? -1 : 1
@@ -507,8 +536,9 @@ function reorderSection(payload: { section: OutlineChapter; direction: 'up' | 'd
 }
 
 function updateOutline(e: DraggableEvent) {
+	const lesson = e.item.__draggable_context.element as OutlineLesson
 	updateLessonIndex.submit({
-		lesson: e.item.__draggable_context.element.name,
+		lesson: lesson.name,
 		sourceChapter: e.from.dataset.chapter,
 		targetChapter: e.to.dataset.chapter,
 		idx: e.newIndex,
@@ -516,8 +546,9 @@ function updateOutline(e: DraggableEvent) {
 }
 
 function updateChapterOrder(e: DraggableEvent) {
+	const chapter = e.item.__draggable_context.element as OutlineChapter
 	updateChapterIndex.submit({
-		chapter: e.item.__draggable_context.element.name,
+		chapter: chapter.name,
 		course: props.courseName,
 		idx: e.newIndex,
 	})

@@ -15,7 +15,7 @@
 	>
 		<template #default>
 			<div class="space-y-3" data-testid="move-section-dialog">
-				<div class="text-sm text-ink-gray-6 truncate" :title="sectionTitle">
+				<div class="text-sm text-ink-gray-6 whitespace-normal break-words" :title="sectionTitle">
 					{{ sectionTitle }}
 				</div>
 				<div class="text-sm text-ink-gray-5">
@@ -31,12 +31,12 @@
 					<button
 						v-if="matches(courseLabel)"
 						type="button"
-						class="flex w-full items-center justify-between gap-2 px-3 py-2 text-start text-sm hover:bg-surface-gray-2"
+						class="flex w-full items-start justify-between gap-2 px-3 py-2 text-start text-sm hover:bg-surface-gray-2"
 						:class="selectedTarget === '' ? 'bg-surface-gray-2' : ''"
 						:data-testid="`move-target-root`"
 						@click="selectTarget('')"
 					>
-						<span class="truncate text-base-medium">{{ courseLabel }}</span>
+						<span class="min-w-0 flex-1 whitespace-normal break-words text-base-medium" :title="courseLabel">{{ courseLabel }}</span>
 					</button>
 					<template v-for="candidate in filteredCandidates" :key="candidate.name">
 						<Tooltip
@@ -46,8 +46,8 @@
 						>
 							<button
 								type="button"
-								class="flex w-full items-center justify-between gap-2 px-3 py-2 text-start text-sm"
-								:style="{ paddingInlineStart: `${candidate.level * 12 + 12}px` }"
+								class="flex w-full items-start justify-between gap-2 px-3 py-2 text-start text-sm"
+								:style="{ paddingInlineStart: `${Math.min(candidate.level * 8 + 12, 36)}px` }"
 								:class="[
 									candidate.blockedReason
 										? 'cursor-not-allowed opacity-50'
@@ -59,8 +59,8 @@
 								:data-testid="`move-target-${candidate.name}`"
 								@click="selectTarget(candidate.name)"
 							>
-								<span class="truncate">{{ candidate.title }}</span>
-								<span class="flex shrink-0 items-center gap-2">
+								<span class="min-w-0 flex-1 whitespace-normal break-words leading-5" :title="candidate.title">{{ candidate.title }}</span>
+								<span class="flex shrink-0 items-center gap-2 pt-0.5">
 									<span class="text-ink-gray-5">
 										{{ __('Level {0}').format(candidate.level) }}
 									</span>

@@ -1,178 +1,174 @@
 <template>
 	<Disclosure v-slot="{ open }" :key="section.name" :defaultOpen="defaultOpen">
-		<DisclosureButton
-			class="flex items-center w-full p-2 group"
-			:aria-describedby="`section-level-${section.name}`"
-		>
-			<span
-				:class="{
-					'rotate-90': open,
-					'rtl:rotate-180': !open,
-					hidden: section.is_scorm_package,
-					'self-start mt-0.5': inlineSelect,
-				}"
-				class="lucide-chevron-right size-4 text-ink-gray-9 transform duration-200"
-			/>
-			<div
-				class="ms-2 min-w-0 flex-1 text-start"
-				:class="[
-					inlineSelect ? '' : 'flex items-baseline justify-between gap-3',
-					isScormSectionLocked ? 'cursor-not-allowed opacity-60' : '',
-				]"
-				@click="redirectToSection"
-			>
-				<TextInput
-					v-if="isRenaming"
-					ref="renameInput"
-					v-model="renameValue"
-					class="w-full"
-					@click.stop.prevent
-					@keydown.enter.stop.prevent="commitRename"
-					@keydown.esc.stop.prevent="cancelRename"
-					@blur="commitRename"
-				/>
-				<div
-					v-else
-					class="truncate text-base-medium leading-5 text-ink-gray-9"
-					:class="{ 'text-sm': level > 1 }"
-					:title="section.title"
-					@dblclick="allowEdit && !section.is_scorm_package && startRename()"
+		<div class="w-full rounded-4 px-2 py-2">
+			<div class="flex w-full items-start gap-2">
+				<DisclosureButton
+					class="flex min-w-0 flex-1 items-start gap-2 text-start"
+					:aria-describedby="canAddSection === false ? `section-level-${section.name}` : undefined"
+					@click="redirectToSection"
 				>
-					{{ section.title }}
-				</div>
-			</div>
-			<div class="flex ms-3 items-center gap-x-4 shrink-0">
-				<span
-					v-if="!section.is_scorm_package && onlyLessons && section.lessons?.length"
-					class="text-sm text-ink-gray-5"
-					:class="{
-						'group-hover:hidden [@media(hover:none)]:hidden': allowEdit,
-					}"
-				>
-					{{ section.lessons.length }}
-				</span>
-				<span
-					v-else-if="!section.is_scorm_package && (section.section_count || section.sections?.length)"
-					class="text-sm text-ink-gray-5"
-					:class="{
-						'group-hover:hidden [@media(hover:none)]:hidden': allowEdit,
-					}"
-				>
-					{{ countsLabel }}
-				</span>
-				<template v-if="allowEdit">
-					<Tooltip
-						:text="__('Add Lesson')"
-						side="bottom"
-					>
-						<span
-							v-if="!section.is_scorm_package"
-							@click.prevent="addLesson"
-							class="lucide-plus size-4 text-ink-gray-9 invisible group-hover:visible [@media(hover:none)]:visible"
-						/>
-					</Tooltip>
-					<Tooltip
-						:text="
-							canAddSection
-								? __('Add Section')
-								: __('Maximum depth reached — 4 section levels')
-						"
-						side="bottom"
-					>
-						<span
-							v-if="!section.is_scorm_package"
-							@click.prevent="canAddSection && emit('add-section', section)"
-							class="lucide-folder-plus size-4 text-ink-gray-9 invisible group-hover:visible [@media(hover:none)]:visible"
-							:class="{ 'opacity-40': !canAddSection }"
-							:aria-disabled="canAddSection ? undefined : 'true'"
-							role="button"
-						/>
-					</Tooltip>
 					<span
-						v-if="canAddSection === false"
-						:id="`section-level-${section.name}`"
-						class="sr-only"
+						:class="{
+							'rotate-90': open,
+							'rtl:rotate-180': !open,
+							hidden: section.is_scorm_package,
+							'self-start mt-0.5': inlineSelect,
+						}"
+						class="lucide-chevron-right mt-0.5 size-4 shrink-0 text-ink-gray-9 transform duration-200"
+					/>
+					<div
+						v-if="allowEdit && !section.is_scorm_package"
+						class="lucide-grip-vertical outline-drag-handle mt-0.5 size-4 shrink-0 cursor-grab text-ink-gray-5 active:cursor-grabbing"
+						:data-sortable-level="currentLevel"
+						:title="__('Drag to reorder')"
+						aria-hidden="true"
+					/>
+					<div
+						class="min-w-0 flex-1 text-start"
+						:class="isScormSectionLocked ? 'cursor-not-allowed opacity-60' : ''"
 					>
-						{{ __('Maximum depth reached — 4 section levels') }}
-					</span>
-					<Tooltip :text="__('Move up')" side="bottom">
-						<span
-							v-if="!section.is_scorm_package"
-							@click.prevent="reorderSection('up')"
-							class="lucide-arrow-up size-4 text-ink-gray-9 invisible group-hover:visible [@media(hover:none)]:visible"
-							:class="{ 'opacity-40': isFirstSibling }"
-							:aria-disabled="isFirstSibling ? 'true' : undefined"
-							role="button"
+						<TextInput
+							v-if="isRenaming"
+							ref="renameInput"
+							v-model="renameValue"
+							class="w-full"
+							@click.stop.prevent
+							@keydown.enter.stop.prevent="commitRename"
+							@keydown.esc.stop.prevent="cancelRename"
+							@blur="commitRename"
 						/>
-					</Tooltip>
-					<Tooltip :text="__('Move down')" side="bottom">
+						<div
+							v-else
+							class="whitespace-normal break-words text-base-medium leading-5 text-ink-gray-9"
+							:class="{ 'text-sm': level > 1 }"
+							:title="section.title"
+							@dblclick="allowEdit && !section.is_scorm_package && startRename()"
+						>
+							{{ section.title }}
+						</div>
+					</div>
+					<div class="ms-2 shrink-0 self-start text-sm text-ink-gray-5">
 						<span
-							v-if="!section.is_scorm_package"
-							@click.prevent="reorderSection('down')"
-							class="lucide-arrow-down size-4 text-ink-gray-9 invisible group-hover:visible [@media(hover:none)]:visible"
-							:class="{ 'opacity-40': isLastSibling }"
-							:aria-disabled="isLastSibling ? 'true' : undefined"
-							role="button"
-						/>
-					</Tooltip>
-					<Tooltip :text="__('Move to…')" side="bottom">
+							v-if="!section.is_scorm_package && onlyLessons && section.lessons?.length"
+						>
+							{{ section.lessons.length }}
+						</span>
 						<span
-							v-if="!section.is_scorm_package"
-							@click.prevent="emit('move-section', section)"
-							class="lucide-folder-input size-4 text-ink-gray-9 invisible group-hover:visible [@media(hover:none)]:visible"
-						/>
-					</Tooltip>
-					<Tooltip :text="__('Rename')" side="bottom">
+							v-else-if="!section.is_scorm_package && (section.section_count || section.sections?.length)"
+						>
+							{{ countsLabel }}
+						</span>
+					</div>
+					<template v-if="isScormSectionLocked">
 						<span
-							v-if="!section.is_scorm_package"
-							@click.prevent="startRename"
-							class="lucide-pen-line size-4 text-ink-gray-9 invisible group-hover:visible [@media(hover:none)]:visible"
+							class="lucide-lock-keyhole mt-0.5 size-4 shrink-0 text-ink-gray-4"
+							:title="__('Complete the previous lessons to unlock this one')"
+							aria-hidden="true"
 						/>
-					</Tooltip>
-					<Tooltip :text="__('Edit Chapter')" side="bottom">
-						<span
-							v-if="section.is_scorm_package"
-							@click.prevent="emit('edit-chapter', section)"
-							class="lucide-file-pen-line size-4 text-ink-gray-9 invisible group-hover:visible [@media(hover:none)]:visible"
-						/>
-					</Tooltip>
-					<Tooltip :text="__('Delete Chapter')" side="bottom">
-						<span
-							@click.prevent="emit('delete-chapter', section.name)"
-							class="lucide-trash-2 size-4 text-ink-red-5 hidden group-hover:inline-block [@media(hover:none)]:inline-block"
-						/>
-					</Tooltip>
-				</template>
+						<span class="sr-only">{{ __('Locked') }}</span>
+					</template>
+					<span
+						v-else-if="section.is_scorm_package && isScormSectionComplete"
+						class="lucide-check mt-0.5 size-4 shrink-0 text-ink-green-8"
+					/>
+				</DisclosureButton>
 			</div>
-			<template v-if="isScormSectionLocked">
+			<div v-if="allowEdit" class="ms-8 mt-2 flex flex-wrap items-center gap-1.5">
+				<button
+					v-if="!section.is_scorm_package"
+					type="button"
+					class="outline-action"
+					:title="__('Add Lesson')"
+					:aria-label="__('Add Lesson')"
+					@click="addLesson"
+				><span class="lucide-plus size-4" /></button>
+				<button
+					v-if="!section.is_scorm_package"
+					type="button"
+					class="outline-action"
+					:title="canAddSection ? __('Add Section') : __('Maximum depth reached — 4 section levels')"
+					:aria-label="canAddSection ? __('Add Section') : __('Maximum depth reached — 4 section levels')"
+					:aria-disabled="canAddSection ? undefined : 'true'"
+					:disabled="!canAddSection"
+					@click="canAddSection && emit('add-section', section)"
+				><span class="lucide-folder-plus size-4" /></button>
+				<button
+					v-if="!section.is_scorm_package"
+					type="button"
+					class="outline-action"
+					:title="__('Move up')"
+					:aria-label="__('Move up')"
+					:aria-disabled="isFirstSibling ? 'true' : undefined"
+					:disabled="isFirstSibling"
+					@click="reorderSection('up')"
+				><span class="lucide-arrow-up size-4" /></button>
+				<button
+					v-if="!section.is_scorm_package"
+					type="button"
+					class="outline-action"
+					:title="__('Move down')"
+					:aria-label="__('Move down')"
+					:aria-disabled="isLastSibling ? 'true' : undefined"
+					:disabled="isLastSibling"
+					@click="reorderSection('down')"
+				><span class="lucide-arrow-down size-4" /></button>
+				<button
+					v-if="!section.is_scorm_package"
+					type="button"
+					class="outline-action w-auto inline-flex items-center gap-1.5 px-2"
+					@click="emit('move-section', section)"
+				><span class="lucide-folder-input size-4" />{{ __('Move to…') }}</button>
+				<button
+					v-if="!section.is_scorm_package"
+					type="button"
+					class="outline-action"
+					:title="__('Rename')"
+					:aria-label="__('Rename')"
+					@click="startRename"
+				><span class="lucide-pen-line size-4" /></button>
+				<button
+					v-if="section.is_scorm_package"
+					type="button"
+					class="outline-action"
+					:title="__('Edit Chapter')"
+					:aria-label="__('Edit Chapter')"
+					@click="emit('edit-chapter', section)"
+				><span class="lucide-file-pen-line size-4" /></button>
+				<button
+					type="button"
+					class="outline-action text-ink-red-5"
+					:title="__('Delete Chapter')"
+					:aria-label="__('Delete Chapter')"
+					@click="emit('delete-chapter', section.name)"
+				><span class="lucide-trash-2 size-4" /></button>
 				<span
-					class="lucide-lock-keyhole size-4 text-ink-gray-4"
-					:title="__('Complete the previous lessons to unlock this one')"
-					aria-hidden="true"
-				/>
-				<span class="sr-only">{{ __('Locked') }}</span>
-			</template>
-			<span
-				v-else-if="section.is_scorm_package && isScormSectionComplete"
-				class="lucide-check size-4 text-ink-green-8"
-			/>
-		</DisclosureButton>
+					v-if="canAddSection === false"
+					:id="`section-level-${section.name}`"
+					class="sr-only"
+				>{{ __('Maximum depth reached — 4 section levels') }}</span>
+			</div>
+		</div>
 		<DisclosurePanel v-if="!section.is_scorm_package">
 			<Draggable
 				:list="mergedChildren"
-				:disabled="!allowEdit"
+				:disabled="!allowEdit || dragDisabled"
 				item-key="key"
-				group="items"
-				:filter="'.outline-section-row'"
+				:group="{ name: 'outline-items', pull: false, put: false }"
+				:draggable="'.outline-section-row, .outline-lesson-row'"
+				:handle="`.outline-drag-handle[data-sortable-level='${currentLevel + 1}']`"
+				:filter="'.scorm-section-row'"
 				:preventOnFilter="false"
 				:data-chapter="section.name"
-				@end="(e: DraggableEvent) => emit('move-lesson', e)"
+				@end="moveChild"
 			>
 				<template #item="{ element }">
 					<div
 						v-if="element.kind === 'section'"
 						class="outline-section-row"
-						:class="childIndentClass"
+						:class="[
+							childIndentClass,
+							element.node!.is_scorm_package ? 'scorm-section-row' : '',
+						]"
 					>
 						<SectionRow
 							:section="element.node!"
@@ -186,6 +182,7 @@
 							:editorLinks="editorLinks"
 							:selectedLessonNumber="selectedLessonNumber"
 							:creatingLesson="creatingLessonChapter === element.node!.name"
+							:dragDisabled="dragDisabled"
 							@select-lesson="(payload) => emit('select-lesson', payload)"
 							@edit-chapter="(chapter) => emit('edit-chapter', chapter)"
 							@rename-chapter="(payload) => emit('rename-chapter', payload)"
@@ -201,15 +198,17 @@
 					</div>
 					<div
 						v-else
-						class="py-2 pe-4 text-ink-gray-9"
+						class="outline-lesson-row flex items-center py-2 pe-4 text-ink-gray-9"
 						data-testid="outline-lesson"
-						:class="[
-							childIndentClass,
-							isActiveLesson(element.lesson!.number)
-								? 'bg-surface-gray-3 rounded-5'
-								: '',
-						]"
+						:class="childIndentClass"
 					>
+						<span
+							v-if="allowEdit"
+							class="lucide-grip-vertical outline-drag-handle me-2 size-4 shrink-0 cursor-grab text-ink-gray-5 active:cursor-grabbing"
+							:data-sortable-level="currentLevel + 1"
+							:title="__('Drag to reorder')"
+							aria-hidden="true"
+						/>
 						<component
 							:is="inlineSelect || element.lesson!.locked ? 'div' : 'router-link'"
 							:to="
@@ -217,13 +216,17 @@
 									? undefined
 									: lessonRoute(element.lesson!)
 							"
-							:class="
+							:class="[
+								'min-w-0 flex-1',
 								element.lesson!.locked
 									? 'cursor-not-allowed opacity-60'
 									: inlineSelect
 									? 'cursor-pointer'
-									: ''
-							"
+									: '',
+								isActiveLesson(element.lesson!.number)
+									? 'bg-surface-gray-3 rounded-5'
+									: '',
+							]"
 							@click="onLessonClick(element.lesson!)"
 						>
 							<div class="flex items-center text-sm leading-5 group">
@@ -305,7 +308,7 @@
 </template>
 
 <script setup lang="ts">
-import { Button, TextInput, Tooltip, toast } from 'frappe-ui'
+import { Button, TextInput, toast } from 'frappe-ui'
 import { computed, inject, nextTick, ref, watch } from 'vue'
 import Draggable from 'vuedraggable'
 import { Disclosure, DisclosureButton, DisclosurePanel } from '@headlessui/vue'
@@ -317,7 +320,7 @@ import type { OutlineChapter, OutlineLesson, SessionUser } from '@/types'
 import { parseLessonNumber } from '@/utils/courseOutline'
 
 interface DraggableEvent {
-	item: { __draggable_context: { element: OutlineChapter | OutlineLesson } }
+	item: { __draggable_context: { element: OutlineChapter | OutlineLesson | MergedChild } }
 	from: { dataset: { chapter: string } }
 	to: { dataset: { chapter: string } }
 	newIndex: number
@@ -330,6 +333,10 @@ interface MergedChild {
 	lesson?: OutlineLesson
 	node?: OutlineChapter
 }
+
+type SectionReorderPayload =
+	| { section: OutlineChapter; direction: 'up' | 'down' }
+	| { section: OutlineChapter; parent: string; idx: number }
 
 // Authoring maximum: 4 structural section levels below the course root; the
 // course root itself is not counted and lessons never count.
@@ -349,6 +356,7 @@ const props = withDefaults(
 		selectedLessonNumber?: string
 		creatingLesson?: boolean
 		creatingLessonChapter?: string
+		dragDisabled?: boolean
 	}>(),
 	{
 		level: 1,
@@ -361,6 +369,7 @@ const props = withDefaults(
 		selectedLessonNumber: '',
 		creatingLesson: false,
 		creatingLessonChapter: '',
+		dragDisabled: false,
 	}
 )
 
@@ -375,7 +384,7 @@ const emit = defineEmits<{
 	'create-lesson': [{ chapter: OutlineChapter; lessonIdx: number }]
 	'add-section': [OutlineChapter]
 	'move-section': [OutlineChapter]
-	'reorder-section': [{ section: OutlineChapter; direction: 'up' | 'down' }]
+	'reorder-section': [SectionReorderPayload]
 }>()
 
 const route = useRoute()
@@ -559,9 +568,33 @@ function reorderSection(direction: 'up' | 'down') {
 	emit('reorder-section', { section: props.section, direction })
 }
 
-function redirectToSection() {
+function moveChild(event: DraggableEvent) {
+	const child = event.item.__draggable_context.element
+	if ('kind' in child && child.kind === 'section' && child.node) {
+		emit('reorder-section', {
+			section: child.node,
+			parent: props.section.name,
+			idx: event.newIndex,
+		})
+		return
+	}
+	if ('kind' in child && child.kind === 'lesson' && child.lesson) {
+		emit('move-lesson', {
+			...event,
+			item: {
+				...event.item,
+				__draggable_context: {
+					...event.item.__draggable_context,
+					element: child.lesson,
+				},
+			},
+		})
+	}
+}
+
+function redirectToSection(event?: MouseEvent) {
 	if (!props.section.is_scorm_package) return
-	;(event as Event | undefined)?.preventDefault()
+	event?.preventDefault()
 	if (isScormSectionLocked.value) return
 	if (!user.data) {
 		toast.success(__('Please enroll for this course to view this lesson'))
@@ -576,3 +609,9 @@ function redirectToSection() {
 	})
 }
 </script>
+
+<style scoped>
+.outline-action {
+	@apply inline-flex h-8 w-8 items-center justify-center rounded-4 text-ink-gray-7 hover:bg-surface-gray-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 disabled:cursor-not-allowed disabled:opacity-40;
+}
+</style>

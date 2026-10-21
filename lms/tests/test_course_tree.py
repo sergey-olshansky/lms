@@ -27,6 +27,7 @@ from lms.lms.utils import (
 	get_course_outline,
 	get_lesson,
 	get_lesson_count,
+	get_lesson_creation_details,
 	get_lesson_index,
 	get_neighbour_lesson,
 	get_ordered_lesson_rows,
@@ -219,6 +220,23 @@ class TestCourseSectionTree(BaseTestUtils):
 		self.assertEqual(
 			[r.name for r in rows], [first.name, nested_lesson.name, second.name]
 		)
+
+	def test_editor_resolves_a_lesson_inside_a_nested_section(self):
+		block = self.make_chapter("Editor Block")
+		self.attach_to_course(block, 1)
+		before = self._create_lesson("Before nested section", block.name, self.course.name)
+		nested = self.make_chapter("Editor Nested", parent_section=block.name)
+		self.attach_lesson_row(block, before, 1)
+		self.attach_section_row(block, nested, 2)
+		lesson = self._create_lesson("Nested lesson title", nested.name, self.course.name)
+		self.attach_lesson_row(nested, lesson, 1)
+
+		details = get_lesson_creation_details(self.course.name, "1-1", 1)
+
+		self.assertEqual(details["chapter"]["name"], nested.name)
+		self.assertEqual(details["chapter"]["title"], "Editor Nested")
+		self.assertEqual(details["lesson"]["name"], lesson.name)
+		self.assertEqual(details["lesson"]["title"], "Nested lesson title")
 
 	def test_numbering_is_the_section_path(self):
 		block1 = self.make_chapter("Number Block One")

@@ -117,20 +117,40 @@ describe('SectionRow inline rename', () => {
 
 describe('SectionRow lesson count', () => {
 	const count = (allowEdit: boolean) =>
-		mountRow(section, allowEdit).get('span.text-ink-gray-5').classes()
+		mountRow(section, allowEdit).get('div.text-ink-gray-5')
 
-	it('gives way to the delete action on hover and on touch', () => {
-		expect(count(true)).toEqual(
-			expect.arrayContaining([
-				'group-hover:hidden',
-				'[@media(hover:none)]:hidden',
-			])
-		)
+	it('stays readable while the always-visible edit actions are shown', () => {
+		expect(count(true).text()).toBe('1')
+		expect(count(true).classes()).not.toContain('group-hover:hidden')
+		expect(count(true).classes()).not.toContain('[@media(hover:none)]:hidden')
 	})
 
 	it('stays visible when the section is not editable', () => {
-		expect(count(false)).not.toContain('group-hover:hidden')
-		expect(count(false)).not.toContain('[@media(hover:none)]:hidden')
+		expect(count(false).text()).toBe('1')
+		expect(count(false).classes()).not.toContain('group-hover:hidden')
+		expect(count(false).classes()).not.toContain('[@media(hover:none)]:hidden')
+	})
+})
+
+describe('SectionRow editor actions', () => {
+	it('keeps the move action visible and exposes reorder controls to the keyboard', () => {
+		const wrapper = mountRow()
+
+		expect(wrapper.get('button[aria-label="Move up"]').element.tagName).toBe('BUTTON')
+		expect(wrapper.get('button[aria-label="Move down"]').element.tagName).toBe('BUTTON')
+		expect(wrapper.findAll('button').some((button) => button.text().includes('Move to…'))).toBe(true)
+	})
+
+	it('wraps long section names instead of truncating them beside actions', () => {
+		const wrapper = mountRow({
+			...section,
+			title: 'A very long section name that needs to remain distinguishable in the editor',
+		})
+
+		const title = wrapper.get('[title^="A very long section name"]')
+		expect(title.classes()).toContain('whitespace-normal')
+		expect(title.classes()).toContain('break-words')
+		expect(title.text()).toBe('A very long section name that needs to remain distinguishable in the editor')
 	})
 })
 
