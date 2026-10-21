@@ -8,14 +8,17 @@
 				label: __('Move'),
 				variant: 'solid',
 				loading: saving,
-				disabled: !selectedTarget,
+				disabled: selectedTarget === null,
 				onClick: () => submit(),
 			},
 		]"
 	>
 		<template #default>
 			<div class="space-y-3" data-testid="move-section-dialog">
-				<div class="text-sm text-ink-gray-6 whitespace-normal break-words" :title="sectionTitle">
+				<div
+					class="text-sm text-ink-gray-6 whitespace-normal break-words"
+					:title="sectionTitle"
+				>
 					{{ sectionTitle }}
 				</div>
 				<div class="text-sm text-ink-gray-5">
@@ -36,9 +39,16 @@
 						:data-testid="`move-target-root`"
 						@click="selectTarget('')"
 					>
-						<span class="min-w-0 flex-1 whitespace-normal break-words text-base-medium" :title="courseLabel">{{ courseLabel }}</span>
+						<span
+							class="min-w-0 flex-1 whitespace-normal break-words text-base-medium"
+							:title="courseLabel"
+							>{{ courseLabel }}</span
+						>
 					</button>
-					<template v-for="candidate in filteredCandidates" :key="candidate.name">
+					<template
+						v-for="candidate in filteredCandidates"
+						:key="candidate.name"
+					>
 						<Tooltip
 							:text="candidate.blockedReason ?? __('Move to…')"
 							side="bottom"
@@ -47,7 +57,12 @@
 							<button
 								type="button"
 								class="flex w-full items-start justify-between gap-2 px-3 py-2 text-start text-sm"
-								:style="{ paddingInlineStart: `${Math.min(candidate.level * 8 + 12, 36)}px` }"
+								:style="{
+									paddingInlineStart: `${Math.min(
+										candidate.level * 8 + 12,
+										36
+									)}px`,
+								}"
 								:class="[
 									candidate.blockedReason
 										? 'cursor-not-allowed opacity-50'
@@ -59,13 +74,17 @@
 								:data-testid="`move-target-${candidate.name}`"
 								@click="selectTarget(candidate.name)"
 							>
-								<span class="min-w-0 flex-1 whitespace-normal break-words leading-5" :title="candidate.title">{{ candidate.title }}</span>
+								<span
+									class="min-w-0 flex-1 whitespace-normal break-words leading-5"
+									:title="candidate.title"
+									>{{ candidate.title }}</span
+								>
 								<span class="flex shrink-0 items-center gap-2 pt-0.5">
 									<span class="text-ink-gray-5">
 										{{ __('Level {0}').format(candidate.level) }}
 									</span>
 								</span>
-						</button>
+							</button>
 						</Tooltip>
 						<span v-if="candidate.blockedReason" class="sr-only">
 							{{ candidate.blockedReason }}
@@ -115,7 +134,9 @@ const movedSection = ref<OutlineChapter | null>(null)
 
 const sectionTitle = computed<string>(() => movedSection.value?.title ?? '')
 
-const courseLabel = computed<string>(() => props.courseTitle || props.courseName)
+const courseLabel = computed<string>(
+	() => props.courseTitle || props.courseName
+)
 
 // Height of the moved subtree counting itself: a leaf section is 1.
 const subtreeHeight = computed<number>(() => {
@@ -192,7 +213,8 @@ function selectTarget(target: string) {
 }
 
 function submit() {
-	if (!movedSection.value || selectedTarget.value === null || saving.value) return
+	if (!movedSection.value || selectedTarget.value === null || saving.value)
+		return
 	saving.value = true
 	moveSection.submit({
 		section: movedSection.value.name,

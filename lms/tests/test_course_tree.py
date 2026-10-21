@@ -20,7 +20,7 @@ from pathlib import Path
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms.lms.api import delete_chapter, move_section, upsert_chapter, update_section_index
+from lms.lms.api import create_lesson, delete_chapter, move_section, update_section_index, upsert_chapter
 from lms.lms.course_import_export import import_course_zip
 from lms.lms.test_helpers import BaseTestUtils
 from lms.lms.utils import (
@@ -217,9 +217,7 @@ class TestCourseSectionTree(BaseTestUtils):
 		self.attach_lesson_row(nested, nested_lesson, 1)
 
 		rows = get_ordered_lesson_rows(self.course.name)
-		self.assertEqual(
-			[r.name for r in rows], [first.name, nested_lesson.name, second.name]
-		)
+		self.assertEqual([r.name for r in rows], [first.name, nested_lesson.name, second.name])
 
 	def test_editor_resolves_a_lesson_inside_a_nested_section(self):
 		block = self.make_chapter("Editor Block")
@@ -228,8 +226,10 @@ class TestCourseSectionTree(BaseTestUtils):
 		nested = self.make_chapter("Editor Nested", parent_section=block.name)
 		self.attach_lesson_row(block, before, 1)
 		self.attach_section_row(block, nested, 2)
+		child = self.make_chapter("Editor Child", parent_section=nested.name)
+		self.attach_section_row(nested, child, 1)
 		lesson = self._create_lesson("Nested lesson title", nested.name, self.course.name)
-		self.attach_lesson_row(nested, lesson, 1)
+		self.attach_lesson_row(nested, lesson, 2)
 
 		details = get_lesson_creation_details(self.course.name, "1-1", 1)
 
@@ -237,6 +237,42 @@ class TestCourseSectionTree(BaseTestUtils):
 		self.assertEqual(details["chapter"]["title"], "Editor Nested")
 		self.assertEqual(details["lesson"]["name"], lesson.name)
 		self.assertEqual(details["lesson"]["title"], "Nested lesson title")
+
+	def test_new_lesson_titles_save_and_reload_at_every_section_level(self):
+		parent = self.make_chapter("Title Level 1")
+		self.attach_to_course(parent, 1)
+		path = "1"
+		for level in range(1, 5):
+			with self.subTest(level=level):
+				lesson_name = create_lesson(parent.name)
+				details = get_lesson_creation_details(self.course.name, path, 1)
+				self.assertEqual(details["lesson"]["name"], lesson_name)
+				title = f"Named lesson at level {level}"
+				frappe.call(
+					"frappe.client.set_value",
+					doctype="Course Lesson",
+					name=lesson_name,
+					fieldname={"title": title},
+				)
+				self.assertEqual(
+					get_lesson_creation_details(self.course.name, path, 1)["lesson"]["title"], title
+				)
+				self.assertEqual(get_lesson(self.course.name, path, "1")["title"], title)
+				if level < 4:
+					child = self.make_chapter(f"Title Level {level + 1}", parent_section=parent.name)
+					self.attach_section_row(parent, child, 2)
+					parent = child
+					path += "-1"
+
+	def test_editor_details_require_authoring_access_to_the_course(self):
+		self.flat_course()
+		other = self._create_user("tree-other-creator@example.com", "Other", "Creator", ["Course Creator"])
+		frappe.set_user(other.name)
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				get_lesson_creation_details(self.course.name, "1", 1)
+		finally:
+			frappe.set_user("Administrator")
 
 	def test_numbering_is_the_section_path(self):
 		block1 = self.make_chapter("Number Block One")
@@ -374,9 +410,7 @@ class TestCourseSectionTree(BaseTestUtils):
 		flat_lesson = self._create_lesson("Dispatch Flat Lesson", flat_two.name, self.course.name)
 		self.attach_lesson_row(flat_two, flat_lesson, 1)
 
-		legacy = frappe.call(
-			"lms.lms.utils.get_lesson", course=self.course.name, chapter="2", lesson="1"
-		)
+		legacy = frappe.call("lms.lms.utils.get_lesson", course=self.course.name, chapter="2", lesson="1")
 		self.assertEqual(legacy["name"], flat_lesson.name)
 		self.assertEqual(get_lesson_index(legacy["name"]), "2-1")
 
@@ -537,9 +571,7 @@ class TestCourseSectionTree(BaseTestUtils):
 		self.assertFalse(frappe.db.exists("Course Chapter", nested.name))
 		self.assertFalse(frappe.db.exists("Course Lesson", top.name))
 		self.assertFalse(frappe.db.exists("Course Lesson", deep.name))
-		self.assertFalse(
-			frappe.db.exists("Lesson Reference", {"parent": ["in", [block.name, nested.name]]})
-		)
+		self.assertFalse(frappe.db.exists("Lesson Reference", {"parent": ["in", [block.name, nested.name]]}))
 		self.assertFalse(
 			frappe.db.exists("Chapter Reference", {"chapter": block.name, "parent": self.course.name})
 		)
@@ -568,9 +600,7 @@ class TestCourseSectionTree(BaseTestUtils):
 		# Attach each child to its parent through the parent's child rows, the
 		# way a real export serialises the tree.
 		for level in range(1, depth):
-			chapters[level - 1]["lessons"] = [
-				{"section": f"{level + 1:04d} Level {level + 1}"}
-			]
+			chapters[level - 1]["lessons"] = [{"section": f"{level + 1:04d} Level {level + 1}"}]
 
 		fd, path = tempfile.mkstemp(suffix=".zip")
 		os.close(fd)
@@ -626,10 +656,8 @@ class TestCourseSectionTree(BaseTestUtils):
 			# A refused import must leave nothing behind once the failed request
 			# rolls back. The HTTP layer achieves that by rolling the whole
 			# request back; inside the test runner's per-test transaction the
-		# equivalent is a rollback to the savepoint taken before the attempt.
+			# equivalent is a rollback to the savepoint taken before the attempt.
 			frappe.db.rollback(save_point="t28_refused_import")
-			self.assertFalse(
-				frappe.db.exists("LMS Course", {"title": "Import Depth Course"})
-			)
+			self.assertFalse(frappe.db.exists("LMS Course", {"title": "Import Depth Course"}))
 		finally:
 			archive_file.unlink(missing_ok=True)

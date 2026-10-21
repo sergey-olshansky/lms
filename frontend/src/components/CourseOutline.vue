@@ -68,7 +68,8 @@
 							:inlineSelect="inlineSelect"
 							:editorLinks="editorLinks"
 							:selectedLessonNumber="selectedLessonNumber"
-							:creatingLessonChapter="creatingLessonChapter === chapter.name"
+							:creatingLesson="creatingLessonChapter === chapter.name"
+							:creatingLessonChapter="creatingLessonChapter"
 							@select-lesson="(payload) => emit('select-lesson', payload)"
 							@edit-chapter="openChapterForm"
 							@rename-chapter="renameChapter"
@@ -402,10 +403,17 @@ function chapterIndex(chapter: OutlineChapter): number {
 
 // Subtree counts for the delete confirmation (design §4.7): nested sections
 // and lessons going with the section, zero parts omitted.
-function subtreeCounts(chapterName: string): { sections: number; lessons: number } {
+function subtreeCounts(chapterName: string): {
+	sections: number
+	lessons: number
+} {
 	const section = (outline.data ?? []).find((c) => c.name === chapterName)
 	if (!section) return { sections: 0, lessons: 0 }
-	const collect = (nodes: OutlineChapter[], sections: number, lessons: number) => {
+	const collect = (
+		nodes: OutlineChapter[],
+		sections: number,
+		lessons: number
+	) => {
 		for (const node of nodes) {
 			sections += 1
 			lessons += node.lessons?.length ?? 0
@@ -427,9 +435,9 @@ function trashChapter(chapterName: string) {
 		parts.push(`${lessons} ${lessons === 1 ? __('lesson') : __('lessons')}`)
 	}
 	const message = parts.length
-		? __('Will be deleted: {0}, including student progress on those lessons').format(
-				parts.join(' and ')
-		  )
+		? __(
+				'Will be deleted: {0}, including student progress on those lessons'
+		  ).format(parts.join(' and '))
 		: __('This section is empty.')
 	$dialog({
 		title: __('Delete section?'),
@@ -477,11 +485,17 @@ function openChapterForm(chapter: OutlineChapter | null = null) {
 // level-1 section down to the parent (design §4.3).
 function openAddSection(parent: OutlineChapter) {
 	const ancestors = findAncestorsByName(parent.name)
-	sectionForm.value?.open(parent, ancestors.map((a) => a.title))
+	sectionForm.value?.open(
+		parent,
+		ancestors.map((a) => a.title)
+	)
 }
 
 function findAncestorsByName(name: string): OutlineChapter[] {
-	const walk = (nodes: OutlineChapter[], path: OutlineChapter[]): OutlineChapter[] | null => {
+	const walk = (
+		nodes: OutlineChapter[],
+		path: OutlineChapter[]
+	): OutlineChapter[] | null => {
 		for (const node of nodes) {
 			const next = [...path, node]
 			if (node.name === name) return next

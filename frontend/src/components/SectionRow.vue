@@ -4,7 +4,11 @@
 			<div class="flex w-full items-start gap-2">
 				<DisclosureButton
 					class="flex min-w-0 flex-1 items-start gap-2 text-start"
-					:aria-describedby="canAddSection === false ? `section-level-${section.name}` : undefined"
+					:aria-describedby="
+						canAddSection === false
+							? `section-level-${section.name}`
+							: undefined
+					"
 					@click="redirectToSection"
 				>
 					<span
@@ -19,7 +23,7 @@
 					<div
 						v-if="allowEdit && !section.is_scorm_package"
 						class="lucide-grip-vertical outline-drag-handle mt-0.5 size-4 shrink-0 cursor-grab text-ink-gray-5 active:cursor-grabbing"
-						:class="level === 1 ? 'outline-drag-handle-level-1' : ''"
+						:class="currentLevel === 1 ? 'outline-drag-handle-level-1' : ''"
 						:data-sortable-level="currentLevel"
 						:title="__('Drag to reorder')"
 						aria-hidden="true"
@@ -43,19 +47,31 @@
 							class="whitespace-normal break-words text-base-medium leading-5 text-ink-gray-9"
 							:class="{ 'text-sm': level > 1 }"
 							:title="section.title"
-							@dblclick="allowEdit && !section.is_scorm_package && startRename()"
+							@dblclick="
+								allowEdit && !section.is_scorm_package && startRename()
+							"
 						>
 							{{ section.title }}
 						</div>
 					</div>
-					<div class="ms-2 shrink-0 self-start text-sm text-ink-gray-5">
+					<div
+						class="ms-2 shrink-0 self-start text-sm text-ink-gray-5"
+						data-testid="section-count"
+					>
 						<span
-							v-if="!section.is_scorm_package && onlyLessons && section.lessons?.length"
+							v-if="
+								!section.is_scorm_package &&
+								onlyLessons &&
+								section.lessons?.length
+							"
 						>
 							{{ section.lessons.length }}
 						</span>
 						<span
-							v-else-if="!section.is_scorm_package && (section.section_count || section.sections?.length)"
+							v-else-if="
+								!section.is_scorm_package &&
+								(section.section_count || section.sections?.length)
+							"
 						>
 							{{ countsLabel }}
 						</span>
@@ -74,25 +90,42 @@
 					/>
 				</DisclosureButton>
 			</div>
-			<div v-if="allowEdit" class="ms-8 mt-2 flex flex-wrap items-center gap-1.5">
+			<div
+				v-if="allowEdit"
+				class="ms-8 mt-2 flex flex-wrap items-center gap-1.5 text-ink-gray-7"
+			>
 				<button
 					v-if="!section.is_scorm_package"
 					type="button"
 					class="outline-action"
 					:title="__('Add Lesson')"
 					:aria-label="__('Add Lesson')"
+					:disabled="creatingLesson"
+					:aria-busy="creatingLesson"
 					@click="addLesson"
-				><span class="lucide-plus size-4" /></button>
+				>
+					<span class="lucide-plus size-4" />
+				</button>
 				<button
 					v-if="!section.is_scorm_package"
 					type="button"
 					class="outline-action"
-					:title="canAddSection ? __('Add Section') : __('Maximum depth reached — 4 section levels')"
-					:aria-label="canAddSection ? __('Add Section') : __('Maximum depth reached — 4 section levels')"
+					:title="
+						canAddSection
+							? __('Add Section')
+							: __('Maximum depth reached — 4 section levels')
+					"
+					:aria-label="
+						canAddSection
+							? __('Add Section')
+							: __('Maximum depth reached — 4 section levels')
+					"
 					:aria-disabled="canAddSection ? undefined : 'true'"
 					:disabled="!canAddSection"
 					@click="canAddSection && emit('add-section', section)"
-				><span class="lucide-folder-plus size-4" /></button>
+				>
+					<span class="lucide-folder-plus size-4" />
+				</button>
 				<button
 					v-if="!section.is_scorm_package"
 					type="button"
@@ -102,7 +135,9 @@
 					:aria-disabled="isFirstSibling ? 'true' : undefined"
 					:disabled="isFirstSibling"
 					@click="reorderSection('up')"
-				><span class="lucide-arrow-up size-4" /></button>
+				>
+					<span class="lucide-arrow-up size-4" />
+				</button>
 				<button
 					v-if="!section.is_scorm_package"
 					type="button"
@@ -112,13 +147,17 @@
 					:aria-disabled="isLastSibling ? 'true' : undefined"
 					:disabled="isLastSibling"
 					@click="reorderSection('down')"
-				><span class="lucide-arrow-down size-4" /></button>
+				>
+					<span class="lucide-arrow-down size-4" />
+				</button>
 				<button
 					v-if="!section.is_scorm_package"
 					type="button"
 					class="outline-action w-auto inline-flex items-center gap-1.5 px-2"
 					@click="emit('move-section', section)"
-				><span class="lucide-folder-input size-4" />{{ __('Move to…') }}</button>
+				>
+					<span class="lucide-folder-input size-4" />{{ __('Move to…') }}
+				</button>
 				<button
 					v-if="!section.is_scorm_package"
 					type="button"
@@ -126,7 +165,9 @@
 					:title="__('Rename')"
 					:aria-label="__('Rename')"
 					@click="startRename"
-				><span class="lucide-pen-line size-4" /></button>
+				>
+					<span class="lucide-pen-line size-4" />
+				</button>
 				<button
 					v-if="section.is_scorm_package"
 					type="button"
@@ -134,19 +175,24 @@
 					:title="__('Edit Chapter')"
 					:aria-label="__('Edit Chapter')"
 					@click="emit('edit-chapter', section)"
-				><span class="lucide-file-pen-line size-4" /></button>
+				>
+					<span class="lucide-file-pen-line size-4" />
+				</button>
 				<button
 					type="button"
 					class="outline-action text-ink-red-5"
 					:title="__('Delete Chapter')"
 					:aria-label="__('Delete Chapter')"
 					@click="emit('delete-chapter', section.name)"
-				><span class="lucide-trash-2 size-4" /></button>
+				>
+					<span class="lucide-trash-2 size-4" />
+				</button>
 				<span
 					v-if="canAddSection === false"
 					:id="`section-level-${section.name}`"
 					class="sr-only"
-				>{{ __('Maximum depth reached — 4 section levels') }}</span>
+					>{{ __('Maximum depth reached — 4 section levels') }}</span
+				>
 			</div>
 		</div>
 		<DisclosurePanel v-if="!section.is_scorm_package">
@@ -154,9 +200,15 @@
 				:list="mergedChildren"
 				:disabled="!allowEdit || dragDisabled"
 				item-key="key"
-				:group="{ name: 'outline-items', pull: false, put: false }"
+				:group="{
+					name: 'outline-items',
+					pull: canTransferChild,
+					put: canTransferChild,
+				}"
 				:draggable="'.outline-section-row, .outline-lesson-row'"
-				:handle="`.outline-drag-handle[data-sortable-level='${currentLevel + 1}']`"
+				:handle="`.outline-drag-handle[data-sortable-level='${
+					currentLevel + 1
+				}']`"
 				:filter="'.scorm-section-row'"
 				:preventOnFilter="false"
 				:data-chapter="section.name"
@@ -290,7 +342,11 @@
 			>
 				<span class="text-sm text-ink-gray-5">{{ __('Empty section') }}</span>
 			</div>
-			<div v-if="allowEdit" class="flex mt-2 mb-4 gap-2" :class="childIndentClass">
+			<div
+				v-if="allowEdit"
+				class="flex mt-2 mb-4 gap-2"
+				:class="childIndentClass"
+			>
 				<Button :loading="creatingLesson" @click="addLesson">
 					<template #prefix>
 						<span class="lucide-plus size-4" />
@@ -321,10 +377,15 @@ import type { OutlineChapter, OutlineLesson, SessionUser } from '@/types'
 import { parseLessonNumber } from '@/utils/courseOutline'
 
 interface DraggableEvent {
-	item: { __draggable_context: { element: OutlineChapter | OutlineLesson | MergedChild } }
+	item: {
+		__draggable_context: {
+			element: OutlineChapter | OutlineLesson | MergedChild
+		}
+	}
 	from: { dataset: { chapter: string } }
 	to: { dataset: { chapter: string } }
 	newIndex: number
+	oldIndex?: number
 }
 
 interface MergedChild {
@@ -450,7 +511,9 @@ const defaultOpen = computed<boolean>(() => {
 	return pathSegments.every((segment, i) => segment === segments[i])
 })
 
-const canAddSection = computed<boolean>(() => currentLevel.value < MAX_SECTION_DEPTH)
+const canAddSection = computed<boolean>(
+	() => currentLevel.value < MAX_SECTION_DEPTH
+)
 
 const isFirstSibling = computed<boolean>(() => (props.position ?? 0) <= 0)
 const isLastSibling = computed<boolean>(
@@ -480,13 +543,13 @@ const mergedChildren = computed<MergedChild[]>(() => {
 	return children.sort((a, b) => a.rowIndex - b.rowIndex)
 })
 
-const onlyLessons = computed<boolean>(
-	() => !props.section.sections?.length
-)
+const onlyLessons = computed<boolean>(() => !props.section.sections?.length)
 
 const countsLabel = computed<string>(() => {
-	const sections = props.section.section_count ?? props.section.sections?.length ?? 0
-	const lessons = props.section.lesson_count ?? props.section.lessons?.length ?? 0
+	const sections =
+		props.section.section_count ?? props.section.sections?.length ?? 0
+	const lessons =
+		props.section.lesson_count ?? props.section.lessons?.length ?? 0
 	const parts: string[] = []
 	if (sections) {
 		parts.push(`${sections} ${sections === 1 ? __('section') : __('sections')}`)
@@ -524,7 +587,8 @@ const isScormSectionLocked = computed<boolean>(() =>
 
 function isActiveLesson(lessonNumber: string): boolean {
 	if (props.inlineSelect) return props.selectedLessonNumber === lessonNumber
-	const { chapterNumber, lessonNumber: lesson } = parseLessonNumber(lessonNumber)
+	const { chapterNumber, lessonNumber: lesson } =
+		parseLessonNumber(lessonNumber)
 	return (
 		route.params.chapterNumber == chapterNumber &&
 		route.params.lessonNumber == lesson
@@ -557,6 +621,7 @@ function onLessonClick(lesson: OutlineLesson) {
 }
 
 function addLesson() {
+	if (props.creatingLesson) return
 	emit('create-lesson', {
 		chapter: props.section,
 		lessonIdx: (props.section.lessons?.length ?? 0) + 1,
@@ -569,7 +634,19 @@ function reorderSection(direction: 'up' | 'down') {
 	emit('reorder-section', { section: props.section, direction })
 }
 
+// Sections reorder inside their own parent; lesson rows retain the existing
+// cross-section transfer behavior. Reparenting a section uses the target dialog.
+function canTransferChild(
+	_to: unknown,
+	_from: unknown,
+	element: HTMLElement
+): boolean {
+	return element.classList.contains('outline-lesson-row')
+}
+
 function moveChild(event: DraggableEvent) {
+	if (!Number.isInteger(event.newIndex)) return
+	if (event.from === event.to && event.oldIndex === event.newIndex) return
 	const child = event.item.__draggable_context.element
 	if ('kind' in child && child.kind === 'section' && child.node) {
 		emit('reorder-section', {
@@ -613,6 +690,6 @@ function redirectToSection(event?: MouseEvent) {
 
 <style scoped>
 .outline-action {
-	@apply inline-flex h-8 w-8 items-center justify-center rounded-4 text-ink-gray-7 hover:bg-surface-gray-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 disabled:cursor-not-allowed disabled:opacity-40;
+	@apply inline-flex h-8 w-8 items-center justify-center rounded-4 hover:bg-surface-gray-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 disabled:cursor-not-allowed disabled:opacity-40;
 }
 </style>

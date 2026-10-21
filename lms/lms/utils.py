@@ -470,7 +470,7 @@ def get_section_path(chapter_name: str) -> str | None:
 	segments = []
 	current = chapter_name
 	seen = set()
-	for _ in range(MAX_SECTION_DEPTH + 1):
+	for _depth in range(MAX_SECTION_DEPTH + 1):
 		if not current or current in seen:
 			return None
 		seen.add(current)
@@ -2056,7 +2056,7 @@ def build_outline(
 		lessons_by_chapter.setdefault(lr.chapter_name, []).append(lesson)
 
 	# Every child row of every section in one per-parent list, mixed and sorted by
-# the child-table idx: this is the single manual order the author edits.
+	# the child-table idx: this is the single manual order the author edits.
 	children_by_chapter = {}
 	for chapter_name, lessons in lessons_by_chapter.items():
 		children_by_chapter.setdefault(chapter_name, []).extend(
@@ -3224,6 +3224,8 @@ def get_lesson_creation_details(course: str, chapter: str, lesson: int) -> dict:
 	never autosave.
 	"""
 	frappe.only_for(["Moderator", "Course Creator"])
+	if not can_modify_course(course):
+		frappe.throw(_("You do not have permission to modify this course."), frappe.PermissionError)
 	chapter_name, chapter_title = resolve_section_by_path(course, chapter)
 
 	lesson_name = None

@@ -40,7 +40,9 @@ vi.mock('frappe-ui', () => ({
 
 vi.mock('vuedraggable', () => ({
 	default: {
-		props: ['list'],
+		name: 'Draggable',
+		props: ['list', 'group', 'handle', 'disabled'],
+		emits: ['end'],
 		template: `
 			<div>
 				<div v-for="item in list" :key="item.key">
@@ -59,7 +61,9 @@ const section: OutlineChapter = {
 	idx: 2,
 	level: 1,
 	is_scorm_package: 0 as const,
-	lessons: [{ name: 'LESSON-1', title: 'Lesson 1', number: '2-1', position: 1 }],
+	lessons: [
+		{ name: 'LESSON-1', title: 'Lesson 1', number: '2-1', position: 1 },
+	],
 }
 
 const mountRow = (
@@ -117,7 +121,7 @@ describe('SectionRow inline rename', () => {
 
 describe('SectionRow lesson count', () => {
 	const count = (allowEdit: boolean) =>
-		mountRow(section, allowEdit).get('div.text-ink-gray-5')
+		mountRow(section, allowEdit).get('[data-testid="section-count"]')
 
 	it('stays readable while the always-visible edit actions are shown', () => {
 		expect(count(true).text()).toBe('1')
@@ -133,24 +137,49 @@ describe('SectionRow lesson count', () => {
 })
 
 describe('SectionRow editor actions', () => {
+	it('prevents duplicate lesson creation while the first request is pending', async () => {
+		const wrapper = mountRow({ ...section, idx: 1 }, true, {
+			creatingLesson: true,
+		})
+		const add = wrapper.get('button[aria-label="Add Lesson"]')
+		expect((add.element as HTMLButtonElement).disabled).toBe(true)
+		await add.trigger('click')
+		const fallback = wrapper
+			.findAll('button')
+			.find((button) => button.text() === 'Add Lesson')!
+		await fallback.trigger('click')
+		expect(wrapper.emitted('create-lesson')).toBeUndefined()
+	})
+
 	it('keeps the move action visible and exposes reorder controls to the keyboard', () => {
 		const wrapper = mountRow()
 
-		expect(wrapper.get('button[aria-label="Move up"]').element.tagName).toBe('BUTTON')
-		expect(wrapper.get('button[aria-label="Move down"]').element.tagName).toBe('BUTTON')
-		expect(wrapper.findAll('button').some((button) => button.text().includes('Move to…'))).toBe(true)
+		expect(wrapper.get('button[aria-label="Move up"]').element.tagName).toBe(
+			'BUTTON'
+		)
+		expect(wrapper.get('button[aria-label="Move down"]').element.tagName).toBe(
+			'BUTTON'
+		)
+		expect(
+			wrapper
+				.findAll('button')
+				.some((button) => button.text().includes('Move to…'))
+		).toBe(true)
 	})
 
 	it('wraps long section names instead of truncating them beside actions', () => {
 		const wrapper = mountRow({
 			...section,
-			title: 'A very long section name that needs to remain distinguishable in the editor',
+			title:
+				'A very long section name that needs to remain distinguishable in the editor',
 		})
 
 		const title = wrapper.get('[title^="A very long section name"]')
 		expect(title.classes()).toContain('whitespace-normal')
 		expect(title.classes()).toContain('break-words')
-		expect(title.text()).toBe('A very long section name that needs to remain distinguishable in the editor')
+		expect(title.text()).toBe(
+			'A very long section name that needs to remain distinguishable in the editor'
+		)
 	})
 })
 
@@ -244,31 +273,28 @@ describe('SectionRow locked lesson', () => {
 	})
 
 	it('does not emit select-lesson when a locked inline row is clicked', async () => {
-		const wrapper = mount(
-			SectionRow,
-			{
-				props: {
-					section: {
-						...section,
-						idx: 1,
-						lessons: [
-							{
-								name: 'LESSON-1',
-								title: 'Lesson 1',
-								number: '2-1',
-								locked: 1,
-							},
-						],
-					},
-					courseName: 'course-1',
-					inlineSelect: true,
+		const wrapper = mount(SectionRow, {
+			props: {
+				section: {
+					...section,
+					idx: 1,
+					lessons: [
+						{
+							name: 'LESSON-1',
+							title: 'Lesson 1',
+							number: '2-1',
+							locked: 1,
+						},
+					],
 				},
-				global: {
-					mocks: { __: (s: string) => s },
-					provide: { $user: { data: { name: 'admin@example.com' } } },
-				},
-			}
-		)
+				courseName: 'course-1',
+				inlineSelect: true,
+			},
+			global: {
+				mocks: { __: (s: string) => s },
+				provide: { $user: { data: { name: 'admin@example.com' } } },
+			},
+		})
 
 		await wrapper.get('.cursor-not-allowed').trigger('click')
 
@@ -296,7 +322,12 @@ describe('SectionRow mixed children (task 28)', () => {
 				level: 2,
 				position: 2,
 				lessons: [
-					{ name: 'LESSON-C', title: 'Nested lesson', number: '1-1-1', position: 1 },
+					{
+						name: 'LESSON-C',
+						title: 'Nested lesson',
+						number: '1-1-1',
+						position: 1,
+					},
 				],
 			},
 		],
@@ -305,7 +336,9 @@ describe('SectionRow mixed children (task 28)', () => {
 	it('interleaves lessons and nested sections in the single child order', () => {
 		const wrapper = mountRow(mixed)
 
-		const items = wrapper.findAll('[data-testid="outline-lesson"], .outline-section-row')
+		const items = wrapper.findAll(
+			'[data-testid="outline-lesson"], .outline-section-row'
+		)
 		expect(items).toHaveLength(3)
 		expect(items[0].text()).toContain('First')
 		expect(items[1].text()).toContain('Nested')
@@ -344,10 +377,11 @@ describe('SectionRow depth limit (task 28)', () => {
 			sections: [],
 		})
 
-		const affordance = wrapper
-			.findAll('[aria-disabled="true"]')
-			.find((el) => el.classes().includes('lucide-folder-plus'))
-		expect(affordance).toBeDefined()
+		const affordance = wrapper.get(
+			'button[aria-label="Maximum depth reached — 4 section levels"]'
+		)
+		expect(affordance.attributes('aria-disabled')).toBe('true')
+		expect((affordance.element as HTMLButtonElement).disabled).toBe(true)
 
 		expect(wrapper.text()).toContain('Maximum depth reached — 4 section levels')
 	})
@@ -369,5 +403,79 @@ describe('SectionRow depth limit (task 28)', () => {
 
 		await affordance.trigger('click')
 		expect(wrapper.emitted('add-section')?.[0]).toEqual([level3])
+	})
+})
+
+describe('SectionRow drag events', () => {
+	const parent: OutlineChapter = {
+		...section,
+		idx: 1,
+		sections: [
+			{ name: 'SUB-1', title: 'Nested', idx: 1, level: 2, position: 2 },
+		],
+	}
+
+	it('reorders the dragged nested section instead of its ancestor', () => {
+		const wrapper = mountRow(parent)
+		const draggable = wrapper.findComponent({ name: 'Draggable' })
+		const child = draggable.props('list')[1]
+		const container = { dataset: { chapter: parent.name } }
+
+		draggable.vm.$emit('end', {
+			item: { __draggable_context: { element: child } },
+			from: container,
+			to: container,
+			oldIndex: 1,
+			newIndex: 0,
+		})
+
+		expect(wrapper.emitted('reorder-section')).toEqual([
+			[{ section: parent.sections![0], parent: parent.name, idx: 0 }],
+		])
+		expect(wrapper.emitted('move-lesson')).toBeUndefined()
+	})
+
+	it('keeps cross-section transfer enabled only for lessons', () => {
+		const wrapper = mountRow(parent)
+		const draggable = wrapper.findComponent({ name: 'Draggable' })
+		const group = draggable.props('group')
+		const lesson = document.createElement('div')
+		lesson.className = 'outline-lesson-row'
+		const nested = document.createElement('div')
+		nested.className = 'outline-section-row'
+
+		for (const permission of [group.pull, group.put]) {
+			expect(permission(null, null, lesson)).toBe(true)
+			expect(permission(null, null, nested)).toBe(false)
+		}
+
+		draggable.vm.$emit('end', {
+			item: { __draggable_context: { element: draggable.props('list')[0] } },
+			from: { dataset: { chapter: parent.name } },
+			to: { dataset: { chapter: 'OTHER' } },
+			oldIndex: 0,
+			newIndex: 1,
+		})
+		expect(wrapper.emitted('move-lesson')?.[0][0]).toMatchObject({
+			item: { __draggable_context: { element: parent.lessons![0] } },
+			from: { dataset: { chapter: parent.name } },
+			to: { dataset: { chapter: 'OTHER' } },
+			newIndex: 1,
+		})
+	})
+
+	it('does not submit an unchanged order after a cancelled drag', () => {
+		const wrapper = mountRow(parent)
+		const draggable = wrapper.findComponent({ name: 'Draggable' })
+		const container = { dataset: { chapter: parent.name } }
+		draggable.vm.$emit('end', {
+			item: { __draggable_context: { element: draggable.props('list')[1] } },
+			from: container,
+			to: container,
+			oldIndex: 1,
+			newIndex: 1,
+		})
+		expect(wrapper.emitted('reorder-section')).toBeUndefined()
+		expect(wrapper.emitted('move-lesson')).toBeUndefined()
 	})
 })
