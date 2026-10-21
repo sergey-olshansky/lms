@@ -565,6 +565,18 @@ const getSidebarItems = (forMobile = false) => {
 					},
 				},
 				{
+					// Task #35: every user is at least an LMS Student, so the
+					// execution board is for everyone; the teacher's own student
+					// picker lives on the page itself.
+					label: 'Homework Execution',
+					icon: 'KanbanSquare',
+					to: 'HomeworkExecution',
+					activeFor: ['HomeworkExecution', 'HomeworkDetail'],
+					condition: () => {
+						return userResource?.data
+					},
+				},
+				{
 					label: 'Jobs',
 					icon: 'Briefcase',
 					to: 'Jobs',
@@ -638,6 +650,20 @@ const getSidebarItems = (forMobile = false) => {
 						'ProgrammingExercises',
 						'ProgrammingExerciseSubmissions',
 						'ProgrammingExerciseSubmission',
+					],
+				},
+				{
+					// Task #35: the teacher's compilation library.
+					label: 'Homework',
+					icon: 'BookMarked',
+					to: 'HomeworkLibrary',
+					condition: () => {
+						return !forMobile && isAdmin()
+					},
+					activeFor: [
+						'HomeworkLibrary',
+						'HomeworkNew',
+						'HomeworkEdit',
 					],
 				},
 			],

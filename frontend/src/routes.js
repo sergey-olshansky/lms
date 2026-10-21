@@ -385,6 +385,38 @@ export const routes = [
 		component: () => import('@/pages/Forms/PersonaForm.vue'),
 	},
 	{
+		// Task #35: the teacher's homework compilation library, with the create
+		// and edit forms as routed children (the Assignments pattern).
+		path: '/homework',
+		name: 'HomeworkLibrary',
+		component: () => import('@/pages/HomeworkLibrary.vue'),
+		children: [
+			{
+				path: 'new',
+				name: 'HomeworkNew',
+				component: () => import('@/pages/Forms/HomeworkForm.vue'),
+			},
+			{
+				path: 'edit/:homeworkID',
+				name: 'HomeworkEdit',
+				component: () => import('@/pages/Forms/HomeworkForm.vue'),
+				props: true,
+			},
+		],
+	},
+	{
+		path: '/homework/execution',
+		name: 'HomeworkExecution',
+		component: () => import('@/pages/HomeworkExecution.vue'),
+	},
+	{
+		// The card's own address, so Back and a shared link both work (spec 5.3).
+		path: '/homework/assignment/:assignmentID',
+		name: 'HomeworkDetail',
+		component: () => import('@/pages/HomeworkAssignmentDetail.vue'),
+		props: true,
+	},
+	{
 		path: '/programming-exercises',
 		name: 'ProgrammingExercises',
 		component: () =>
