@@ -189,6 +189,9 @@ def _compose_library_counts(rows: list) -> None:
 		row["lessons_count"] = len(lessons)
 		row["quizzes_count"] = quizzes + standalone
 		row["has_materials"] = bool(lessons or standalone)
+		row["has_assignments"] = bool(
+			frappe.db.exists("LMS Homework Assignment", {"homework": row.name})
+		)
 
 
 @frappe.whitelist()
@@ -291,6 +294,14 @@ def archive_homework(name: str, archived: bool = True) -> dict:
 	doc.archived = 1 if archived else 0
 	doc.save()
 	return {"name": doc.name, "archived": bool(doc.archived)}
+
+
+@frappe.whitelist()
+def delete_homework(name: str) -> dict:
+	"""Only a never-issued compilation can be deleted; the doctype refuses a
+	deleted-in-flight history (spec 8.1)."""
+	frappe.delete_doc("LMS Homework", name)
+	return {"deleted": True}
 
 
 # --- Source tree (spec 3.4) -----------------------------------------------------
@@ -451,7 +462,80 @@ def get_homework_board(
 				"has_more": offset + len(rows) < count,
 			}
 		)
+	_attach_continue_targets([row for column in columns for row in column["cards"]])
 	return {"student": target, "columns": columns}
+
+
+def _attach_continue_targets(rows: list) -> None:
+	"""The card's «Продолжить» target (spec 5.2): the first unfinished material,
+	computed for a whole page of cards in three batched queries, never one per row.
+	"""
+	names = [row.name for row in rows]
+	if not names:
+		return
+	reqs = frappe.get_all(
+		"LMS Homework Requirement",
+		filters={"parent": ("in", names), "parenttype": "LMS Homework Assignment"},
+		fields=["parent", "requirement_type", "lesson", "quiz", "status", "course"],
+		order_by="parent asc, idx asc",
+	)
+	lessons = {row.lesson for row in reqs if row.lesson}
+	positions = _lesson_positions(lessons) if lessons else {}
+
+	targets: dict[str, dict] = {}
+	for row in reqs:
+		if row.status in {"Completed", "Completed Earlier", "Unavailable"}:
+			continue
+		if row.parent in targets:
+			continue
+		if row.requirement_type == "Open Lesson" and row.lesson and row.lesson in positions:
+			targets[row.parent] = {"type": "lesson", **positions[row.lesson]}
+		elif row.requirement_type == "Pass Quiz" and row.quiz:
+			if row.lesson and row.lesson in positions:
+				targets[row.parent] = {"type": "lesson", **positions[row.lesson]}
+			else:
+				targets[row.parent] = {"type": "quiz", "quiz": row.quiz, "course": row.course}
+	for row in rows:
+		row["continue_target"] = targets.get(row.name)
+
+
+def _lesson_positions(lessons: set) -> dict:
+	"""lesson -> {course, chapter_number, lesson_number} matching the SPA route
+	/courses/:courseName/learn/:chapterNumber-:lessonNumber, batched."""
+	lesson_rows = frappe.get_all(
+		"Course Lesson", filters={"name": ("in", list(lessons))}, fields=["name", "chapter"]
+	)
+	chapters = {row.chapter for row in lesson_rows if row.chapter}
+	if not chapters:
+		return {}
+	chapter_rows = frappe.get_all(
+		"Course Chapter", filters={"name": ("in", list(chapters))}, fields=["name", "course"]
+	)
+	courses = {row.course for row in chapter_rows if row.course}
+	chapter_refs = (
+		frappe.get_all(
+			"Chapter Reference",
+			filters={"parent": ("in", list(courses)), "chapter": ("in", list(chapters))},
+			fields=["chapter", "parent", "idx"],
+		)
+		if courses
+		else []
+	)
+	lesson_refs = frappe.get_all(
+		"Lesson Reference",
+		filters={"parent": ("in", list(chapters)), "lesson": ("in", list(lessons))},
+		fields=["parent", "lesson", "idx"],
+	)
+	chapter_number = {row.chapter: row.idx for row in chapter_refs}
+	chapter_course = {row.name: row.course for row in chapter_rows}
+	positions = {}
+	for row in lesson_refs:
+		positions[row.lesson] = {
+			"course": chapter_course.get(row.parent),
+			"chapter_number": chapter_number.get(row.parent),
+			"lesson_number": row.idx,
+		}
+	return positions
 
 
 def authorize_board(target: str) -> None:
@@ -589,55 +673,17 @@ def format_requirement(row) -> dict:
 def continue_target(doc) -> dict | None:
 	"""The first unfinished material: a lesson link with homework context, falling
 	back to a standalone quiz. Lesson routes use chapter/lesson order numbers."""
+	positions = _lesson_positions({row.lesson for row in doc.requirements if row.lesson})
 	for row in doc.requirements:
 		if row.status in {"Completed", "Completed Earlier", "Unavailable"}:
 			continue
-		if row.requirement_type == "Open Lesson" and row.lesson:
-			position = _lesson_position(row.lesson)
-			if position:
-				return {
-					"type": "lesson",
-					"course": row.course,
-					"lesson": row.lesson,
-					"chapter_number": position["chapter_number"],
-					"lesson_number": position["lesson_number"],
-				}
+		if row.requirement_type == "Open Lesson" and row.lesson and row.lesson in positions:
+			return {"type": "lesson", "lesson": row.lesson, **positions[row.lesson]}
 		if row.requirement_type == "Pass Quiz" and row.quiz:
-			if row.lesson and (position := _lesson_position(row.lesson)):
-				return {
-					"type": "lesson",
-					"course": row.course,
-					"lesson": row.lesson,
-					"chapter_number": position["chapter_number"],
-					"lesson_number": position["lesson_number"],
-				}
+			if row.lesson and row.lesson in positions:
+				return {"type": "lesson", "lesson": row.lesson, **positions[row.lesson]}
 			return {"type": "quiz", "quiz": row.quiz, "course": row.course}
 	return None
-
-
-def _lesson_position(lesson: str) -> dict | None:
-	"""(chapter index, lesson index) inside the lesson's course, 1-based, matching
-	the SPA's /courses/:course/learn/:chapterNumber-:lessonNumber route."""
-	chapter = frappe.db.get_value("Course Lesson", lesson, "chapter")
-	if not chapter:
-		return None
-	chapter_row = frappe.get_all(
-		"Chapter Reference",
-		filters={"parent": frappe.db.get_value("Course Chapter", chapter, "course"), "chapter": chapter},
-		pluck="idx",
-		limit=1,
-	)
-	if not chapter_row:
-		return None
-	lesson_row = frappe.get_all(
-		"Lesson Reference",
-		filters={"parent": chapter, "lesson": lesson, "parenttype": "Course Chapter"},
-		pluck="idx",
-		limit=1,
-	)
-	if not lesson_row:
-		return None
-	return {"chapter_number": chapter_row[0], "lesson_number": lesson_row[0]}
 
 
 # --- Events and actions (spec 7) ------------------------------------------------
