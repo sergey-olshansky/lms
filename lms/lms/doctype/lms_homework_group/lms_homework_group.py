@@ -60,7 +60,9 @@ class LMSHomeworkGroup(Document):
 		if frappe.db.exists("LMS Homework Group", {"parent_group": self.name}):
 			frappe.throw(_("Delete the subgroups of {0} first.").format(self.title))
 		if frappe.db.exists("LMS Homework", {"group": self.name}):
-			frappe.throw(_("Group {0} still has homeworks. Move them to another group first.").format(self.title))
+			frappe.throw(
+				_("Group {0} still has homeworks. Move them to another group first.").format(self.title)
+			)
 
 
 def _is_privileged() -> bool:

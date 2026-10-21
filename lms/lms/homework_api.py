@@ -129,12 +129,16 @@ def _group_titles(rows: list) -> None:
 		)
 	}
 	parent_names = {row.parent_group for row in groups.values() if row.parent_group}
-	parents = {
-		row.name: row.title
-		for row in frappe.get_all(
-			"LMS Homework Group", filters={"name": ("in", list(parent_names))}, fields=["name", "title"]
-		)
-	} if parent_names else {}
+	parents = (
+		{
+			row.name: row.title
+			for row in frappe.get_all(
+				"LMS Homework Group", filters={"name": ("in", list(parent_names))}, fields=["name", "title"]
+			)
+		}
+		if parent_names
+		else {}
+	)
 	for row in rows:
 		group = groups.get(row.group)
 		if not group:
@@ -189,9 +193,7 @@ def _compose_library_counts(rows: list) -> None:
 		row["lessons_count"] = len(lessons)
 		row["quizzes_count"] = quizzes + standalone
 		row["has_materials"] = bool(lessons or standalone)
-		row["has_assignments"] = bool(
-			frappe.db.exists("LMS Homework Assignment", {"homework": row.name})
-		)
+		row["has_assignments"] = bool(frappe.db.exists("LMS Homework Assignment", {"homework": row.name}))
 
 
 @frappe.whitelist()
@@ -358,9 +360,11 @@ def precheck_assignment(homework: str, student: str, days: int | None = None) ->
 		frappe.throw(_("You can only assign your own homework."), frappe.PermissionError)
 
 	check_days = homework_service.validate_days_raw(days if days is not None else doc.days)
-	reasons = homework_sources.validate_sources_for_student(doc.items, student) if doc.items else [
-		_("This homework has no materials.")
-	]
+	reasons = (
+		homework_sources.validate_sources_for_student(doc.items, student)
+		if doc.items
+		else [_("This homework has no materials.")]
+	)
 	active = frappe.db.get_value(
 		"LMS Homework Assignment", {"homework": homework, "student": student, "cancelled": 0}
 	)
@@ -443,10 +447,20 @@ def get_homework_board(
 			"LMS Homework Assignment",
 			filters=column_filters,
 			fields=[
-				"name", "title", "teacher", "status", "due_at", "assigned_at",
-				"needs_revision", "submitted_for_review_at", "reviewed_at",
-				"total_requirements", "completed_requirements",
-				"lessons_total", "quizzes_total", "quizzes_completed",
+				"name",
+				"title",
+				"teacher",
+				"status",
+				"due_at",
+				"assigned_at",
+				"needs_revision",
+				"submitted_for_review_at",
+				"reviewed_at",
+				"total_requirements",
+				"completed_requirements",
+				"lessons_total",
+				"quizzes_total",
+				"quizzes_completed",
 			],
 			order_by="due_at asc, assigned_at asc" if column_status != STATUS_DONE else "reviewed_at desc",
 			limit_page_length=BOARD_PAGE_SIZE,

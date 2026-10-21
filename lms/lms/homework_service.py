@@ -227,8 +227,10 @@ def quiz_awaiting_grading(member: str, quiz: str) -> bool:
 		fields=["question_type", "answer", "marks", "marks_out_of"],
 	)
 	for row in rows:
-		if row.question_type == "Open Ended" and (row.answer or "").strip() and cint(row.marks) < cint(
-			row.marks_out_of
+		if (
+			row.question_type == "Open Ended"
+			and (row.answer or "").strip()
+			and cint(row.marks) < cint(row.marks_out_of)
 		):
 			return True
 	return False
@@ -629,9 +631,7 @@ def _get_owned_assignment(assignment_name: str):
 	if assignment.student != frappe.session.user and not _is_privileged():
 		frappe.throw(_("This homework belongs to another student."), frappe.PermissionError)
 	if assignment.student != frappe.session.user:
-		frappe.throw(
-			_("Only the student's own opening starts the homework."), frappe.PermissionError
-		)
+		frappe.throw(_("Only the student's own opening starts the homework."), frappe.PermissionError)
 	return assignment
 
 
@@ -645,7 +645,9 @@ def _get_teachable_assignment(assignment_name: str):
 	return assignment
 
 
-def _add_history(assignment, event: str, from_status: str | None, to_status: str | None, comment: str | None = None) -> None:
+def _add_history(
+	assignment, event: str, from_status: str | None, to_status: str | None, comment: str | None = None
+) -> None:
 	assignment.append(
 		"history",
 		{

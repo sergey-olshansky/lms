@@ -48,15 +48,12 @@ class LMSHomeworkAssignment(Document):
 		assignable = [
 			row
 			for row in self.requirements
-			if row.status in COMPLETED_REQUIREMENT_STATUSES
-			or row.status in {"Pending", "Awaiting Grading"}
+			if row.status in COMPLETED_REQUIREMENT_STATUSES or row.status in {"Pending", "Awaiting Grading"}
 		]
 		if not assignable:
 			frappe.throw(_("A homework assignment must contain at least one requirement."))
 
 	def on_doctype_update(self):
-		frappe.db.add_index(
-			self.doctype, ["student", "status", "cancelled"], "homework_student_status_idx"
-		)
+		frappe.db.add_index(self.doctype, ["student", "status", "cancelled"], "homework_student_status_idx")
 		frappe.db.add_index(self.doctype, ["homework", "student"], "homework_template_student_idx")
 		frappe.db.add_index(self.doctype, ["teacher", "cancelled"], "homework_teacher_idx")

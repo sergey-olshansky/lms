@@ -108,9 +108,7 @@ def get_course_source_tree(course: str) -> dict:
 		chapter["children"] = [
 			lesson_nodes[row.name] for row in lesson_rows if row.chapter_name == chapter["name"]
 		] + _chapter_children(chapter["name"])
-		chapter["assignable"] = any(
-			child.get("assignable") for child in chapter["children"]
-		)
+		chapter["assignable"] = any(child.get("assignable") for child in chapter["children"])
 
 	standalone = _standalone_nodes(course, quizzes_by_lesson, assignments_by_lesson)
 
@@ -225,19 +223,31 @@ def _standalone_nodes(course: str, quizzes_by_lesson: dict, assignments_by_lesso
 	embedded_assignments = {a for rows in assignments_by_lesson.values() for a in rows}
 
 	nodes = []
-	for quiz in frappe.get_all("LMS Quiz", filters={"course": course}, fields=["name", "title"], order_by="title"):
+	for quiz in frappe.get_all(
+		"LMS Quiz", filters={"course": course}, fields=["name", "title"], order_by="title"
+	):
 		if quiz.name not in embedded_quizzes:
 			nodes.append(
-				{"key": f"quiz:{quiz.name}", "type": "quiz", "name": quiz.name,
-				 "title": quiz.title, "assignable": True}
+				{
+					"key": f"quiz:{quiz.name}",
+					"type": "quiz",
+					"name": quiz.name,
+					"title": quiz.title,
+					"assignable": True,
+				}
 			)
 	for assignment in frappe.get_all(
 		"LMS Assignment", filters={"course": course}, fields=["name", "title"], order_by="title"
 	):
 		if assignment.name not in embedded_assignments:
 			nodes.append(
-				{"key": f"assignment:{assignment.name}", "type": "assignment",
-				 "name": assignment.name, "title": assignment.title, "assignable": True}
+				{
+					"key": f"assignment:{assignment.name}",
+					"type": "assignment",
+					"name": assignment.name,
+					"title": assignment.title,
+					"assignable": True,
+				}
 			)
 	return nodes
 
@@ -418,9 +428,7 @@ def validate_sources_for_student(items: list, student: str) -> list[str]:
 	for course in courses:
 		if not get_membership(course, student):
 			course_title = frappe.db.get_value("LMS Course", course, "title") or course
-			reasons.append(
-				_("Student is not enrolled in the course {0}.").format(frappe.bold(course_title))
-			)
+			reasons.append(_("Student is not enrolled in the course {0}.").format(frappe.bold(course_title)))
 
 	locked = _locked_lessons_for_student(courses, student)
 	if locked:
@@ -440,7 +448,9 @@ def validate_sources_for_student(items: list, student: str) -> list[str]:
 			if item.quiz and not frappe.db.exists("LMS Quiz", item.quiz):
 				reasons.append(_("Quiz {0} no longer exists.").format(frappe.bold(item.label)))
 			elif item.quiz and not can_access_assessment("LMS Quiz", item.quiz, user=student):
-				reasons.append(_("Quiz {0} is not available to this student.").format(frappe.bold(item.label)))
+				reasons.append(
+					_("Quiz {0} is not available to this student.").format(frappe.bold(item.label))
+				)
 		elif item.source_type == "Assignment":
 			if item.assignment and not frappe.db.exists("LMS Assignment", item.assignment):
 				reasons.append(_("Assignment {0} no longer exists.").format(frappe.bold(item.label)))
