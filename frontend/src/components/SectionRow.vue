@@ -153,7 +153,7 @@
 				<button
 					v-if="!section.is_scorm_package"
 					type="button"
-					class="outline-action w-auto inline-flex items-center gap-1.5 px-2"
+					class="outline-action gap-1.5 px-2"
 					@click="emit('move-section', section)"
 				>
 					<span class="lucide-folder-input size-4" />{{ __('Move to…') }}
@@ -690,6 +690,6 @@ function redirectToSection(event?: MouseEvent) {
 
 <style scoped>
 .outline-action {
-	@apply inline-flex h-8 w-8 items-center justify-center rounded-4 hover:bg-surface-gray-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 disabled:cursor-not-allowed disabled:opacity-40;
+	@apply inline-flex h-8 min-w-8 shrink-0 items-center justify-center rounded-4 hover:bg-surface-gray-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 disabled:cursor-not-allowed disabled:opacity-40;
 }
 </style>

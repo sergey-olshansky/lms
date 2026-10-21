@@ -40,6 +40,7 @@ STUDENT = "tree-student@example.com"
 class TestCourseSectionTree(BaseTestUtils):
 	def setUp(self):
 		super().setUp()
+		self._create_user("frappe@example.com", "Frappe", "Teacher", ["Course Creator"])
 		self.course = self._create_course("Section Tree Course")
 		self.instructor = self.course.instructors[0].instructor
 

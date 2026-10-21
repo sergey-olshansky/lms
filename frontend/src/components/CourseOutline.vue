@@ -118,6 +118,7 @@ import MoveSectionModal from '@/components/Modals/MoveSectionModal.vue'
 import { openFormRoute } from '@/composables/useFormRoute'
 import {
 	flattenLessons,
+	flattenSections,
 	forEachLesson,
 	parseLessonNumber,
 } from '@/utils/courseOutline'
@@ -407,22 +408,14 @@ function subtreeCounts(chapterName: string): {
 	sections: number
 	lessons: number
 } {
-	const section = (outline.data ?? []).find((c) => c.name === chapterName)
+	const section = flattenSections(outline.data).find(
+		(c) => c.name === chapterName
+	)
 	if (!section) return { sections: 0, lessons: 0 }
-	const collect = (
-		nodes: OutlineChapter[],
-		sections: number,
-		lessons: number
-	) => {
-		for (const node of nodes) {
-			sections += 1
-			lessons += node.lessons?.length ?? 0
-			;[sections, lessons] = collect(node.sections ?? [], sections, lessons)
-		}
-		return [sections, lessons] as const
+	return {
+		sections: flattenSections([section]).length - 1,
+		lessons: flattenLessons([section]).length,
 	}
-	const [sections, lessons] = collect(section.sections ?? [], 0, 0)
-	return { sections, lessons }
 }
 
 function trashChapter(chapterName: string) {
