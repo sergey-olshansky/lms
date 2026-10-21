@@ -35,7 +35,20 @@
 				:placeholder="__('Course')"
 			/>
 			<BooleanSwitch v-model="overdueOnly" size="sm" :label="__('Overdue')" />
+			<BooleanSwitch
+				v-model="cancelledOnly"
+				size="sm"
+				:label="__('Recalled')"
+				data-testid="board-cancelled-switch"
+			/>
 		</div>
+		<p
+			v-if="cancelledOnly"
+			class="px-4 pb-2 text-sm text-ink-gray-5 md:px-6"
+			data-testid="board-cancelled-note"
+		>
+			{{ __('Recalled assignments: history only, no updates.') }}
+		</p>
 
 		<div
 			class="board-scroll min-h-0 flex-1 overflow-x-auto overflow-y-auto px-4 pb-4 md:px-6"
@@ -210,15 +223,19 @@ const search = ref(String(route.query.title || ''))
 const statusFilter = ref(String(route.query.status || ''))
 const courseFilter = ref(String(route.query.course || ''))
 const overdueOnly = ref(Boolean(route.query.overdue))
+// The recalled-assignments history (spec 8.1): a separate read-only view, not a
+// fifth board column.
+const cancelledOnly = ref(Boolean(route.query.recalled))
 
-const columns = ref(
+const emptyColumns = () =>
 	BOARD_STATUSES.map((status) => ({
 		status,
 		count: 0,
 		cards: [],
 		has_more: false,
 	}))
-)
+
+const columns = ref(emptyColumns())
 const offsets = ref({})
 
 const board = createResource({
@@ -230,6 +247,7 @@ const board = createResource({
 		overdue: overdueOnly.value,
 		course: courseFilter.value || null,
 		offsets: JSON.stringify(offsets.value),
+		include_cancelled: cancelledOnly.value,
 	}),
 	onSuccess(data) {
 		columns.value = data.columns
@@ -241,8 +259,10 @@ const board = createResource({
 })
 
 const reloadBoard = () => {
-	// A different student means a different board: offsets reset so paging
-	// cannot leak rows of the previous target (spec 5.1).
+	// A different board target means no card of the previous one may linger on
+	// screen while the fetch is in flight (spec 5.1: the client cache is
+	// re-isolated on student change), and paging resets with it.
+	columns.value = emptyColumns()
 	offsets.value = {}
 	board.reload()
 }
@@ -252,19 +272,22 @@ onMounted(() => {
 	else reloadBoard()
 })
 
-watch([student, search, statusFilter, courseFilter, overdueOnly], () => {
-	router.replace({
-		query: {
-			student: student.value || undefined,
-			title: search.value || undefined,
-			status: statusFilter.value || undefined,
-			course: courseFilter.value || undefined,
-			overdue: overdueOnly.value ? 1 : undefined,
-		},
-	})
-	offsets.value = {}
-	board.reload()
-})
+watch(
+	[student, search, statusFilter, courseFilter, overdueOnly, cancelledOnly],
+	() => {
+		router.replace({
+			query: {
+				student: student.value || undefined,
+				title: search.value || undefined,
+				status: statusFilter.value || undefined,
+				course: courseFilter.value || undefined,
+				overdue: overdueOnly.value ? 1 : undefined,
+				recalled: cancelledOnly.value ? 1 : undefined,
+			},
+		})
+		reloadBoard()
+	}
+)
 
 const students = createResource({
 	url: 'lms.lms.homework_api.get_homework_students',

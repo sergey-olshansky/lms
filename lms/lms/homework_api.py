@@ -21,8 +21,10 @@ from lms.lms.homework_service import (
 	STATUS_REVIEW,
 	STATUS_TO_DO,
 	compute_due_at,
+	source_alive,
 )
 from lms.lms.schedule_utils import datetime_to_iso
+from lms.lms.utils import get_membership
 
 BOARD_PAGE_SIZE = 10
 BOARD_STATUSES = [STATUS_TO_DO, STATUS_IN_PROGRESS, STATUS_REVIEW, STATUS_DONE]
@@ -365,12 +367,20 @@ def precheck_assignment(homework: str, student: str, days: int | None = None) ->
 		if doc.items
 		else [_("This homework has no materials.")]
 	)
+	# Which courses the student cannot reach yet, so the dialog can link straight
+	# to the app's own enrollment management instead of naming it in prose.
+	missing_courses = [
+		course
+		for course in {item.course for item in (doc.items or []) if item.course}
+		if not get_membership(course, student)
+	]
 	active = frappe.db.get_value(
 		"LMS Homework Assignment", {"homework": homework, "student": student, "cancelled": 0}
 	)
 	return {
 		"ok": not reasons and not doc.archived,
 		"reasons": reasons,
+		"missing_courses": missing_courses,
 		"archived": bool(doc.archived),
 		"due_at": datetime_to_iso(compute_due_at(now_datetime(), check_days)),
 		"days": check_days,
@@ -408,15 +418,19 @@ def get_homework_board(
 	overdue: bool = False,
 	course: str | None = None,
 	offsets: str | None = None,
+	include_cancelled: bool = False,
 ) -> dict:
 	"""The board of an allowed student, four columns with full counts and per-column
 	paging. ``student`` from the URL is never the authority: the server decides whose
 	board the session user may read (students: their own; teachers: their own
-	assignments to that student via the permission conditions; staff: everything)."""
+	assignments to that student via the permission conditions; staff: everything).
+
+	``include_cancelled`` flips the board into the history of recalled assignments
+	(spec 8.1): a technical flag with its own view, never a fifth column."""
 	target = student or frappe.session.user
 	authorize_board(target)
 
-	filters: dict = {"student": target, "cancelled": 0}
+	filters: dict = {"student": target, "cancelled": 1 if include_cancelled else 0}
 	# frappe.get_all reads without the scripted permission conditions, so a teacher's
 	# view of a student's board is narrowed here, explicitly, to their own issued
 	# assignments (spec 5.1: the teacher sees the board "within their own rights").
@@ -654,6 +668,20 @@ def get_homework_assignment(name: str) -> dict:
 		"viewer_is_student": doc.student == frappe.session.user,
 		"viewer_can_teach": doc.teacher == frappe.session.user or _is_privileged(),
 	}
+	# Spec 5.3.3: every material row carries its own working link to the real
+	# course page, not only the first unfinished one.
+	positions = _lesson_positions({row.lesson for row in doc.requirements if row.lesson})
+	for formatted, row in zip(payload["requirements"], doc.requirements, strict=True):
+		if row.lesson and row.lesson in positions:
+			position = positions[row.lesson]
+			formatted["route"] = {
+				"type": "lesson",
+				"course": position["course"],
+				"chapter_number": position["chapter_number"],
+				"lesson_number": position["lesson_number"],
+			}
+		elif row.quiz:
+			formatted["route"] = {"type": "quiz", "quiz": row.quiz, "course": row.course}
 	return payload
 
 
@@ -671,7 +699,7 @@ def format_requirement(row) -> dict:
 		"Completed Earlier": _("Done earlier"),
 		"Unavailable": _("Unavailable"),
 	}
-	status = row.status if _source_alive(row) else "Unavailable"
+	status = row.status if source_alive(row) else "Unavailable"
 	return {
 		"requirement_type": row.requirement_type,
 		"course": row.course,
@@ -687,17 +715,6 @@ def format_requirement(row) -> dict:
 		"proof_type": row.proof_type,
 		"proof_name": row.proof_name,
 	}
-
-
-def _source_alive(row) -> bool:
-	"""Whether the row's underlying material still resolves by its stable id."""
-	if row.requirement_type == "Open Lesson" and row.lesson:
-		return bool(frappe.db.exists("Course Lesson", row.lesson))
-	if row.requirement_type == "Pass Quiz" and row.quiz:
-		return bool(frappe.db.exists("LMS Quiz", row.quiz))
-	if row.requirement_type == "Reference" and row.reference_assignment:
-		return bool(frappe.db.exists("LMS Assignment", row.reference_assignment))
-	return True
 
 
 def continue_target(doc) -> dict | None:

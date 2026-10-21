@@ -214,6 +214,14 @@
 										{{ row.state_label }}
 									</span>
 									<router-link
+										v-if="row.route && row.status !== 'Unavailable'"
+										:to="rowRoute(row.route)"
+										class="shrink-0 text-xs text-ink-gray-5 underline"
+										:data-testid="`open-material-${row.lesson || row.quiz}`"
+									>
+										{{ __('Open') }}
+									</router-link>
+									<router-link
 										v-if="
 											row.proof_type === 'LMS Quiz Submission' && row.proof_name
 										"
@@ -225,6 +233,83 @@
 									>
 										{{ __('Attempt') }}
 									</router-link>
+								</div>
+
+								<!-- Spec 5.3.4: the quizzes of a selected lesson are
+								expandable sub-rows of that lesson, each with its own
+								state and, when passed, the attempt link. -->
+								<div
+									v-if="quizzesOf(row).length"
+									class="mt-1 ms-8 divide-y divide-outline-gray-1 rounded-4 border border-outline-gray-2"
+								>
+									<button
+										type="button"
+										class="flex w-full items-center gap-2 px-2 py-1 text-start text-xs text-ink-gray-6 hover:bg-surface-gray-1"
+										:aria-expanded="quizExpanded(rowKey(row))"
+										:data-testid="`quiz-toggle-${row.lesson}`"
+										@click="toggleQuizzes(rowKey(row))"
+									>
+										<span
+											class="block size-3.5 transition-transform"
+											:class="
+												quizExpanded(rowKey(row))
+													? 'lucide-chevron-down'
+													: 'lucide-chevron-right'
+											"
+										/>
+										{{
+											__('{0} quizzes').format(String(quizzesOf(row).length))
+										}}
+									</button>
+									<div v-if="quizExpanded(rowKey(row))">
+										<div
+											v-for="quiz in quizzesOf(row)"
+											:key="rowKey(quiz)"
+											class="flex items-start gap-3 px-2 py-1.5"
+										>
+											<span
+												class="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-4 border text-[10px]"
+												:class="stateClass(quiz)"
+												:aria-label="quiz.state_label"
+											>
+												<span
+													v-if="isDone(quiz)"
+													class="lucide-check size-3"
+													aria-hidden="true"
+												/>
+												<span
+													v-else-if="quiz.status === 'Awaiting Grading'"
+													class="lucide-hourglass size-3"
+													aria-hidden="true"
+												/>
+											</span>
+											<span
+												class="min-w-0 flex-1 truncate text-xs text-ink-gray-7"
+												:title="quiz.path"
+											>
+												{{ quiz.label }}
+											</span>
+											<span
+												class="shrink-0 rounded-4 px-1.5 py-0.5 text-[10px]"
+												:class="stateTextClass(quiz)"
+											>
+												{{ quiz.state_label }}
+											</span>
+											<router-link
+												v-if="
+													quiz.proof_type === 'LMS Quiz Submission' &&
+													quiz.proof_name
+												"
+												:to="{
+													name: 'QuizSubmission',
+													params: { submission: quiz.proof_name },
+												}"
+												class="shrink-0 text-[10px] text-ink-gray-5 underline"
+											>
+												{{ __('Attempt') }}
+											</router-link>
+										</div>
+									</div>
 								</div>
 							</div>
 						</div>
@@ -417,9 +502,34 @@ onMounted(async () => {
 	detail.reload()
 })
 
+// Spec 5.3.4: a lesson's quizzes render as expandable sub-rows of that lesson,
+// so quiz rows with a lesson are pulled out of the flat list here and handed
+// back through quizzesOf(). Standalone quizzes (no lesson) stay top-level.
+const quizzesOf = (lessonRow) =>
+	(detail.data?.requirements || []).filter(
+		(row) =>
+			row.requirement_type === 'Pass Quiz' && row.lesson === lessonRow.lesson
+	)
+
+const expandedQuizLessons = ref(new Set())
+const quizExpanded = (key) => expandedQuizLessons.value.has(key)
+const toggleQuizzes = (key) => {
+	const next = new Set(expandedQuizLessons.value)
+	if (next.has(key)) next.delete(key)
+	else next.add(key)
+	expandedQuizLessons.value = next
+}
+
 const groupedRequirements = computed(() => {
 	const groups = {}
-	for (const row of detail.data?.requirements || []) {
+	const all = detail.data?.requirements || []
+	const nested = new Set(
+		all
+			.filter((row) => row.requirement_type === 'Pass Quiz' && row.lesson)
+			.map(rowKey)
+	)
+	for (const row of all) {
+		if (nested.has(rowKey(row))) continue
 		const course = row.course || '—'
 		const chapter = row.chapter_title || ''
 		groups[course] = groups[course] || {}
@@ -453,7 +563,8 @@ const allConfirmed = computed(() => {
 	)
 })
 const stateClass = (row) => {
-	if (isDone(row)) return 'border-outline-gray-3 bg-surface-green-2 text-ink-green-5'
+	if (isDone(row))
+		return 'border-outline-gray-3 bg-surface-green-2 text-ink-green-5'
 	if (row.status === 'Awaiting Grading')
 		return 'border-outline-gray-3 bg-surface-orange-1 text-ink-orange-5'
 	if (row.status === 'Unavailable')
@@ -482,6 +593,31 @@ const breadcrumbs = computed(() => [
 		},
 	},
 ])
+
+// A checklist row's own link into the real course page (spec 5.3.3), carrying
+// the homework context so the way back is right there after opening.
+const rowRoute = (route) => {
+	if (!route) return null
+	if (route.type === 'lesson') {
+		return {
+			name: 'Lesson',
+			params: {
+				courseName: route.course,
+				chapterNumber: String(route.chapter_number),
+				lessonNumber: String(route.lesson_number),
+			},
+			query: { hw: props.assignmentID },
+		}
+	}
+	if (route.type === 'quiz') {
+		return {
+			name: 'QuizPage',
+			params: { quizID: route.quiz },
+			query: { hw: props.assignmentID },
+		}
+	}
+	return null
+}
 
 const continueWorking = () => {
 	const target = detail.data?.continue_target

@@ -182,6 +182,18 @@ def _apply_prior_credit(requirements: list[dict], student: str) -> list[dict]:
 	return requirements
 
 
+def source_alive(row) -> bool:
+	"""Whether a requirement's underlying material still resolves by its stable id
+	(spec 8.2: a deleted source reads Unavailable, never silently counts)."""
+	if row.get("requirement_type") == "Open Lesson" and row.get("lesson"):
+		return bool(frappe.db.exists("Course Lesson", row.lesson))
+	if row.get("requirement_type") == "Pass Quiz" and row.get("quiz"):
+		return bool(frappe.db.exists("LMS Quiz", row.quiz))
+	if row.get("requirement_type") == "Reference" and row.get("reference_assignment"):
+		return bool(frappe.db.exists("LMS Assignment", row.reference_assignment))
+	return True
+
+
 # --- Quiz evidence (spec 6.2) ---------------------------------------------------
 
 
@@ -361,6 +373,18 @@ def accept(assignment_name: str, comment: str | None = None) -> dict:
 		return {"status": STATUS_DONE}
 	if assignment.status != STATUS_REVIEW:
 		frappe.throw(_("Only homework in Review can be accepted."))
+	# "Требования по-прежнему валидны" (spec 7): a source deleted while the card
+	# sat in Review must be fixed or recalled, not accepted as done.
+	dead = [
+		row.label
+		for row in assignment.requirements
+		if row.requirement_type in CHECKABLE_TYPES and not source_alive(row)
+	]
+	if dead:
+		frappe.throw(
+			_("Some materials are no longer available: {0}.").format(frappe.bold(", ".join(dead))),
+			frappe.ValidationError,
+		)
 
 	assignment.status = STATUS_DONE
 	assignment.reviewed_by = frappe.session.user

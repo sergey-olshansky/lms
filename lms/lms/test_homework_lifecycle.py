@@ -113,8 +113,19 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 		precheck = homework_api.precheck_assignment(template, self.student.email, 3)
 		self.assertFalse(precheck["ok"])
 		self.assertTrue(any("not enrolled" in reason for reason in precheck["reasons"]))
+		# The dialog turns these into links to the app's own access management.
+		self.assertEqual(precheck["missing_courses"], [self.course.name])
 		with self.assertRaises(frappe.ValidationError):
 			self._assign(template, self.student, "key-blocked")
+
+	def test_accept_refused_when_source_deleted(self):
+		"""Spec 7: acceptance requires the requirements to still be valid."""
+		name = self._drive_to_review("key-accept-dead")
+		frappe.set_user(self.teacher.email)
+		frappe.delete_doc("Course Lesson", self.lesson_quiz.name)
+		with self.assertRaises(frappe.ValidationError):
+			homework_service.accept(name)
+		self.assertEqual(frappe.get_value("LMS Homework Assignment", name, "status"), "Review")
 
 	def test_idempotent_same_key_returns_same_assignment(self):
 		self._enroll(self.student)

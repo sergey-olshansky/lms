@@ -68,7 +68,9 @@
 				/>
 
 				<p v-if="dueLabel" class="text-sm text-ink-gray-6">
-					{{ __('Due') }}: <span class="text-ink-gray-9">{{ dueLabel }}</span>
+					{{ __('Due') }}:
+					<span class="text-ink-gray-9">{{ dueLabel }}</span>
+					<span v-if="dueZone" class="text-xs">({{ dueZone }})</span>
 				</p>
 
 				<div
@@ -89,6 +91,25 @@
 								'Grant the student access to the course first, or change the composition.'
 							)
 						}}
+					</p>
+					<!-- Spec 4: the block comes with a way into the app's own access
+					management, not just the reason in prose. -->
+					<p
+						v-if="
+							precheck.data.missing_courses &&
+							precheck.data.missing_courses.length
+						"
+						class="flex flex-wrap gap-2 text-xs"
+					>
+						<router-link
+							v-for="courseName in precheck.data.missing_courses"
+							:key="courseName"
+							:to="{ name: 'CourseDetail', params: { courseName } }"
+							class="underline"
+							data-testid="assign-missing-course-link"
+						>
+							{{ courseName }}
+						</router-link>
 					</p>
 				</div>
 
@@ -218,13 +239,20 @@ const blocked = computed(
 		) || Boolean(precheck.data?.archived)
 )
 
+// The deadline renders in the site's timezone with its offset named (spec 4.1):
+// the server's ISO string already carries the site-local wall clock, so both the
+// time and the zone are read straight from it -- never from the browser's zone.
 const dueLabel = computed(() => {
-	if (!precheck.data?.due_at) return ''
-	try {
-		return new Date(precheck.data.due_at).toLocaleString()
-	} catch {
-		return precheck.data.due_at
-	}
+	const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(
+		precheck.data?.due_at || ''
+	)
+	if (!match) return ''
+	return `${match[3]}.${match[2]}.${match[1]} ${match[4]}:${match[5]}`
+})
+
+const dueZone = computed(() => {
+	const match = /([+-]\d{2}:\d{2})$/.exec(precheck.data?.due_at || '')
+	return match ? `UTC${match[1]}` : ''
 })
 
 watch(
