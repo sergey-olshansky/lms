@@ -207,7 +207,26 @@ def _idempotency_params_match(existing, homework_name: str, student: str, days, 
 def _apply_prior_credit(requirements: list[dict], student: str) -> list[dict]:
 	"""Credit evidence that already exists at issue time as "Completed Earlier"
 	(spec 6.3). Without reliable stored history the row stays Pending -- no fact
-	of viewing is invented."""
+	of viewing is invented.
+
+	Three proofs count (D05): the course's own completion record, a finally
+	successful quiz submission, and the student's own CONFIRMED homework
+	openings recorded on earlier assignments -- server-recorded with the access
+	check of their day, never a client checkbox. A teacher's or another
+	student's viewing never lands in this student's rows, so it never credits
+	here either."""
+	lesson_rows = [row for row in requirements if row["requirement_type"] == REQUIREMENT_OPEN_LESSON]
+	prior_views = _prior_lesson_view_evidence(
+		student, [row["lesson"] for row in lesson_rows if row.get("lesson")]
+	)
+	prior_openings = _prior_assignment_view_evidence(
+		student,
+		[
+			row["reference_assignment"]
+			for row in requirements
+			if row["requirement_type"] == REQUIREMENT_OPEN_ASSIGNMENT and row.get("reference_assignment")
+		],
+	)
 	for row in requirements:
 		if row["requirement_type"] == REQUIREMENT_OPEN_LESSON:
 			if frappe.db.exists(
@@ -222,6 +241,11 @@ def _apply_prior_credit(requirements: list[dict], student: str) -> list[dict]:
 					{"member": student, "lesson": row["lesson"], "status": "Complete"},
 					"name",
 				)
+			elif row.get("lesson") in prior_views:
+				row["status"] = "Completed Earlier"
+				row["completed_at"] = now_datetime()
+				row["proof_type"] = "Lesson View"
+				row["proof_name"] = row["lesson"]
 		elif row["requirement_type"] == REQUIREMENT_PASS_QUIZ:
 			proof = passed_quiz_evidence(student, row["quiz"])
 			if proof:
@@ -229,7 +253,62 @@ def _apply_prior_credit(requirements: list[dict], student: str) -> list[dict]:
 				row["completed_at"] = now_datetime()
 				row["proof_type"] = "LMS Quiz Submission"
 				row["proof_name"] = proof
+		elif row["requirement_type"] == REQUIREMENT_OPEN_ASSIGNMENT:
+			if row.get("reference_assignment") in prior_openings:
+				row["status"] = "Completed Earlier"
+				row["completed_at"] = now_datetime()
+				row["proof_type"] = "Assignment View"
+				row["proof_name"] = row["reference_assignment"]
 	return requirements
+
+
+def _prior_lesson_view_evidence(student: str, lessons: list[str]) -> set[str]:
+	"""Lessons this student already opened under an EARLIER homework (D05): the
+	confirmed-opening rows the service itself recorded, scoped to this student's
+	own assignments. Course Progress is deliberately NOT the only witness -- a
+	homework opening is its own stored fact, and homework must not lean on the
+	course-completion mechanism it is forbidden to alter."""
+	if not lessons:
+		return set()
+	return _prior_requirement_evidence(student, REQUIREMENT_OPEN_LESSON, "lesson", lessons)
+
+
+def _prior_assignment_view_evidence(student: str, assignments: list[str]) -> set[str]:
+	"""Written assignments this student already opened under an earlier homework
+	(D05), same shape as the lesson evidence."""
+	if not assignments:
+		return set()
+	return _prior_requirement_evidence(
+		student, REQUIREMENT_OPEN_ASSIGNMENT, "reference_assignment", assignments
+	)
+
+
+def _prior_requirement_evidence(
+	student: str, requirement_type: str, field: str, values: list[str]
+) -> set[str]:
+	rows = frappe.get_all(
+		"LMS Homework Requirement",
+		filters={
+			"parenttype": "LMS Homework Assignment",
+			"requirement_type": requirement_type,
+			field: ("in", values),
+			"status": ("in", ["Completed", "Completed Earlier"]),
+		},
+		fields=["parent", field],
+	)
+	if not rows:
+		return set()
+	# The opening is the student's own only if the card it was recorded on is
+	# the student's: another student's identical row never credits here.
+	owned = set(
+		frappe.get_all(
+			"LMS Homework Assignment",
+			filters={"name": ("in", {row.parent for row in rows}), "student": student},
+			pluck="name",
+		)
+	)
+	witnessed = {getattr(row, field) for row in rows if row.parent in owned}
+	return witnessed - {None}
 
 
 def source_alive(row) -> bool:

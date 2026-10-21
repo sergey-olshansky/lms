@@ -182,6 +182,7 @@ import {
 } from 'frappe-ui'
 import { computed, ref, watch } from 'vue'
 import { resourceErrorMessage } from '@/utils/resource'
+import { siteWallClock, siteZoneLabel } from '@/utils/dueDate'
 
 const props = defineProps({
 	open: { type: Boolean, default: false },
@@ -239,21 +240,16 @@ const blocked = computed(
 		) || Boolean(precheck.data?.archived)
 )
 
-// The deadline renders in the site's timezone with its offset named (spec 4.1):
-// the server's ISO string already carries the site-local wall clock, so both the
-// time and the zone are read straight from it -- never from the browser's zone.
-const dueLabel = computed(() => {
-	const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(
-		precheck.data?.due_at || ''
-	)
-	if (!match) return ''
-	return `${match[3]}.${match[2]}.${match[1]} ${match[4]}:${match[5]}`
-})
+// The deadline renders in the site's timezone with its offset named (spec 4.1,
+// U01): the shared dueDate helper reads both straight from the server's
+// offset-bearing ISO -- never from the browser's zone.
+const dueLabel = computed(() =>
+	siteWallClock(precheck.data?.due_at || '')
+)
 
-const dueZone = computed(() => {
-	const match = /([+-]\d{2}:\d{2})$/.exec(precheck.data?.due_at || '')
-	return match ? `UTC${match[1]}` : ''
-})
+const dueZone = computed(() =>
+	siteZoneLabel(precheck.data?.due_at || '')
+)
 
 watch(
 	() => props.open,

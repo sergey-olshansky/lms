@@ -244,7 +244,7 @@ def submit_quiz(
 	# limited shuffled quiz can no longer score past 100% across retakes.
 	quiz_questions = _quiz_question_rows(quiz)
 	credited = _credited_question_rows(quiz, frappe.session.user)
-	merge_credited_results(quiz_questions, credited, data["results"])
+	carried_graded = merge_credited_results(quiz_questions, credited, data["results"])
 	score_out_of = resolve_attempt_score_out_of(
 		quiz_details, quiz_questions, credited, data["results"], _parse_question_pool(question_pool)
 	)
@@ -261,6 +261,7 @@ def submit_quiz(
 		quiz_details.passing_percentage,
 		violation_count=proctoring["violation_count"],
 		submission_reason=proctoring["submission_reason"],
+		carried_graded=carried_graded,
 	)
 	percentage = submission.percentage or 0
 	save_progress_after_quiz(quiz_details, percentage)
@@ -741,7 +742,7 @@ def _credited_question_rows(quiz: str, member: str) -> dict[str, dict]:
 	return credited
 
 
-def merge_credited_results(quiz_questions: dict, credited: dict, results: list) -> None:
+def merge_credited_results(quiz_questions: dict, credited: dict, results: list) -> set:
 	"""Fold the member's already-credited answers into a retake's results (#32).
 
 	The retake UI offers only the never-credited questions; the credited ones are
@@ -754,11 +755,15 @@ def merge_credited_results(quiz_questions: dict, credited: dict, results: list) 
 	already earned cannot be lost to a re-answer. A question that has since left
 	the quiz is not carried — its marks no longer exist to be credited.
 
-	In-place on ``results``, before create_submission scores the attempt.
+	In-place on ``results``, before create_submission scores the attempt. Returns
+	the set of question names the SERVER carried, so the submission's validate
+	can tell a recorded verdict riding along (D02) from a client-forged
+	``graded`` flag -- the flag alone is never trusted on a member's save.
 	"""
 	if not credited:
-		return
+		return set()
 
+	carried: set = set()
 	submitted = set()
 	for result in results:
 		name = result.get("question_name")
@@ -774,6 +779,7 @@ def merge_credited_results(quiz_questions: dict, credited: dict, results: list) 
 		result["is_correct"] = 1
 		# Carried answers carry their verdict with them (task #35, C01).
 		result["graded"] = 1
+		carried.add(name)
 
 	for question_name, source in credited.items():
 		if question_name in submitted:
@@ -793,6 +799,8 @@ def merge_credited_results(quiz_questions: dict, credited: dict, results: list) 
 				"graded": 1,
 			}
 		)
+		carried.add(question_name)
+	return carried
 
 
 def _parse_question_pool(raw) -> list[str] | None:
@@ -957,9 +965,13 @@ def create_submission(
 	passing_percentage: float,
 	violation_count: int = 0,
 	submission_reason: str = "manual",
+	carried_graded: set | None = None,
 ):
 	submission = frappe.new_doc("LMS Quiz Submission")
-	# Score and percentage are calculated by the controller function
+	# Which open answers the SERVER carried from earlier graded attempts (D02):
+	# doc flags never cross the client boundary, so validate_grading_flags can
+	# trust exactly these rows' graded=1 on the member's own save.
+	submission.flags.carried_graded_questions = carried_graded or set()
 	submission.update(
 		{
 			"doctype": "LMS Quiz Submission",

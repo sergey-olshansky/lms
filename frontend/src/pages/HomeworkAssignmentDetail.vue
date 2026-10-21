@@ -78,20 +78,14 @@
 						{{
 							__('Assigned by {0} on {1}').format(
 								detail.data.teacher_name,
-								detail.data.assigned_at
-									? dayjs(detail.data.assigned_at).format('DD.MM.YYYY HH:mm')
-									: ''
+								siteWallClock(detail.data.assigned_at_iso)
 							)
 						}}
 					</p>
 					<p class="text-sm text-ink-gray-6">
 						{{ __('Due') }}:
 						<span class="text-ink-gray-9">
-							{{
-								detail.data.due_at
-									? dayjs(detail.data.due_at).format('DD.MM.YYYY HH:mm')
-									: ''
-							}}
+							{{ formatDueAt(detail.data.due_at_iso) }}
 						</span>
 						<span
 							v-if="detail.data.overdue"
@@ -213,6 +207,39 @@
 									>
 										{{ row.state_label }}
 									</span>
+									<!-- U02: an exhausted attempt limit is the one reason a
+									     stuck card may have that the checklist alone never
+									     shows. Teacher-only, with the count and a link to the
+									     existing review mechanism; never a limit reset. -->
+									<span
+										v-if="
+											detail.data.viewer_can_teach &&
+											row.attempts_exhausted
+										"
+										class="shrink-0 rounded-4 bg-surface-orange-1 px-1.5 py-0.5 text-xs text-ink-orange-5"
+										:data-testid="`attempts-exhausted-${row.quiz}`"
+									>
+										{{
+											__('{0} of {1} attempts used').format(
+												String(row.attempts_used ?? 0),
+												String(row.attempts_max ?? 0)
+											)
+										}}
+									</span>
+									<router-link
+										v-if="
+											detail.data.viewer_can_teach &&
+											row.attempts_exhausted &&
+											row.latest_submission
+										"
+										:to="{
+											name: 'QuizSubmission',
+											params: { submission: row.latest_submission },
+										}"
+										class="shrink-0 text-xs text-ink-gray-5 underline"
+									>
+										{{ __('Review latest attempt') }}
+									</router-link>
 									<router-link
 										v-if="row.route && row.status !== 'Unavailable'"
 										:to="rowRoute(row.route)"
@@ -318,6 +345,11 @@
 						)
 					}}
 				</section>
+
+				<!-- Task #35 (E03): the student's optional solution files. Purely
+				     additive: attaching nothing changes no requirement, no
+				     status and no review decision. -->
+				<HomeworkSolutionFiles :detail="detail" ref="solutionFiles" />
 
 				<!-- History (spec 5.3.5) -->
 				<section class="space-y-2">
@@ -437,15 +469,21 @@ import {
 	createResource,
 	toast,
 } from 'frappe-ui'
-import { computed, inject, onMounted, onUnmounted, ref } from 'vue'
+import { computed, inject, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/Layouts/pages/PageHeader.vue'
+import HomeworkSolutionFiles from '@/components/HomeworkSolutionFiles.vue'
 import { lessonRouteParams } from '@/utils/homeworkSelection'
 import { resourceErrorMessage } from '@/utils/resource'
+import { formatDueAt, siteWallClock } from '@/utils/dueDate'
+import { openExternal } from '@/utils/openExternal'
 
 const route = useRoute()
 const router = useRouter()
 const dayjs = inject('$dayjs')
+// E01: the guest-vs-signed distinction the login return needs (a guest has
+// no user data at all).
+const user = inject('$user')
 
 const props = defineProps({ assignmentID: { type: String, required: true } })
 
@@ -476,6 +514,16 @@ const detail = createResource({
 	makeParams: () => ({ name: props.assignmentID }),
 })
 
+// E03: the solution-files panel reloads with the card so a status change
+// (review submitted, accepted, returned) flips its editability at once.
+const solutionFiles = ref(null)
+watch(
+	() => detail.data?.status,
+	() => {
+		if (detail.data?.name) solutionFiles.value?.reload?.()
+	}
+)
+
 onMounted(async () => {
 	// B11: read the card FIRST -- the payload's viewer_is_student is the
 	// structured role signal. Only the student's own open starts execution, so a
@@ -492,6 +540,16 @@ onMounted(async () => {
 			assignment: props.assignmentID,
 		})
 	} catch (error) {
+		// E01: on a guest-access site the router lets a Guest through, but the
+		// card itself is never public -- the API refuses. A guest here is
+		// offered the login that returns them to exactly this page; a signed-in
+		// viewer who merely lacks this card keeps the plain refusal (no data
+		// leak, no redirect loop).
+		if (!user.data?.name) {
+			const target = `${window.location.pathname}${window.location.search}${window.location.hash}`
+			window.location.href = `/login?redirect-to=${encodeURIComponent(target)}`
+			return
+		}
 		toast.error(resourceErrorMessage(error, __('Error')))
 		return
 	}
@@ -681,6 +739,21 @@ const revokeReason = ref('')
 
 const teacherMenu = computed(() => [
 	{
+		// E01: the card's own permanent address, ready to paste into any
+		// channel. The link grants nothing by itself -- the server re-checks
+		// the viewer on open -- and a guest landing on it comes straight back
+		// after login through the redirect the router attaches.
+		label: copied.value ? __('Link copied') : __('Copy link for student'),
+		icon: copied.value ? 'lucide-check' : 'lucide-link',
+		onClick: copyStudentLink,
+	},
+	{
+		// E02: the frozen snapshot PDF -- student, term, materials with links.
+		label: __('Download PDF'),
+		icon: 'lucide-file-down',
+		onClick: downloadAssignmentPdf,
+	},
+	{
 		label: __('Change deadline'),
 		icon: 'lucide-calendar-clock',
 		onClick: () => {
@@ -697,6 +770,36 @@ const teacherMenu = computed(() => [
 		},
 	},
 ])
+
+function downloadAssignmentPdf() {
+	// The shared opener: noopener + the scheme allowlist every window of the
+	// app clears; the server sets Content-Disposition so this downloads.
+	openExternal(
+		`/api/method/lms.lms.homework_pdf.download_homework_assignment_pdf?name=${encodeURIComponent(
+			props.assignmentID
+		)}`
+	)
+}
+
+// E01: the full origin + SPA path of THIS card, so the link works from mail,
+// chat and external readers alike.
+const studentLink = computed(() => {
+	if (!detail.data?.name) return ''
+	const basePath = window.lms_path ? `/${window.lms_path}` : '/lms'
+	return `${window.location.origin}${basePath}/homework/assignment/${detail.data.name}`
+})
+
+const copied = ref(false)
+
+async function copyStudentLink() {
+	try {
+		await navigator.clipboard.writeText(studentLink.value)
+		copied.value = true
+		setTimeout(() => (copied.value = false), 2000)
+	} catch {
+		toast.error(__('Could not copy the link'))
+	}
+}
 
 const callAction = (url, params) =>
 	new Promise((resolve, reject) => {

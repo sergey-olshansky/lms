@@ -322,6 +322,9 @@ const MANIFEST: Record<string, Privacy[]> = {
 	// `uploadArgs` computed object — no longer `computed`, still private.
 	'components/UploadPlugin.vue': ['private'],
 	'components/VideoArchiveBlock.vue': ['private'],
+	// Task #35 (E03): the homework solution-files uploader is private by
+	// design -- a student's submitted work is never public storage.
+	'components/HomeworkSolutionFiles.vue': ['private'],
 	'pages/Forms/AssignmentForm.vue': ['undeclared'],
 	// Moved out of AnnouncementForm.vue when it adopted FormLayout: the
 	// `<RichTextEditor>` tag now lives in this reusable field adapter instead.

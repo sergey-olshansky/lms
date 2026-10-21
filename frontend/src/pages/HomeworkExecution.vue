@@ -195,11 +195,11 @@ import Select from '@/components/Controls/Select.vue'
 import BooleanSwitch from '@/components/Controls/BooleanSwitch.vue'
 import { lessonRouteParams, progressLine } from '@/utils/homeworkSelection'
 import { resourceErrorMessage } from '@/utils/resource'
+import { siteWallClockShort } from '@/utils/dueDate'
 
 const route = useRoute()
 const router = useRouter()
 const user = inject('$user')
-const dayjs = inject('$dayjs')
 
 const BOARD_STATUSES = ['To Do', 'In Progress', 'Review', 'Done']
 const STATUS_LABELS = {
@@ -361,8 +361,10 @@ const statusOptions = computed(() => [
 	})),
 ])
 
-const dueLabel = (card) =>
-	card.due_at ? dayjs(card.due_at).format('DD.MM HH:mm') : ''
+// U01: the card reads the site-local wall clock straight from the offset-aware
+// ISO the server sends -- `dayjs(naive)` would repaint it in the browser's
+// zone and disagree with the dialog and the detail page.
+const dueLabel = (card) => siteWallClockShort(card.due_at_iso || '')
 
 const progressPercent = (card) =>
 	card.total_requirements

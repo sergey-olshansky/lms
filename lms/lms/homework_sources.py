@@ -335,7 +335,7 @@ def _canonical_item(source_type: str, name: str) -> dict:
 			"assignment": None,
 			"course": row.course,
 			"label": row.title,
-			"path": _display_path(row.course, chapter.title if chapter else None, row.title),
+			"path": _display_path(row.course, row.chapter, row.title),
 		}
 
 	if source_type == "Quiz":
@@ -419,6 +419,7 @@ def expand_requirements(items: list) -> list[dict]:
 					"course": item.get("course"),
 					"chapter_title": chapter_title,
 					"lesson": item.lesson,
+					"lesson_snapshot": item.lesson,
 					"quiz": None,
 					"reference_assignment": None,
 					"label": lesson_title,
@@ -534,15 +535,42 @@ def _lesson_assignments(lesson: str) -> list[dict]:
 	return [{"name": name, "title": titles.get(name, name)} for name in names]
 
 
+def _chapter_ancestor_titles(chapter: str) -> list[str]:
+	"""The titles of `chapter`'s whole ancestor chain, ROOT FIRST (D06).
+
+	Task #28 nests sections through Lesson Reference rows whose ``section``
+	names the child, so a lesson's readable path is course / root / ... / leaf
+	section / lesson. Two same-named lessons in different sections stay
+	 distinguishable exactly because every ancestor is present. The seen-set
+	 only bounds corrupt data, the same stance the tree walk takes."""
+	if not chapter:
+		return []
+	chain = []
+	current: str | None = chapter
+	seen: set[str] = set()
+	while current and current not in seen:
+		seen.add(current)
+		chain.append(current)
+		current = frappe.db.get_value(
+			"Lesson Reference",
+			{"parenttype": "Course Chapter", "section": current},
+			"parent",
+		)
+	chain.reverse()
+	titles = _titles("Course Chapter", chain)
+	return [titles.get(name, name) for name in chain]
+
+
 def _display_path(course: str, chapter: str, title: str) -> str:
+	"""The canonical human-readable path: course title, every ancestor section
+	title (root first, D06), then the material's own title. `chapter` is the
+	section ID -- the title lookups happen here, never at the caller."""
 	parts = []
 	course_title = frappe.db.get_value("LMS Course", course, "title") if course else None
 	if course_title:
 		parts.append(course_title)
 	if chapter:
-		chapter_title = frappe.db.get_value("Course Chapter", chapter, "title")
-		if chapter_title:
-			parts.append(chapter_title)
+		parts.extend(_chapter_ancestor_titles(chapter))
 	parts.append(title)
 	return " / ".join(parts)
 
@@ -608,25 +636,84 @@ def validate_sources_for_student(items: list, student: str) -> list[str]:
 		if item.source_type == "Lesson":
 			if item.lesson and not frappe.db.exists("Course Lesson", item.lesson):
 				reasons.append(_("Lesson {0} no longer exists.").format(frappe.bold(item.label)))
+				continue
+			# An embedded assessment IS part of the homework's obligation (D08):
+			# issuing a composition whose mandatory nested quiz cannot be sat
+			# would hand the student a card that can never leave In Progress.
+			# Every placement row the issue snapshot would freeze is checked
+			# here, so the precheck and the issue step answer identically.
+			embedded_quizzes = [quiz["name"] for quiz in _lesson_quizzes(item.lesson)]
+			embedded_assignments = [
+				assignment["name"] for assignment in _lesson_assignments(item.lesson)
+			]
+			reasons.extend(
+				_assessment_block_reasons("LMS Quiz", embedded_quizzes, student)
+			)
+			reasons.extend(
+				_assessment_block_reasons("LMS Assignment", embedded_assignments, student)
+			)
 		elif item.source_type == "Quiz":
 			if item.quiz and not frappe.db.exists("LMS Quiz", item.quiz):
 				reasons.append(_("Quiz {0} no longer exists.").format(frappe.bold(item.label)))
-			elif item.quiz and not can_access_assessment("LMS Quiz", item.quiz, user=student):
-				reasons.append(
-					_("Quiz {0} is not available to this student.").format(frappe.bold(item.label))
-				)
+			else:
+				reasons.extend(_assessment_block_reasons("LMS Quiz", [item.quiz], student))
 		elif item.source_type == "Assignment":
 			if item.assignment and not frappe.db.exists("LMS Assignment", item.assignment):
 				reasons.append(_("Assignment {0} no longer exists.").format(frappe.bold(item.label)))
-			elif item.assignment and not can_access_assessment(
-				"LMS Assignment", item.assignment, user=student
-			):
+			else:
+				reasons.extend(_assessment_block_reasons("LMS Assignment", [item.assignment], student))
+	return reasons
+
+
+def _assessment_block_reasons(assessment_type: str, names: list[str], student: str) -> list[str]:
+	"""Why `student` cannot work these assessments RIGHT NOW (D08): gone, out of
+	reach through the app's own access resolver, or outside its schedule window.
+	Only the named materials are judged -- nothing here opens access, and an
+	assessment nowhere in the composition stays nobody's business (R05)."""
+	reasons: list[str] = []
+	for name in names:
+		if not name or not frappe.db.exists(assessment_type, name):
+			if name:
 				reasons.append(
-					_("Assignment {0} is not available to this student.").format(
-						frappe.bold(item.label)
+					_("{0} {1} no longer exists.").format(
+						_(assessment_type), frappe.bold(name)
 					)
 				)
+			continue
+		title = frappe.db.get_value(assessment_type, name, "title") or name
+		if not can_access_assessment(assessment_type, name, user=student):
+			reasons.append(
+				_("{0} is not available to this student.").format(frappe.bold(title))
+			)
+		reason = _schedule_block_reason(assessment_type, name, title)
+		if reason:
+			reasons.append(reason)
 	return reasons
+
+
+def _schedule_block_reason(assessment_type: str, name: str, title: str) -> str | None:
+	"""The availability-window half of the issue check (D08): the same window
+	``assert_within_schedule`` enforces at submit time, read as a reason instead
+	of an exception so the dialog can name the blocking material."""
+	from lms.lms.schedule_utils import get_schedule_block_reason
+
+	row = frappe.db.get_value(
+		assessment_type,
+		name,
+		["enable_scheduling", "schedule_start", "schedule_end"],
+		as_dict=True,
+	)
+	reason = get_schedule_block_reason(
+		row.enable_scheduling, row.schedule_start, row.schedule_end
+	)
+	if reason == "not_started":
+		return _("{0} opens on {1}.").format(
+			frappe.bold(title),
+			frappe.format(row.schedule_start, {"fieldtype": "Datetime"}),
+		)
+	if reason == "ended":
+		return _("The schedule for {0} has ended.").format(frappe.bold(title))
+	return None
 
 
 def _locked_lessons_for_student(courses: set, student: str) -> set:

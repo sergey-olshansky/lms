@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import frappe
 from frappe import _
-from frappe.utils import now_datetime
+from frappe.utils import cint, now_datetime
 
 from lms.lms import homework_service, homework_sources
 from lms.lms.homework_service import (
@@ -238,15 +238,17 @@ def get_homework(name: str) -> dict:
 		}
 		for row in doc.items
 	]
-	numbers = _lesson_numbers_by_course({item["course"] for item in items if item["course"]})
+	numbers = _lesson_route_lookup(
+		{item["name"] for item in items if item["source_type"] == "Lesson"}
+	)
 	for item in items:
-		number = (
-			numbers.get(item["course"], {}).get(item["name"])
-			if item["source_type"] == "Lesson"
-			else None
-		)
-		if number:
-			item["route"] = {"type": "lesson", "course": item["course"], "number": number}
+		placement = numbers.get(item["name"]) if item["source_type"] == "Lesson" else None
+		if placement:
+			item["route"] = {
+				"type": "lesson",
+				"course": placement["course"],
+				"number": placement["number"],
+			}
 		elif item["source_type"] == "Quiz":
 			item["route"] = {"type": "quiz", "quiz": item["name"], "course": item["course"]}
 		elif item["source_type"] == "Assignment":
@@ -572,7 +574,7 @@ def get_homework_board(
 def _attach_continue_targets(rows: list) -> None:
 	"""The card's «Продолжить» target (spec 5.2): the first unfinished material,
 	computed for a whole page of cards in batched queries, never one per row.
-	"""
+	Lesson targets resolve through the lesson's CURRENT placement (D07)."""
 	names = [row.name for row in rows]
 	if not names:
 		return
@@ -582,8 +584,7 @@ def _attach_continue_targets(rows: list) -> None:
 		fields=["parent", "requirement_type", "lesson", "quiz", "reference_assignment", "status", "course"],
 		order_by="parent asc, idx asc",
 	)
-	courses = {row.course for row in reqs if row.course}
-	numbers = _lesson_numbers_by_course(courses)
+	placements = _lesson_route_lookup({row.lesson for row in reqs if row.lesson})
 
 	targets: dict[str, dict] = {}
 	for row in reqs:
@@ -591,12 +592,20 @@ def _attach_continue_targets(rows: list) -> None:
 			continue
 		if row.parent in targets:
 			continue
-		number = numbers.get(row.course, {}).get(row.lesson) if row.lesson else None
-		if row.requirement_type == "Open Lesson" and number:
-			targets[row.parent] = {"type": "lesson", "course": row.course, "number": number}
+		placement = placements.get(row.lesson) if row.lesson else None
+		if row.requirement_type == "Open Lesson" and placement:
+			targets[row.parent] = {
+				"type": "lesson",
+				"course": placement["course"],
+				"number": placement["number"],
+			}
 		elif row.requirement_type == "Pass Quiz" and row.quiz:
-			if number:
-				targets[row.parent] = {"type": "lesson", "course": row.course, "number": number}
+			if placement:
+				targets[row.parent] = {
+					"type": "lesson",
+					"course": placement["course"],
+					"number": placement["number"],
+				}
 			else:
 				targets[row.parent] = {"type": "quiz", "quiz": row.quiz, "course": row.course}
 		elif row.requirement_type == "Open Assignment" and row.reference_assignment:
@@ -666,6 +675,49 @@ def _lesson_numbers_by_course(courses: set) -> dict[str, dict[str, str]]:
 			walk(root.chapter, str(root.idx))
 		maps[course] = numbers
 	return maps
+
+
+def _lesson_route_lookup(lessons: set) -> dict[str, dict]:
+	"""lesson -> its placement in the CURRENT course tree (D07).
+
+	A moved lesson keeps a working link by its stable id: the course a lesson
+	sits in TODAY is resolved through its chapter (never the snapshot's frozen
+	course column, and never ``Course Lesson.course`` -- that mirror goes stale
+	on a move), and the outline number is computed for that course. A deleted
+	lesson, or one whose chapter no longer resolves, gets no entry: no link may
+	ever land on a DIFFERENT lesson that merely inherited the ordinal."""
+	from lms.lms.permissions import resolve_lesson_course
+
+	by_course: dict[str, list[str]] = {}
+	for lesson in lessons:
+		if not lesson or not frappe.db.exists("Course Lesson", lesson):
+			continue
+		course = resolve_lesson_course(lesson)
+		if course:
+			by_course.setdefault(course, []).append(lesson)
+	if not by_course:
+		return {}
+	numbers = _lesson_numbers_by_course(set(by_course))
+	routes: dict[str, dict] = {}
+	for course, lesson_names in by_course.items():
+		for lesson in lesson_names:
+			number = numbers.get(course, {}).get(lesson)
+			if number:
+				routes[lesson] = {"course": course, "number": number}
+	return routes
+
+
+def _student_cannot_open_reason(lesson: str, student: str) -> str | None:
+	"""Why the assignment's student cannot open this lesson right now (D07): a
+	move never widens rights, so a route into a course the student cannot read
+	is published together with its reason instead of pretending to work."""
+	from lms.lms.permissions import can_access_lesson
+
+	if not student or not frappe.db.exists("User", student):
+		return None
+	if can_access_lesson(lesson, user=student):
+		return None
+	return _("This material is not available to the student right now.")
 
 
 def authorize_board(target: str) -> None:
@@ -762,7 +814,7 @@ def get_homework_assignment(name: str) -> dict:
 		"submitted_for_review_at": doc.submitted_for_review_at,
 		"reviewed_by": doc.reviewed_by,
 		"reviewed_at": doc.reviewed_at,
-		"requirements": [format_requirement(row) for row in doc.requirements],
+		"requirements": [format_requirement(row, frozen=bool(doc.cancelled)) for row in doc.requirements],
 		"history": [
 			{
 				"actor": row.actor,
@@ -780,12 +832,14 @@ def get_homework_assignment(name: str) -> dict:
 		"viewer_can_teach": doc.teacher == frappe.session.user or _is_privileged(),
 	}
 	# Spec 5.3.3: every material row carries its own working link to the real
-	# course page, not only the first unfinished one. Numbers come from the
-	# outline builder, multi-segment under task #28 ("2-1-3"). Course titles ship
-	# with the assignment itself (R18): a student must not need the teacher's
-	# course list to read their own checklist.
+	# course page, not only the first unfinished one. Numbers are multi-segment
+	# under task #28 ("2-1-3") and follow the lesson's CURRENT placement (D07):
+	# the snapshot keeps its frozen label and path, the link tracks where the
+	# material lives now -- resolved by stable lesson id, never by ordinal, so a
+	# deletion cannot redirect a link onto a different lesson that inherited
+	# the number. Course titles ship with the assignment itself (R18).
 	course_names = {row.course for row in doc.requirements if row.course}
-	numbers = _lesson_numbers_by_course(course_names)
+	lesson_routes = _lesson_route_lookup({row.lesson for row in doc.requirements if row.lesson})
 	payload["course_titles"] = (
 		{
 			row.name: row.title
@@ -797,9 +851,19 @@ def get_homework_assignment(name: str) -> dict:
 		else {}
 	)
 	for formatted, row in zip(payload["requirements"], doc.requirements, strict=True):
-		number = numbers.get(row.course, {}).get(row.lesson) if row.lesson else None
-		if number:
-			formatted["route"] = {"type": "lesson", "course": row.course, "number": number}
+		placement = lesson_routes.get(row.lesson) if row.lesson else None
+		if placement:
+			formatted["route"] = {
+				"type": "lesson",
+				"course": placement["course"],
+				"number": placement["number"],
+			}
+			# A move does not widen rights (D07): the link ships, but when the
+			# student it belongs to cannot open the current location, the reason
+			# ships beside it instead of a silent 403.
+			blocked = _student_cannot_open_reason(row.lesson, doc.student)
+			if blocked:
+				formatted["blocked_reason"] = blocked
 		elif row.quiz:
 			formatted["route"] = {"type": "quiz", "quiz": row.quiz, "course": row.course}
 		elif row.reference_assignment:
@@ -808,16 +872,69 @@ def get_homework_assignment(name: str) -> dict:
 				"assignment": row.reference_assignment,
 				"course": row.course,
 			}
+	_stamped_quiz_attempt_states(doc, payload["requirements"])
 	return payload
 
 
-def format_requirement(row) -> dict:
+def _stamped_quiz_attempt_states(doc, formatted_rows: list) -> None:
+	"""U02: for every UNFINISHED quiz row, whether the member has spent all their
+	attempts -- the reason a card can be stuck in In Progress through no fault of
+	composition. The limit is read from the quiz's own setting and never widened
+	here; the teacher gets the number and the latest attempt's name so the
+	existing report/review mechanism is one click away. Exhaustion is NOT a
+	refusal to grade: an ungraded open answer stays "Awaiting grading" and the
+	grading action remains available whatever this flag says."""
+	unfinished = [
+		row
+		for row in formatted_rows
+		if row.get("requirement_type") == "Pass Quiz"
+		and row.get("quiz")
+		and row.get("status") not in ("Completed", "Completed Earlier")
+	]
+	if not unfinished:
+		return
+	limits = {
+		quiz.name: cint(quiz.max_attempts)
+		for quiz in frappe.get_all(
+			"LMS Quiz",
+			filters={"name": ("in", {row["quiz"] for row in unfinished})},
+			fields=["name", "max_attempts"],
+		)
+	}
+	history: dict[str, list[str]] = {}
+	for submission in frappe.get_all(
+		"LMS Quiz Submission",
+		filters={
+			"quiz": ("in", {row["quiz"] for row in unfinished}),
+			"member": doc.student,
+		},
+		fields=["name", "quiz"],
+		order_by="creation asc",
+	):
+		history.setdefault(submission.quiz, []).append(submission.name)
+	for row in unfinished:
+		max_attempts = limits.get(row["quiz"], 0)
+		if max_attempts <= 0:
+			continue
+		attempts = history.get(row["quiz"]) or []
+		row["attempts_max"] = max_attempts
+		row["attempts_used"] = len(attempts)
+		if len(attempts) >= max_attempts:
+			row["attempts_exhausted"] = True
+			if attempts:
+				row["latest_submission"] = attempts[-1]
+
+
+def format_requirement(row, frozen: bool = False) -> dict:
 	"""One checklist row for the client: identity, path, state with a text label
 	(color never the only carrier, spec 5.3), and the proof link when one exists.
 
 	A source deleted after issuing (spec 8.2) reads as Unavailable right here,
 	without rewriting the frozen snapshot: the row stays, the work does not
-	silently count, and the teacher sees what to fix or recall."""
+	silently count, and the teacher sees what to fix or recall. A RECALLED
+	assignment (``frozen=True``, D04) skips even that live re-derivation: its
+	rows are history exactly as they were recalled, whatever happened to the
+	course afterwards."""
 	state_labels = {
 		"Pending": _("Not done"),
 		"Awaiting Grading": _("Awaiting grading"),
@@ -825,7 +942,7 @@ def format_requirement(row) -> dict:
 		"Completed Earlier": _("Done earlier"),
 		"Unavailable": _("Unavailable"),
 	}
-	status = row.status if source_alive(row) else "Unavailable"
+	status = row.status if (frozen or source_alive(row)) else "Unavailable"
 	return {
 		"id": row.name,
 		"requirement_type": row.requirement_type,
@@ -846,18 +963,28 @@ def format_requirement(row) -> dict:
 
 def continue_target(doc) -> dict | None:
 	"""The first unfinished material: a lesson link with homework context, falling
-	back to a standalone quiz. The lesson link carries the outline's route number,
-	multi-segment under task #28."""
-	numbers = _lesson_numbers_by_course({row.course for row in doc.requirements if row.course})
+	back to a standalone quiz. The lesson link resolves through the lesson's
+	CURRENT placement (D07), the same lookup every checklist row uses."""
+	routes = _lesson_route_lookup({row.lesson for row in doc.requirements if row.lesson})
 	for row in doc.requirements:
 		if row.status in {"Completed", "Completed Earlier", "Unavailable"}:
 			continue
-		number = numbers.get(row.course, {}).get(row.lesson) if row.lesson else None
-		if row.requirement_type == "Open Lesson" and number:
-			return {"type": "lesson", "lesson": row.lesson, "course": row.course, "number": number}
+		placement = routes.get(row.lesson) if row.lesson else None
+		if row.requirement_type == "Open Lesson" and placement:
+			return {
+				"type": "lesson",
+				"lesson": row.lesson,
+				"course": placement["course"],
+				"number": placement["number"],
+			}
 		if row.requirement_type == "Pass Quiz" and row.quiz:
-			if number:
-				return {"type": "lesson", "lesson": row.lesson, "course": row.course, "number": number}
+			if placement:
+				return {
+					"type": "lesson",
+					"lesson": row.lesson,
+					"course": placement["course"],
+					"number": placement["number"],
+				}
 			return {"type": "quiz", "quiz": row.quiz, "course": row.course}
 		if row.requirement_type == "Open Assignment" and row.reference_assignment:
 			return {

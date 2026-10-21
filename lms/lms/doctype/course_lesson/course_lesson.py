@@ -140,39 +140,58 @@ def cleanup_lesson_backreferences(lesson: str):
 		pluck="name",
 	):
 		frappe.delete_doc("LMS Homework Source", source_row, ignore_permissions=True)
+	# A RECALLED assignment is doubly frozen (D04): its progress, proofs and
+	# counters are history no later course event may rewrite, so only the live
+	# Link is lifted off its rows -- the immutable lesson_snapshot set first
+	# keeps the original identity -- and nothing else about them changes.
+	# Active assignments read the deletion: their Open Lesson rows go
+	# Unavailable and the counters follow in the same breath, so no live card
+	# keeps a stale "done" over a deleted lesson.
 	snapshot_rows = frappe.get_all(
 		"LMS Homework Requirement",
 		{
 			"parenttype": "LMS Homework Assignment",
 			"lesson": lesson,
 		},
-		pluck="name",
+		["name", "parent", "requirement_type"],
 	)
 	if snapshot_rows:
-		for snapshot_row in snapshot_rows:
-			frappe.db.set_value("LMS Homework Requirement", snapshot_row, "lesson", None)
-		lesson_rows = frappe.get_all(
+		row_names = [row.name for row in snapshot_rows]
+		# The frozen identity first (D04), for every row regardless of its
+		# parent's fate: rows issued before the snapshot column carry it set
+		# right here, and clearing the live link below never loses it.
+		frappe.db.set_value(
 			"LMS Homework Requirement",
-			filters={
-				"name": ("in", snapshot_rows),
-				"requirement_type": "Open Lesson",
-			},
-			pluck="name",
+			{"name": ("in", row_names)},
+			"lesson_snapshot",
+			lesson,
+			update_modified=False,
 		)
-		for lesson_row in lesson_rows:
-			frappe.db.set_value(
-				"LMS Homework Requirement",
-				lesson_row,
-				{
-					"status": "Unavailable",
-					"completed_at": None,
-					"proof_type": None,
-					"proof_name": None,
-				},
+		cancelled_parents = set(
+			frappe.get_all(
+				"LMS Homework Assignment",
+				{"name": ("in", {row.parent for row in snapshot_rows}), "cancelled": 1},
+				pluck="name",
 			)
+		)
+		for row in snapshot_rows:
+			frappe.db.set_value("LMS Homework Requirement", row.name, "lesson", None)
+			if row.parent in cancelled_parents:
+				continue
+			if row.requirement_type == "Open Lesson":
+				frappe.db.set_value(
+					"LMS Homework Requirement",
+					row.name,
+					{
+						"status": "Unavailable",
+						"completed_at": None,
+						"proof_type": None,
+						"proof_name": None,
+					},
+				)
 		checkable = ("Open Lesson", "Pass Quiz", "Open Assignment")
 		completed = ("Completed", "Completed Earlier")
-		for name in {frappe.db.get_value("LMS Homework Requirement", row, "parent") for row in snapshot_rows}:
+		for name in {row.parent for row in snapshot_rows if row.parent not in cancelled_parents}:
 			rows = frappe.get_all(
 				"LMS Homework Requirement",
 				filters={"parent": name, "parenttype": "LMS Homework Assignment"},

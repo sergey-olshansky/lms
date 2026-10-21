@@ -39,7 +39,19 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 
 	def _lesson(self, title, content=None):
 		chapter = self._create_chapter(f"Chapter {title}", self.course.name)
-		self._create_chapter_reference(self.course.name, chapter.name)
+		# T01: every root chapter lands with its OWN idx -- the helper's default
+		# left them all at 1, and everything that orders roots by idx (outline
+		# walk, route numbering, locked-lesson sequencing) becomes
+		# row-order-dependent on a tie. Counting what this course already holds
+		# makes the order deterministic without changing the helper's contract
+		# for the other suites.
+		idx = (
+			frappe.db.count(
+				"Chapter Reference", {"parent": self.course.name, "parenttype": "LMS Course"}
+			)
+			+ 1
+		)
+		self._create_chapter_reference(self.course.name, chapter.name, idx=idx)
 		lesson = self._create_lesson(title, chapter.name, self.course.name, content)
 		self._create_lesson_reference(chapter.name, lesson.name)
 		return lesson
@@ -839,7 +851,16 @@ class TestHomeworkDeepTree(BaseTestUtils, IntegrationTestCase):
 		L2]; Part -> [lesson L3 with an embedded quiz]. Four structural levels,
 		mixed children on the way down."""
 		block = self._section("Block")
-		self._create_chapter_reference(self.course.name, block.name, idx=1)
+		# T01: the lifecycle course already holds root chapters by now -- a
+		# hard idx=1 would tie them and leave this fixture's route numbers to
+		# row order. The next free slot keeps "1-1-1-1" stable.
+		root_idx = (
+			frappe.db.count(
+				"Chapter Reference", {"parent": self.course.name, "parenttype": "LMS Course"}
+			)
+			+ 1
+		)
+		self._create_chapter_reference(self.course.name, block.name, idx=root_idx)
 		chapter = self._section("Chapter", parent_section=block.name)
 		part = self._section("Part", parent_section=chapter.name)
 
@@ -931,7 +952,14 @@ class TestHomeworkRound2(BaseTestUtils, IntegrationTestCase):
 
 	def _lesson(self, title, content=None):
 		chapter = self._create_chapter(f"Chapter {title}", self.course.name)
-		self._create_chapter_reference(self.course.name, chapter.name)
+		# T01: unique root idx, same rationale as the lifecycle class above.
+		idx = (
+			frappe.db.count(
+				"Chapter Reference", {"parent": self.course.name, "parenttype": "LMS Course"}
+			)
+			+ 1
+		)
+		self._create_chapter_reference(self.course.name, chapter.name, idx=idx)
 		lesson = self._create_lesson(title, chapter.name, self.course.name, content)
 		self._create_lesson_reference(chapter.name, lesson.name)
 		return lesson

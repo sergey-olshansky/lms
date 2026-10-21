@@ -15,6 +15,8 @@ const state = vi.hoisted(() => ({
 	result: [] as Record<string, unknown>[],
 	// The submission's quiz, member and counters.
 	docExtras: {} as Record<string, unknown>,
+	// What the narrow grading action (D01) was last called with.
+	grades: null as any,
 	push: vi.fn(),
 	open: vi.fn(),
 }))
@@ -41,6 +43,20 @@ vi.mock('frappe-ui', () => {
 						return
 					}
 					resource.data = state.quizQuestions.data
+				}),
+			}
+			return resource
+		}
+		if (
+			options.url ===
+			'lms.lms.doctype.lms_quiz_submission.lms_quiz_submission.save_submission_grades'
+		) {
+			// D01: grades travel through the narrow action, not the generic
+			// document save -- the test records what the grader hand sent.
+			const resource = {
+				submit: vi.fn((params: any, handlers: any = {}) => {
+					state.grades = params
+					handlers.onSuccess?.()
 				}),
 			}
 			return resource
@@ -203,6 +219,7 @@ beforeEach(() => {
 	state.liveQuestionsParams = []
 	state.result = gradedRows()
 	state.docExtras = {}
+	state.grades = null
 	state.push.mockReset()
 	state.open.mockReset()
 	vi.stubGlobal('open', state.open)
@@ -241,7 +258,13 @@ describe('Quiz submission review', () => {
 		expect(inputs).toHaveLength(1)
 		await inputs[0].setValue('2')
 		expect(state.result[2].marks).toBe('2')
+		// D01: the typed verdict commits through the narrow grading action
+		// once the debounced save fires on unmount.
 		wrapper.unmount()
+		expect(state.grades?.submission).toBe('SUBM-1')
+		expect(state.grades?.grades).toEqual([
+			{ name: state.result[2].name, marks: '2', graded: 1 },
+		])
 	})
 
 	it('fetches the live questions with the submission\'s own quiz', () => {

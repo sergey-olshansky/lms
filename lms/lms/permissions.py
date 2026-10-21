@@ -615,6 +615,13 @@ def file_has_permission(doc, ptype="read", user=None):
 		return user != "Guest"
 
 	if doc.attached_to_doctype != "Course Lesson":
+		# Task #35 (E03): a private solution file is readable by its
+		# assignment's own student and that assignment's teacher alone --
+		# `is_private` only hides it from /files/, the URL guess under
+		# /private/files/ still answers File.has_permission, so this is where
+		# another student's guess is refused.
+		if doc.attached_to_doctype == "LMS Homework Attachment":
+			return _homework_attachment_file_allowed(doc, user)
 		return True
 	if doc.attached_to_field not in INSTRUCTOR_FIELDS:
 		return True
@@ -630,6 +637,30 @@ def file_has_permission(doc, ptype="read", user=None):
 		doc.attached_to_name,
 	)
 	return False
+
+
+def _homework_attachment_file_allowed(doc, user: str) -> bool:
+	"""Who may read one homework solution file (task #35, E03.4): the
+	assignment's student and its teacher (plus privileged staff). The verdict
+	comes from the attachment ROW the file is bound to -- never from the file's
+	owner field alone -- so a guessed URL serves nothing to anyone else."""
+	row = frappe.db.get_value(
+		"LMS Homework Attachment",
+		doc.attached_to_name,
+		["assignment", "student"],
+		as_dict=True,
+	)
+	if not row:
+		# An orphaned binding denies everyone but staff.
+		return user == "Administrator" or has_moderator_role(user)
+	assignment = frappe.db.get_value(
+		"LMS Homework Assignment", row.assignment, ["student", "teacher"], as_dict=True
+	)
+	if not assignment:
+		return user == "Administrator" or has_moderator_role(user)
+	if user in (assignment.student, assignment.teacher):
+		return True
+	return user == "Administrator" or has_moderator_role(user)
 
 
 # --- Authored content -------------------------------------------------------
@@ -1396,4 +1427,63 @@ def homework_assignment_query_conditions(user: str | None = None) -> str:
 	assignment = frappe.qb.DocType("LMS Homework Assignment")
 	member = LiteralValue(frappe.db.escape(user))
 	condition = Bracket((assignment.student == member) | (assignment.teacher == member))
+	return _render(condition)
+
+
+def homework_attachment_has_permission(doc, ptype="read", user=None) -> bool:
+	"""One solution-file row belongs to the (assignment, student) pair it was
+	registered under (task #35, E03).
+
+	DocPerms give the broad reading roles plain read -- a private File bound to
+	this row is served only to readers of THE ROW, so the teacher of the
+	assignment must hold row read for the download to work at all. The hook is
+	the narrow half: any OTHER student or teacher -- someone whose only claim is
+	the same role -- is denied here, and with the row denied, the private bytes
+	stay unreachable whatever URL they guessed. Read-only by construction:
+	nobody but staff holds write/create/delete on the doctype."""
+	user = user or frappe.session.user
+	if _unrestricted_homework_access(user):
+		return True
+	if doc.is_new():
+		return True
+	assignment_name = doc.get("assignment")
+	stored = (
+		frappe.db.get_value(
+			"LMS Homework Assignment",
+			assignment_name,
+			["student", "teacher"],
+			as_dict=True,
+		)
+		if assignment_name
+		else None
+	)
+	if not stored:
+		return False
+	if stored.student == user and doc.get("student", user) == user:
+		return True
+	if stored.teacher == user:
+		return True
+	frappe.logger("lms.security").warning(
+		"Homework attachment denied: user=%s name=%s ptype=%s", user, doc.name, ptype
+	)
+	return False
+
+
+def homework_attachment_query_conditions(user: str | None = None) -> str:
+	"""The row-list mirror of the hook: only rows of assignments this user is
+	the student or the teacher of."""
+	user = user or frappe.session.user
+	if _unrestricted_homework_access(user):
+		return ""
+	assignment = frappe.qb.DocType("LMS Homework Assignment")
+	attachment = frappe.qb.DocType("LMS Homework Attachment")
+	member = LiteralValue(frappe.db.escape(user))
+	own = (
+		frappe.qb.from_(attachment)
+		.select(assignment.name)
+		.inner_join(assignment)
+		.on(attachment.assignment == assignment.name)
+		.where((assignment.student == member) | (assignment.teacher == member))
+	)
+	condition = attachment.name.isin(own)
 	return _render(condition)

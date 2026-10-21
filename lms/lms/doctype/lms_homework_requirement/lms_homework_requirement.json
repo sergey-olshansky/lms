@@ -9,6 +9,7 @@
   "course",
   "chapter_title",
   "lesson",
+  "lesson_snapshot",
   "quiz",
   "label",
   "path",
@@ -48,6 +49,13 @@
    "label": "Lesson",
    "options": "Course Lesson",
    "search_index": 1
+  },
+  {
+   "description": "Immutable snapshot of the lesson id at issue time. The live Link is cleared when the lesson is deleted (D04); this copy keeps the frozen row's original identity for history.",
+   "fieldname": "lesson_snapshot",
+   "fieldtype": "Data",
+   "label": "Lesson Snapshot",
+   "read_only": 1
   },
   {
    "depends_on": "eval:doc.requirement_type == 'Pass Quiz'",

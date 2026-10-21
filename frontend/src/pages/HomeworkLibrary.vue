@@ -138,6 +138,7 @@ import HomeworkGroupsDialog from '@/components/Modals/HomeworkGroupsDialog.vue'
 import HomeworkAssignDialog from '@/components/Modals/HomeworkAssignDialog.vue'
 import { openFormRoute } from '@/composables/useFormRoute'
 import { resourceErrorMessage } from '@/utils/resource'
+import { openExternal } from '@/utils/openExternal'
 
 const router = useRouter()
 const user = inject('$user')
@@ -288,6 +289,12 @@ const rowMenu = (row) =>
 			onClick: () => openForm(row.name),
 		},
 		{
+			// E02: the composition as a PDF with real links to every material.
+			label: __('Download PDF'),
+			icon: 'lucide-file-down',
+			onClick: () => downloadTemplatePdf(row),
+		},
+		{
 			label: __('Create copy'),
 			icon: 'lucide-copy',
 			onClick: () => copyRow(row),
@@ -304,6 +311,18 @@ const rowMenu = (row) =>
 			onClick: () => deleteRow(row),
 		},
 	].filter((item) => (item.condition ? item.condition() : true))
+
+// E02: a plain navigational download -- the server sets Content-Disposition,
+// so opening the method URL hands the browser the file. The shared opener
+// adds the noopener guard and the scheme allowlist every window of the app
+// clears.
+const downloadTemplatePdf = (row) => {
+	openExternal(
+		`/api/method/lms.lms.homework_pdf.download_homework_template_pdf?name=${encodeURIComponent(
+			row.name
+		)}`
+	)
+}
 
 const copyRow = async (row) => {
 	try {

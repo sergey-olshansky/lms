@@ -143,13 +143,19 @@
 					<Button variant="subtle" @click="emit('cancel')">
 						{{ __('Cancel') }}
 					</Button>
+					<!-- U03: an empty confirmation is how the last material is
+					     removed from a draft -- the assignment-time ban is the
+					     server's business, not the picker's. -->
 					<Button
 						variant="solid"
-						:disabled="selected.size === 0"
 						@click="confirmSelection"
 						data-testid="picker-confirm"
 					>
-						{{ __('Add selected ({0})').format(String(selected.size)) }}
+						{{
+							selected.size
+								? __('Add selected ({0})').format(String(selected.size))
+								: __('Save empty selection')
+						}}
 					</Button>
 				</div>
 			</div>
@@ -161,7 +167,9 @@
 import { Button, Checkbox, Dialog, FormControl, call } from 'frappe-ui'
 import { computed, ref, watch } from 'vue'
 import TreeNodeRow from '@/components/HomeworkTreeNodeRow.vue'
+import { createDialog } from '@/utils/dialogs'
 import {
+	checkState,
 	collectLeafKeys,
 	flattenWithPaths,
 	toggleNode,
@@ -333,6 +341,42 @@ const toggleKey = (key, checked) => {
 }
 
 const onNodeToggle = ({ node, checked }) => {
+	// U03: unchecking a whole section drops every material under it in one
+	// click (spec 3.3: show how many selected items this removes); Cancel
+	// leaves the confirmed set untouched. Only an UNCHECK of a checked
+	// container with selected leaves asks -- checking adds, leaf edits are
+	// single items, and neither needs a dialog.
+	if (
+		!checked &&
+		node.type === 'chapter' &&
+		checkState(node, selected.value) === 'checked'
+	) {
+		const leaving = collectLeafKeys(node).filter((key) =>
+			selected.value.has(key)
+		).length
+		if (leaving > 0) {
+			createDialog({
+				title: __('Remove materials'),
+				message: __(
+					'Unchecking "{0}" will remove {1} selected materials from the composition.'
+				).format(node.title, String(leaving)),
+				actions: [
+					{
+						label: __('Cancel'),
+						variant: 'subtle',
+					},
+					{
+						label: __('Remove'),
+						variant: 'solid',
+						onClick: () => {
+							selected.value = toggleNode(node, selected.value, false)
+						},
+					},
+				],
+			})
+			return
+		}
+	}
 	selected.value = toggleNode(node, selected.value, checked)
 }
 

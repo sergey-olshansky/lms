@@ -123,6 +123,7 @@ permission_query_conditions = {
 	"LMS Homework Group": "lms.lms.permissions.homework_group_query_conditions",
 	"LMS Homework": "lms.lms.permissions.homework_query_conditions",
 	"LMS Homework Assignment": "lms.lms.permissions.homework_assignment_query_conditions",
+	"LMS Homework Attachment": "lms.lms.permissions.homework_attachment_query_conditions",
 }
 
 has_permission = {
@@ -150,6 +151,7 @@ has_permission = {
 	"LMS Homework Group": "lms.lms.permissions.homework_group_has_permission",
 	"LMS Homework": "lms.lms.permissions.homework_has_permission",
 	"LMS Homework Assignment": "lms.lms.permissions.homework_assignment_has_permission",
+	"LMS Homework Attachment": "lms.lms.permissions.homework_attachment_has_permission",
 }
 
 # DocType Class

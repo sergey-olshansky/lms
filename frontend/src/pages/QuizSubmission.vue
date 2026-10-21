@@ -110,19 +110,25 @@
 									{{ __('Marks:') }}
 								</span>
 								<!-- Task #35 (C01): a typed value IS the verdict --
-								     including a deliberate 0 -- and writes the row's
-								     graded flag in the same edit; clearing the input
-								     takes the verdict back. The flag survives the Int
-								     serialization that stores an ungraded answer as 0. -->
+							     including a deliberate 0 -- and writes the row's
+							     graded flag in the same edit; clearing the input
+							     takes the verdict back. The flag survives the Int
+							     serialization that stores an ungraded answer as 0.
+							     Task #35 (D01): grades travel through the narrow
+							     save_submission_grades action -- plain Course
+							     Creators hold no write on the doctype, so the
+							     generic document save answers them with 403. -->
 								<FormControl
 									v-if="row.status === 'pending'"
 									v-model="resultRow.marks"
 									type="number"
 									class="w-20"
 									@update:model-value="
-										(value) =>
-											(resultRow.graded =
-												value === null || value === '' ? 0 : 1)
+										(value) => {
+											resultRow.graded =
+												value === null || value === '' ? 0 : 1
+											markRowDirty(resultRow)
+										}
 									"
 								/>
 								<span
@@ -530,12 +536,42 @@ const isOwnSubmission = computed(
 		submissionDetails.doc?.member === user.data?.name
 )
 
+// Task #35 (D01): grades commit through the narrow server action, not the
+// generic document save. Only rows the grader actually touched travel; the
+// endpoint re-checks the reviewer's authority server-side.
+const gradeResource = createResource({
+	url: 'lms.lms.doctype.lms_quiz_submission.lms_quiz_submission.save_submission_grades',
+})
+
+const dirtyRowNames = ref(new Set())
+
+const markRowDirty = (resultRow) => {
+	dirtyRowNames.value.add(resultRow.name)
+	autoSave()
+}
+
 const saveSubmission = (opts = {}) => {
-	if (isOwnSubmission.value) return
-	submissionDetails.save.submit(
-		{},
+	if (isOwnSubmission.value || !dirtyRowNames.value.size) return
+	const byName = new Map(
+		(submissionDetails.doc?.result || []).map((row) => [row.name, row])
+	)
+	const grades = [...dirtyRowNames.value]
+		.map((name) => byName.get(name))
+		.filter(Boolean)
+		.map((row) => ({
+			name: row.name,
+			marks: row.marks ?? 0,
+			graded: row.graded ? 1 : 0,
+		}))
+	if (!grades.length) return
+	gradeResource.submit(
+		{
+			submission: props.submission,
+			grades,
+		},
 		{
 			onSuccess() {
+				dirtyRowNames.value.clear()
 				if (!opts.silent) toast.success(__('Saved'))
 			},
 			onError(err) {
@@ -548,18 +584,11 @@ const saveSubmission = (opts = {}) => {
 // Marks are typed one field at a time, so the grade is committed as it is
 // entered rather than left to a Save the grader may never press.
 const autoSave = useDebounceFn(() => {
-	if (submissionDetails.isDirty) saveSubmission({ silent: true })
+	saveSubmission({ silent: true })
 }, 1000)
 
-watch(
-	() => submissionDetails.isDirty,
-	(dirty) => {
-		if (dirty) autoSave()
-	}
-)
-
 onBeforeUnmount(() => {
-	if (submissionDetails.isDirty) saveSubmission({ silent: true })
+	if (dirtyRowNames.value.size) saveSubmission({ silent: true })
 })
 
 usePageMeta(() => ({

@@ -5,10 +5,13 @@
 				{{ __('You are not permitted to manage homework.') }}
 			</div>
 			<div v-else data-testid="homework-fields" class="space-y-4 text-base">
+				<!-- U03: the server's Data cap, shown and enforced in the input, so a
+				     141st character can never be typed and lost on save. -->
 				<FormControl
 					v-model="form.title"
 					:label="__('Title')"
 					:required="true"
+					maxlength="140"
 				/>
 				<FormControl
 					type="number"
@@ -341,6 +344,12 @@ const saveHomework = (andAssign) => {
 	if (!canManage.value) return
 	if (!String(form.title || '').trim()) {
 		toast.error(__('Title is required'))
+		return
+	}
+	// U03: the input caps typing at 140, this caps paste/drag the same way the
+	// server's Data field does -- both must agree on one limit.
+	if (String(form.title || '').length > 140) {
+		toast.error(__('Title cannot exceed 140 characters'))
 		return
 	}
 	const days = Number(form.days)
