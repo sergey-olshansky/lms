@@ -234,9 +234,13 @@ def _apply_prior_credit(requirements: list[dict], student: str) -> list[dict]:
 
 def source_alive(row) -> bool:
 	"""Whether a requirement's underlying material still resolves by its stable id
-	(spec 8.2: a deleted source reads Unavailable, never silently counts)."""
-	if row.get("requirement_type") == "Open Lesson" and row.get("lesson"):
-		return bool(frappe.db.exists("Course Lesson", row.lesson))
+	(spec 8.2: a deleted source reads Unavailable, never silently counts).
+
+	An Open Lesson row without a lesson id is a snapshot whose material was
+	deleted: the platform's lesson cleanup unlinks the frozen row exactly that
+	way, so absence of the id IS the death marker, not an always-alive row."""
+	if row.get("requirement_type") == "Open Lesson":
+		return bool(row.get("lesson")) and bool(frappe.db.exists("Course Lesson", row.lesson))
 	if row.get("requirement_type") == "Pass Quiz" and row.get("quiz"):
 		return bool(frappe.db.exists("LMS Quiz", row.quiz))
 	if row.get("requirement_type") in ("Reference", "Open Assignment") and row.get("reference_assignment"):

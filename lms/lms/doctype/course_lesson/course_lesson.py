@@ -30,9 +30,9 @@ from lms.lms.permissions import (
 from lms.lms.utils import (
 	get_course_progress,
 	get_editorjs_blocks,
+	get_ordered_lesson_rows,
 	guest_access_allowed,
 	is_demo_course,
-	get_ordered_lesson_rows,
 	moderators_among,
 	recalculate_course_progress,
 	sanitize_editorjs,
@@ -123,6 +123,77 @@ def cleanup_lesson_backreferences(lesson: str):
 	frappe.db.set_value("LMS Quiz", {"lesson": lesson}, "lesson", None)
 	frappe.db.set_value("LMS Enrollment", {"current_lesson": lesson}, "current_lesson", None)
 	frappe.db.set_value("LMS Assignment Submission", {"lesson": lesson}, "lesson", None)
+
+	# Homework snapshots are frozen history (task #35 spec 8.2): the row stays,
+	# readable by its label and path, and reads Unavailable once its material is
+	# gone -- the machine link is cleared so the deletion is not blocked, the
+	# same stance the graded-work rows above take. Only the rows whose material
+	# IS the lesson flip to Unavailable: an embedded quiz row's material is its
+	# quiz, which survives the lesson. Counters follow in the same breath so no
+	# card keeps a stale "done" over a deleted lesson.
+	# Template compositions are editable by design: a source whose material is
+	# gone simply leaves the template (the teacher re-picks); only the issued
+	# snapshots keep their frozen rows.
+	for source_row in frappe.get_all(
+		"LMS Homework Source",
+		{"parenttype": "LMS Homework", "lesson": lesson},
+		pluck="name",
+	):
+		frappe.delete_doc("LMS Homework Source", source_row, ignore_permissions=True)
+	snapshot_rows = frappe.get_all(
+		"LMS Homework Requirement",
+		{
+			"parenttype": "LMS Homework Assignment",
+			"lesson": lesson,
+		},
+		pluck="name",
+	)
+	if snapshot_rows:
+		for snapshot_row in snapshot_rows:
+			frappe.db.set_value("LMS Homework Requirement", snapshot_row, "lesson", None)
+		lesson_rows = frappe.get_all(
+			"LMS Homework Requirement",
+			filters={
+				"name": ("in", snapshot_rows),
+				"requirement_type": "Open Lesson",
+			},
+			pluck="name",
+		)
+		for lesson_row in lesson_rows:
+			frappe.db.set_value(
+				"LMS Homework Requirement",
+				lesson_row,
+				{
+					"status": "Unavailable",
+					"completed_at": None,
+					"proof_type": None,
+					"proof_name": None,
+				},
+			)
+		checkable = ("Open Lesson", "Pass Quiz", "Open Assignment")
+		completed = ("Completed", "Completed Earlier")
+		for name in {frappe.db.get_value("LMS Homework Requirement", row, "parent") for row in snapshot_rows}:
+			rows = frappe.get_all(
+				"LMS Homework Requirement",
+				filters={"parent": name, "parenttype": "LMS Homework Assignment"},
+				fields=["requirement_type", "status"],
+			)
+			rows = [row for row in rows if row.requirement_type in checkable]
+			frappe.db.set_value(
+				"LMS Homework Assignment",
+				name,
+				{
+					"total_requirements": len(rows),
+					"completed_requirements": sum(1 for row in rows if row.status in completed),
+					"lessons_total": sum(1 for row in rows if row.requirement_type == "Open Lesson"),
+					"quizzes_total": sum(1 for row in rows if row.requirement_type == "Pass Quiz"),
+					"quizzes_completed": sum(
+						1
+						for row in rows
+						if row.requirement_type == "Pass Quiz" and row.status in completed
+					),
+				},
+			)
 
 
 def has_permission(doc, ptype="read", user=None):

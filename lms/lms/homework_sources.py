@@ -389,11 +389,17 @@ def expand_requirements(items: list) -> list[dict]:
 	"""Template items -> the frozen requirement rows of one assignment (spec 8.2).
 
 	A lesson becomes one Open Lesson requirement plus one Pass Quiz requirement per
-	student-visible quiz embedded in it at issue time. A standalone quiz becomes one
-	Pass Quiz requirement. A standalone Assignment becomes a Reference row: its own
-	submission UI keeps working, but no automatic condition is invented for it
-	(spec 6.1). The same quiz embedded in two selected lessons yields two rows --
-	both paths stay for navigation, and one passing submission satisfies both (spec 3.4).
+	student-visible quiz embedded in it at issue time, plus one Open Assignment
+	per student-visible written assignment embedded in it (integration finding,
+	round 3: on this stack members reach an assessment only through a
+	student-visible lesson placement or a batch -- the course stamp alone grants
+	authors only -- so an openable written-assignment requirement must ride the
+	lesson that places it). A standalone quiz becomes one Pass Quiz requirement.
+	A standalone stamped Assignment stays pickable for the author, but issuing it
+	to a student is refused with a reason by ``validate_sources_for_student``
+	until the student can actually reach it. The same quiz embedded in two
+	selected lessons yields two rows -- both paths stay for navigation, and one
+	passing submission satisfies both (spec 3.4).
 
 	Chapter titles are snapshotted from the lesson's own chapter at issue time, so the
 	checklist grouping stays readable even if the course is restructured later.
@@ -430,6 +436,19 @@ def expand_requirements(items: list) -> list[dict]:
 						"reference_assignment": None,
 						"label": quiz["title"],
 						"path": f"{base_path} / {quiz['title']}",
+					}
+				)
+			for assignment in _lesson_assignments(item.lesson):
+				rows.append(
+					{
+						"requirement_type": REQUIREMENT_OPEN_ASSIGNMENT,
+						"course": item.get("course"),
+						"chapter_title": chapter_title,
+						"lesson": item.lesson,
+						"quiz": None,
+						"reference_assignment": assignment["name"],
+						"label": assignment["title"],
+						"path": f"{base_path} / {assignment['title']}",
 					}
 				)
 		elif item.get("source_type") == "Quiz" and item.get("quiz"):
@@ -487,6 +506,31 @@ def _lesson_quizzes(lesson: str) -> list[dict]:
 	if not names:
 		return []
 	titles = _titles("LMS Quiz", names)
+	return [{"name": name, "title": titles.get(name, name)} for name in names]
+
+
+def _lesson_assignments(lesson: str) -> list[dict]:
+	"""Student-visible written assignments placed in this lesson: the openable
+	requirement for them rides the lesson, since on this stack a member reaches
+	an assessment through its placement (or a batch), never the course stamp."""
+	rows = frappe.get_all(
+		"LMS Lesson Assessment",
+		filters={
+			"parent": lesson,
+			"parenttype": "Course Lesson",
+			"assessment_type": "LMS Assignment",
+			"instructor_only": 0,
+		},
+		fields=["assessment_name"],
+		order_by="idx",
+	)
+	names: list[str] = []
+	for row in rows:
+		if row.assessment_name not in names:
+			names.append(row.assessment_name)
+	if not names:
+		return []
+	titles = _titles("LMS Assignment", names)
 	return [{"name": name, "title": titles.get(name, name)} for name in names]
 
 

@@ -63,9 +63,19 @@ class TestHomeworkTemplates(BaseTestUtils, IntegrationTestCase):
 		self.assertIn("\n", stored)
 
 	def test_days_validation(self):
-		for bad in (0, -2, 2.5, "7.5", 100000):
+		# Fractional and non-numeric days are refused; on Frappe v17 the typed
+		# API boundary raises FrappeTypeError before the handler body runs, on
+		# older frameworks the handler's own validate_days_raw raises
+		# ValidationError. Either way the raw value never becomes a silent 7.
+		from frappe.exceptions import FrappeTypeError
+
+		for bad in (0, -2, 100000):
 			with self.subTest(days=bad):
 				with self.assertRaises(frappe.ValidationError):
+					self._save(days=bad)
+		for bad in (2.5, "7.5"):
+			with self.subTest(days=bad):
+				with self.assertRaises((frappe.ValidationError, FrappeTypeError)):
 					self._save(days=bad)
 
 	def test_empty_draft_saved_and_flagged(self):
@@ -121,8 +131,10 @@ class TestHomeworkTemplates(BaseTestUtils, IntegrationTestCase):
 		self.assertEqual(row.title, "Original (copy)")
 
 	def test_delete_used_rejected_archive_ok(self):
-		lesson = self._lesson("Archive lesson")
+		frappe.set_user("Administrator")
 		student = self._create_user("hw-student-a@example.com", "Ann", "One", ["LMS Student"])
+		frappe.set_user(self.teacher.email)
+		lesson = self._lesson("Archive lesson")
 		self._create_enrollment(student.email, self.course.name)
 		entry = {
 			"source_type": "Lesson",

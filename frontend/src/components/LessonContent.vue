@@ -32,7 +32,10 @@
 			</div>
 		</div>
 		<div v-else-if="block.includes('{{ Quiz')">
-			<Quiz :quiz="getId(block)" />
+			<Quiz
+				:quiz="getId(block)"
+				@submitted="$emit('submitted')"
+			/>
 		</div>
 		<div
 			v-else-if="block.includes('{{ Video')"
@@ -92,7 +95,7 @@
 		<div v-else v-safe-html:rich="renderMarkdown(block)"></div>
 	</div>
 	<div v-if="quizId">
-		<Quiz :quiz="quizId" />
+		<Quiz :quiz="quizId" @submitted="$emit('submitted')" />
 	</div>
 </template>
 <script setup lang="ts">
@@ -114,6 +117,10 @@ const markdown = new MarkdownIt({
 // The directive sanitizes at the rich level, which is where the anchor-target
 // hook and the form-tag blocklist live. This only does the markdown pass.
 const renderMarkdown = (block: string): string => markdown.render(block)
+
+// B11/C5 follow-up: an embedded quiz's submission travels up to the page, so
+// the homework banner refreshes immediately.
+defineEmits<{ submitted: [] }>()
 
 defineProps<{
 	content: string

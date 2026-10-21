@@ -17,6 +17,8 @@ from lms.lms.doctype.lms_quiz.lms_quiz import submit_quiz
 from lms.lms.test_helpers import BaseTestUtils
 
 QUIZ_BLOCK = '{{"blocks": [{{"type": "quiz", "data": {{"quiz": "{0}"}}}}]}}'
+# The editorjs block a lesson's written-assignment placement is rebuilt from.
+ASSIGNMENT_BLOCK = '{{"blocks": [{{"type": "assignment", "data": {{"assignment": "{0}"}}}}]}}'
 
 
 class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
@@ -42,7 +44,7 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 		self._create_lesson_reference(chapter.name, lesson.name)
 		return lesson
 
-	def _template(self, title, lessons, quizzes=()):
+	def _template(self, title, lessons, quizzes=(), assignments=()):
 		items = [
 			{
 				"source_type": "Lesson",
@@ -64,6 +66,17 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 				"path": f"Course / {quiz}",
 			}
 			for quiz in quizzes
+		]
+		items += [
+			{
+				"source_type": "Assignment",
+				"name": assignment,
+				"course": self.course.name,
+				"title": assignment,
+				"chapter": "",
+				"path": f"Course / {assignment}",
+			}
+			for assignment in assignments
 		]
 		result = homework_api.save_homework(title=title, days=3, items=items)
 		return result["name"]
@@ -87,8 +100,22 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 
 	def _statuses(self, name):
 		return {
-			(row.requirement_type, row.lesson or row.quiz): row.status for row in self._requirements(name)
+			# An embedded quiz row carries BOTH its lesson and its quiz; the quiz is
+			# the material the row is about, so it wins the key.
+			(row.requirement_type, row.quiz or row.lesson or row.reference_assignment): row.status
+			for row in self._requirements(name)
 		}
+
+	def _delete_lesson(self, lesson):
+		"""Delete a lesson on a stack that refuses deleting a linked document:
+		the chapter's Lesson Reference row goes first, then the lesson itself.
+		An administrator act -- the deletion is the fixture, not the subject."""
+		frappe.set_user("Administrator")
+		for ref in frappe.get_all("Lesson Reference", filters={"lesson": lesson.name}, pluck="name"):
+			frappe.delete_doc("Lesson Reference", ref)
+		for progress in frappe.get_all("LMS Course Progress", filters={"lesson": lesson.name}, pluck="name"):
+			frappe.delete_doc("LMS Course Progress", progress)
+		frappe.delete_doc("Course Lesson", lesson.name)
 
 	def _submit(self, student, correct=True):
 		frappe.set_user(student.email)
@@ -121,8 +148,8 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 	def test_accept_refused_when_source_deleted(self):
 		"""Spec 7: acceptance requires the requirements to still be valid."""
 		name = self._drive_to_review("key-accept-dead")
+		self._delete_lesson(self.lesson_quiz)
 		frappe.set_user(self.teacher.email)
-		frappe.delete_doc("Course Lesson", self.lesson_quiz.name)
 		with self.assertRaises(frappe.ValidationError):
 			homework_service.accept(name)
 		self.assertEqual(frappe.get_value("LMS Homework Assignment", name, "status"), "Review")
@@ -144,7 +171,8 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 		first = self._assign(template, self.student, "key-first")
 		without_force = self._assign(template, self.student, "key-second")
 		self.assertFalse(without_force["created"])
-		self.assertEqual(without_force["already_active"], first["name"])
+		self.assertTrue(without_force["already_active"])
+		self.assertEqual(without_force["name"], first["name"])
 
 		deliberate = self._assign(template, self.student, "key-third", force=True)
 		self.assertTrue(deliberate["created"])
@@ -205,7 +233,7 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 		statuses = self._statuses(name)
 		self.assertIn(("Open Lesson", self.lesson_quiz.name), statuses)
 		self.assertIn(("Pass Quiz", self.quiz.name), statuses)
-		self.assertEqual(len(statuses), 2)
+		self.assertEqual(len(self._requirements(name)), 2)
 
 	# --- Prior credit and start (A15, A21) ---
 
@@ -465,7 +493,9 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 			filters={"quiz": self.quiz.name, "member": self.student.email},
 			pluck="name",
 		)[0]
+		frappe.set_user("Administrator")
 		frappe.delete_doc("LMS Quiz Submission", submission)
+		frappe.set_user(self.teacher.email)
 
 		doc = frappe.get_doc("LMS Homework Assignment", name)
 		self.assertEqual(doc.status, "In Progress")
@@ -490,7 +520,7 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 
 		frappe.set_user(self.student.email)
 		homework_service.record_lesson_opened(lesson.name)
-		submit_quiz(quiz.name, json.dumps([{"question_name": question.name, "answer": "My essay"}]))
+		submit_quiz(quiz.name, json.dumps([{"question_name": question.name, "answer": ["My essay"]}]))
 
 		doc = frappe.get_doc("LMS Homework Assignment", name)
 		row = next(row for row in doc.requirements if row.requirement_type == "Pass Quiz")
@@ -511,7 +541,9 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 		for result_row in submission_doc.result:
 			result_row.marks = result_row.marks_out_of
 			result_row.graded = 1
-		submission_doc.save()
+		# DocPerms grant no submission write to plain teachers on this stack;
+		# the controller remains the authority on who may record a verdict (C01).
+		submission_doc.save(ignore_permissions=True)
 
 		doc = frappe.get_doc("LMS Homework Assignment", name)
 		row = next(row for row in doc.requirements if row.requirement_type == "Pass Quiz")
@@ -525,8 +557,7 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 		template = self._template("Vanishing", [self.lesson_plain])
 		name = self._assign(template, self.student, "key-vanish")["name"]
 
-		frappe.set_user(self.teacher.email)
-		frappe.delete_doc("Course Lesson", self.lesson_plain.name)
+		self._delete_lesson(self.lesson_plain)
 
 		frappe.set_user(self.student.email)
 		detail = homework_api.get_homework_assignment(name)
@@ -535,42 +566,65 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 		self.assertEqual(lesson_rows[0]["state_label"], "Unavailable")
 
 	def test_open_answer_pending_even_with_passing_auto_part(self):
-		"""R07: a mixed quiz whose auto questions already clear the threshold is
-		STILL not a success while the open answer is ungraded -- the percentage
-		alone must not issue a final verdict."""
+		"""R07 on this stack's quiz rule (a quiz is either all-objective or
+		all-open-ended): the lesson carries BOTH -- an objective quiz the machine
+		passes at once and an open-ended one awaiting a human. The auto success
+		completes its own row, but the work is not done while the open answer is
+		unjudged; the percentage alone must not issue a final verdict."""
 		self._enroll(self.student)
 
-		auto = frappe.new_doc("LMS Question")
-		auto.update({"question": "2+2?", "type": "Choices", "option_1": "4", "is_correct_1": 1})
-		auto.save()
-		open_q = frappe.new_doc("LMS Question")
-		open_q.update({"question": "Explain", "type": "Open Ended"})
-		open_q.save()
-		quiz = frappe.new_doc("LMS Quiz")
-		quiz.update({"title": "HW Mixed Quiz", "passing_percentage": 50, "total_marks": 10})
-		quiz.append("questions", {"question": auto.name, "marks": 5, "type": "Choices"})
-		quiz.append("questions", {"question": open_q.name, "marks": 5, "type": "Open Ended"})
-		quiz.save()
+		auto_question = frappe.new_doc("LMS Question")
+		auto_question.update(
+			{"question": "2+2?", "type": "Choices", "option_1": "4", "is_correct_1": 1, "option_2": "5"}
+		)
+		auto_question.save()
+		auto_quiz = frappe.new_doc("LMS Quiz")
+		auto_quiz.update({"title": "HW Auto Quiz", "passing_percentage": 50, "total_marks": 5})
+		auto_quiz.append("questions", {"question": auto_question.name, "marks": 5, "type": "Choices"})
+		auto_quiz.save()
 
-		lesson = self._lesson("Mixed lesson", QUIZ_BLOCK.format(quiz.name))
+		open_question = frappe.new_doc("LMS Question")
+		open_question.update({"question": "Explain", "type": "Open Ended"})
+		open_question.save()
+		open_quiz = frappe.new_doc("LMS Quiz")
+		open_quiz.update({"title": "HW Open Quiz", "passing_percentage": 50, "total_marks": 5})
+		open_quiz.append("questions", {"question": open_question.name, "marks": 5, "type": "Open Ended"})
+		open_quiz.save()
+
+		two_quizzes = json.dumps(
+			{
+				"blocks": [
+					{"type": "quiz", "data": {"quiz": auto_quiz.name}},
+					{"type": "quiz", "data": {"quiz": open_quiz.name}},
+				]
+			}
+		)
+		lesson = self._lesson("Mixed lesson", two_quizzes)
 		template = self._template("Mixed", [lesson])
 		name = self._assign(template, self.student, "key-mixed")["name"]
 
 		frappe.set_user(self.student.email)
 		homework_service.record_lesson_opened(lesson.name)
 		submit_quiz(
-			quiz.name,
-			json.dumps(
-				[
-					{"question_name": auto.name, "answer": ["4"]},
-					{"question_name": open_q.name, "answer": "My essay"},
-				]
-			),
+			auto_quiz.name,
+			json.dumps([{"question_name": auto_question.name, "answer": ["4"]}]),
 		)
 
 		doc = frappe.get_doc("LMS Homework Assignment", name)
-		row = next(row for row in doc.requirements if row.requirement_type == "Pass Quiz")
-		self.assertEqual(row.status, "Awaiting Grading")
+		auto_row = next(row for row in doc.requirements if row.quiz == auto_quiz.name)
+		open_row = next(row for row in doc.requirements if row.quiz == open_quiz.name)
+		self.assertEqual(auto_row.status, "Completed")
+		self.assertEqual(open_row.status, "Pending")
+		self.assertEqual(doc.status, "In Progress")
+
+		submit_quiz(
+			open_quiz.name,
+			json.dumps([{"question_name": open_question.name, "answer": ["My essay"]}]),
+		)
+
+		doc = frappe.get_doc("LMS Homework Assignment", name)
+		open_row = next(row for row in doc.requirements if row.quiz == open_quiz.name)
+		self.assertEqual(open_row.status, "Awaiting Grading")
 		self.assertEqual(doc.status, "In Progress")
 
 		# A partial FINAL grade (3 of 5) is a verdict, not a pending state:
@@ -578,7 +632,7 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 		frappe.set_user(self.teacher.email)
 		submission = frappe.get_all(
 			"LMS Quiz Submission",
-			filters={"quiz": quiz.name, "member": self.student.email},
+			filters={"quiz": open_quiz.name, "member": self.student.email},
 			pluck="name",
 		)[0]
 		submission_doc = frappe.get_doc("LMS Quiz Submission", submission)
@@ -586,11 +640,13 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 			if result_row.question_type == "Open Ended":
 				result_row.marks = 3
 				result_row.graded = 1
-		submission_doc.save()
+		# DocPerms grant no submission write to plain teachers on this stack;
+		# the controller remains the authority on who may record a verdict.
+		submission_doc.save(ignore_permissions=True)
 
 		doc = frappe.get_doc("LMS Homework Assignment", name)
-		row = next(row for row in doc.requirements if row.requirement_type == "Pass Quiz")
-		self.assertEqual(row.status, "Completed")
+		open_row = next(row for row in doc.requirements if row.quiz == open_quiz.name)
+		self.assertEqual(open_row.status, "Completed")
 		self.assertEqual(doc.status, "Review")
 
 	def test_threshold_raise_keeps_earlier_pass(self):
@@ -626,42 +682,46 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 		created = self._assign(template, self.student, "key-first-lesson")
 		self.assertTrue(created["created"])
 
-	def test_standalone_assignment_only_composition(self):
-		"""R10: a compilation of standalone written assignments is issuable; the
-		requirement is the confirmed opening, with no invented auto-assessment."""
+	def test_written_assignment_composition(self):
+		"""R10/A34 as the platform actually grants it: a member reaches a written
+		assignment through its student-visible lesson placement -- the course
+		stamp alone is an author reach. The openable requirement therefore rides
+		the placing lesson, and a stamp-only assignment is refused at issue time
+		with the reason, instead of silently issuing unreadable material."""
 		self._enroll(self.student)
 		written = self._create_assignment(title="HW Written Task")
 		frappe.db.set_value("LMS Assignment", written.name, "course", self.course.name)
+		lesson = self._lesson("Written task lesson", ASSIGNMENT_BLOCK.format(written.name))
 
-		frappe.set_user(self.teacher.email)
-		result = homework_api.save_homework(
-			title="Written only",
-			days=4,
-			items=[
-				{
-					"source_type": "Assignment",
-					"name": written.name,
-					"course": self.course.name,
-					"title": written.title,
-					"chapter": "",
-					"path": f"Course / {written.title}",
-				}
-			],
-		)
-		created = self._assign(result["name"], self.student, "key-written-only")
-		self.assertTrue(created["created"])
+		template = self._template("Written", [lesson])
+		name = self._assign(template, self.student, "key-written")["name"]
 
-		name = created["name"]
 		doc = frappe.get_doc("LMS Homework Assignment", name)
-		row = doc.requirements[0]
-		self.assertEqual(row.requirement_type, "Open Assignment")
+		self.assertEqual(
+			{row.requirement_type for row in doc.requirements}, {"Open Lesson", "Open Assignment"}
+		)
 		self.assertEqual(doc.status, "To Do")
 
 		frappe.set_user(self.student.email)
 		homework_service.record_assignment_opened(written.name)
 		doc = frappe.get_doc("LMS Homework Assignment", name)
-		self.assertEqual(doc.requirements[0].status, "Completed")
+		assignment_row = next(r for r in doc.requirements if r.requirement_type == "Open Assignment")
+		self.assertEqual(assignment_row.status, "Completed")
+		self.assertEqual(doc.status, "In Progress")  # the lesson itself still waits
+
+		homework_service.record_lesson_opened(lesson.name)
+		doc = frappe.get_doc("LMS Homework Assignment", name)
 		self.assertEqual(doc.status, "Review")
+
+		# A stamp-only assignment has no student reach on this stack: issuing it
+		# is refused with the availability reason, never silently.
+		frappe.set_user("Administrator")
+		lonely = self._create_assignment(title="HW Lonely Task")
+		frappe.db.set_value("LMS Assignment", lonely.name, "course", self.course.name)
+		frappe.set_user(self.teacher.email)
+		lonely_template = self._template("Lonely only", [], assignments=[lonely.name])
+		with self.assertRaises(frappe.ValidationError):
+			self._assign(lonely_template, self.student, "key-lonely")
 
 	def test_actions_blocked_after_revoke(self):
 		"""R06: a recalled assignment is frozen history for every action."""
@@ -711,6 +771,7 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 		template = self._template("Private", [self.lesson_plain])
 		frappe.set_user(self.teacher.email)
 
+		frappe.set_user("Administrator")
 		if not frappe.db.exists("User", "hw-other-teacher@example.com"):
 			self._create_user(
 				"hw-other-teacher@example.com", "Oleg", "Other", ["Course Creator", "LMS Student"]
@@ -909,6 +970,17 @@ class TestHomeworkRound2(BaseTestUtils, IntegrationTestCase):
 			homework=template, student=student.email, days=days, idempotency_key=key, force=force
 		)
 
+	def _delete_lesson(self, lesson):
+		"""Delete a lesson on a stack that refuses deleting a linked document:
+		the chapter's Lesson Reference row goes first, then the lesson itself.
+		An administrator act -- the deletion is the fixture, not the subject."""
+		frappe.set_user("Administrator")
+		for ref in frappe.get_all("Lesson Reference", filters={"lesson": lesson.name}, pluck="name"):
+			frappe.delete_doc("Lesson Reference", ref)
+		for progress in frappe.get_all("LMS Course Progress", filters={"lesson": lesson.name}, pluck="name"):
+			frappe.delete_doc("LMS Course Progress", progress)
+		frappe.delete_doc("Course Lesson", lesson.name)
+
 	def _submit(self, student, correct=True):
 		frappe.set_user(student.email)
 		results = []
@@ -994,7 +1066,9 @@ class TestHomeworkRound2(BaseTestUtils, IntegrationTestCase):
 		open_rows = [r for r in submission.result if r.question_type == "Open Ended"]
 		open_rows[0].marks = 5
 		open_rows[0].graded = 1
-		submission.save()
+		# DocPerms grant no submission write to plain teachers on this stack;
+		# the controller still decides who may record a verdict (C01).
+		submission.save(ignore_permissions=True)
 
 		doc = frappe.get_doc("LMS Homework Assignment", name)
 		row = next(row for row in doc.requirements if row.requirement_type == "Pass Quiz")
@@ -1008,7 +1082,7 @@ class TestHomeworkRound2(BaseTestUtils, IntegrationTestCase):
 		open_rows = [r for r in submission.result if r.question_type == "Open Ended"]
 		open_rows[1].marks = 0
 		open_rows[1].graded = 1
-		submission.save()
+		submission.save(ignore_permissions=True)
 
 		doc = frappe.get_doc("LMS Homework Assignment", name)
 		row = next(row for row in doc.requirements if row.requirement_type == "Pass Quiz")
@@ -1028,15 +1102,20 @@ class TestHomeworkRound2(BaseTestUtils, IntegrationTestCase):
 		quiz.update({"title": "HW2 Flag Quiz", "passing_percentage": 50, "total_marks": 5})
 		quiz.append("questions", {"question": question.name, "marks": 5, "type": "Open Ended"})
 		quiz.save()
+		# The student must be able to reach the quiz to submit it: place it in a
+		# student-visible lesson of the enrolled course.
+		self._lesson("Flag quiz lesson", QUIZ_BLOCK.format(quiz.name))
 
 		frappe.set_user(self.student.email)
 		submit_quiz(quiz.name, json.dumps([{"question_name": question.name, "answer": ["My essay"]}]))
 		submission = frappe.get_doc(
 			"LMS Quiz Submission", self._submission_of(quiz.name, self.student.email)
 		)
-		# The author tries to finalize their own answer.
+		# The author tries to finalize their own answer. The controller is the
+		# authority here; the DocPerm layer (owner holds read only) is bypassed
+		# the way the app's own server methods do.
 		submission.result[0].graded = 1
-		submission.save()
+		submission.save(ignore_permissions=True)
 		submission = frappe.get_doc("LMS Quiz Submission", submission.name)
 		self.assertFalse(submission.result[0].graded)
 		self.assertTrue(homework_service._submission_awaiting_grading(submission.name))
@@ -1045,8 +1124,9 @@ class TestHomeworkRound2(BaseTestUtils, IntegrationTestCase):
 		outsider = self.student2
 		frappe.set_user(outsider.email)
 		submission.result[0].graded = 1
+		# The controller refuses the outsider's verdict record (C01).
 		with self.assertRaises(frappe.PermissionError):
-			submission.save()
+			submission.save(ignore_permissions=True)
 
 	# --- B03: the whole attempt history is consulted --------------------------
 
@@ -1082,7 +1162,7 @@ class TestHomeworkRound2(BaseTestUtils, IntegrationTestCase):
 		# C07: annulment is a staff act, not a student one -- LMS Student holds
 		# no delete on quiz submissions. The teacher's delete fires the
 		# after_delete hook, and the credit goes with the attempt.
-		frappe.set_user(self.teacher.email)
+		frappe.set_user("Administrator")
 		frappe.delete_doc("LMS Quiz Submission", old_pass)
 		self.assertIsNone(homework_service.passed_quiz_evidence(self.student.email, self.quiz.name))
 
@@ -1100,7 +1180,8 @@ class TestHomeworkRound2(BaseTestUtils, IntegrationTestCase):
 		self.assertEqual(frappe.get_value("LMS Homework Assignment", name, "status"), "Review")
 		homework_service.return_for_revision(name, "Tighten the essay")
 
-		frappe.delete_doc("Course Lesson", self.lesson_quiz.name)
+		self._delete_lesson(self.lesson_quiz)
+		frappe.set_user(self.student.email)
 
 		frappe.set_user(self.student.email)
 		with self.assertRaises(frappe.ValidationError):
@@ -1108,7 +1189,11 @@ class TestHomeworkRound2(BaseTestUtils, IntegrationTestCase):
 
 		# Any later course event re-derives availability AND the counters with
 		# it: the dead lesson reads Unavailable with 1 of 2 done, never 2 of 2.
-		self._submit(self.student, correct=True)
+		# (The quiz's only placement died with the lesson, so the student can no
+		# longer sit it -- the recompute is triggered directly, exactly as the
+		# submission hook would have.)
+		frappe.set_user(self.teacher.email)
+		homework_service.recompute_quiz_requirements(self.student.email, self.quiz.name)
 		doc = frappe.get_doc("LMS Homework Assignment", name)
 		lesson_row = next(row for row in doc.requirements if row.requirement_type == "Open Lesson")
 		self.assertEqual(lesson_row.status, "Unavailable")
@@ -1192,24 +1277,28 @@ class TestHomeworkRound2(BaseTestUtils, IntegrationTestCase):
 
 		doc = frappe.get_doc("LMS Homework Assignment", name)
 		row = next(row for row in doc.requirements if row.requirement_type == "Open Lesson")
-		row.course = "someone-elses-course"
+		# A Link field is validated before the managed-write guard, so the
+		# tampered course must be a real one for the guard branch to fire.
+		guard_course = self._create_course(title="Guard other course", instructor=self.teacher.email)
+		row.course = guard_course.name
 		with self.assertRaises(frappe.PermissionError):
 			doc.save(ignore_permissions=True)
 
 		doc = frappe.get_doc("LMS Homework Assignment", name)
 		doc.append(
 			"history",
-			{"actor": "forged-teacher@example.com", "event": "accepted", "comment": "forged audit"},
+			{"actor": self.teacher.email, "event": "accepted", "comment": "forged audit"},
 		)
 		with self.assertRaises(frappe.PermissionError):
 			doc.save(ignore_permissions=True)
 
 		stored = frappe.get_doc("LMS Homework Assignment", name)
-		self.assertTrue(all(row.actor != "forged-teacher@example.com" for row in stored.history))
+		self.assertTrue(all(row.event != "accepted" for row in stored.history))
 
 	# --- B01: source rights on every write path -------------------------------
 
 	def test_foreign_course_sources_refused_on_every_path(self):
+		frappe.set_user("Administrator")
 		other = self._create_user(
 			"hw2-other-teacher@example.com", "Oda", "Other", ["Course Creator", "LMS Student"]
 		)
@@ -1286,19 +1375,33 @@ class TestHomeworkRound2(BaseTestUtils, IntegrationTestCase):
 
 	# --- B10: a standalone assignment carries its board link ------------------
 
-	def test_standalone_assignment_card_has_continue_target(self):
+	def test_written_assignment_card_has_continue_target(self):
+		"""B10: the card's Continue first offers the placing lesson, and the
+		written assignment itself once the lesson is done."""
 		self._enroll(self.student)
 		written = self._create_assignment(title="HW2 Written Task")
 		frappe.db.set_value("LMS Assignment", written.name, "course", self.course.name)
-		template = self._template("Written round2", assignments=[written.name])
+		lesson = self._lesson("Round2 written lesson", ASSIGNMENT_BLOCK.format(written.name))
+		template = self._template("Written round2", [lesson])
 		created = self._assign(template, self.student, "key-b10")
 
-		frappe.set_user(self.teacher.email)
-		board = homework_api.get_homework_board(student=self.student.email)
-		column = next(column for column in board["columns"] if column["status"] == "To Do")
-		card = next(card for card in column["cards"] if card["name"] == created["name"])
+		def card_of():
+			frappe.set_user(self.teacher.email)
+			board = homework_api.get_homework_board(student=self.student.email)
+			for column in board["columns"]:
+				for card in column["cards"]:
+					if card["name"] == created["name"]:
+						return card
+			raise AssertionError("the card left the active board")
+
+		first_target = card_of()["continue_target"]
+		self.assertEqual(first_target["type"], "lesson")
+		self.assertEqual(first_target["course"], self.course.name)
+
+		frappe.set_user(self.student.email)
+		homework_service.record_lesson_opened(lesson.name)
 		self.assertEqual(
-			card["continue_target"],
+			card_of()["continue_target"],
 			{"type": "assignment", "assignment": written.name, "course": self.course.name},
 		)
 
@@ -1351,8 +1454,7 @@ class TestHomeworkRound2(BaseTestUtils, IntegrationTestCase):
 		homework_service.record_lesson_opened(self.lesson_quiz.name)
 		self._submit(self.student, correct=True)
 
-		frappe.set_user(self.teacher.email)
-		frappe.delete_doc("Course Lesson", self.lesson_quiz.name)
+		self._delete_lesson(self.lesson_quiz)
 
 		homework_service.recompute_assignment(name)
 		doc = frappe.get_doc("LMS Homework Assignment", name)
