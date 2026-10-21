@@ -18,20 +18,14 @@
 		</PageHeader>
 
 		<!-- Task #35: the homework context rides in ?hw=, so the way back to the
-		assignment is one click from any lesson of the composition (spec 5.3.6).
-		The query survives quiz submits (same page) and prev/next navigation. -->
-		<router-link
+		assignment is one click from any lesson of the composition (spec 5.3.6),
+		with live progress beside it. The query survives quiz submits (same page)
+		and prev/next navigation. -->
+		<HomeworkContextBanner
 			v-if="homeworkContext"
-			:to="{
-				name: 'HomeworkDetail',
-				params: { assignmentID: homeworkContext },
-			}"
-			class="flex items-center gap-2 border-b bg-surface-gray-1 px-5 py-2 text-sm text-ink-gray-7 transition-colors hover:bg-surface-gray-2"
+			:assignment-id="homeworkContext"
 			data-testid="homework-back-banner"
-		>
-			<span class="lucide-clipboard-list size-4" aria-hidden="true" />
-			{{ __('Back to homework') }}
-		</router-link>
+		/>
 
 		<div
 			v-if="isMobile && lessonTotal"
@@ -416,6 +410,7 @@ import LessonNavButtons from '@/components/LessonNavButtons.vue'
 import StudentLessonSidebar from '@/components/StudentLessonSidebar.vue'
 import BottomSheet from '@/components/BottomSheet.vue'
 import PageHeader from '@/components/Layouts/pages/PageHeader.vue'
+import HomeworkContextBanner from '@/components/HomeworkContextBanner.vue'
 import HeaderButton from '@/components/HeaderButton.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 import Notes from '@/components/Notes/Notes.vue'

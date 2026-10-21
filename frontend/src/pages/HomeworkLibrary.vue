@@ -109,7 +109,7 @@
 		</template>
 	</ListPage>
 
-	<router-view @created="reload" />
+	<router-view @created="resetAndReload" />
 
 	<HomeworkGroupsDialog
 		:open="groupsOpen"
@@ -171,8 +171,13 @@ watch([search, groupFilter, archivedOnly], () => {
 			archived: archivedOnly.value ? 1 : undefined,
 		},
 	})
-	offset.value = 0
-	reload()
+	resetAndReload()
+})
+
+// A page-size change re-reads from the top: the already loaded page and the
+// requested size would otherwise disagree (R12).
+watch(pageLength, () => {
+	resetAndReload()
 })
 
 const library = createResource({
@@ -182,7 +187,7 @@ const library = createResource({
 		group: groupFilter.value || null,
 		archived: archivedOnly.value,
 		limit: pageLength.value,
-		offset: offset.value,
+		offset: rows.value.length,
 	}),
 	onSuccess(data) {
 		if (offset.value === 0) rows.value = data.rows
@@ -195,12 +200,23 @@ const library = createResource({
 	},
 })
 
-const reload = () => library.reload()
-const loadMore = () => {
-	offset.value += pageLength.value
+const resetAndReload = () => {
+	rows.value = []
+	offset.value = 0
 	library.reload()
 }
-const hasMore = computed(() => offset.value + rows.value.length < total.value)
+
+const reload = () => {
+	offset.value = rows.value.length
+	library.reload()
+}
+const loadMore = () => {
+	offset.value = rows.value.length
+	library.reload()
+}
+// R12: "how much is loaded" is rows.length alone -- offset double-counted it,
+// hiding the last page of a 60-row library at 25 per page.
+const hasMore = computed(() => rows.value.length < total.value)
 
 const groups = createResource({
 	url: 'lms.lms.homework_api.list_homework_groups',
@@ -216,8 +232,7 @@ const groupFilterOptions = computed(() => [
 
 const reloadGroupsAndRows = () => {
 	groups.reload()
-	offset.value = 0
-	reload()
+	resetAndReload()
 }
 
 const columns = computed(() => [
@@ -294,8 +309,7 @@ const copyRow = async (row) => {
 	try {
 		await callAction('lms.lms.homework_api.copy_homework', { name: row.name })
 		toast.success(__('Copy created'))
-		offset.value = 0
-		reload()
+		resetAndReload()
 	} catch (err) {
 		toast.error(resourceErrorMessage(err, __('Error')))
 	}
@@ -308,8 +322,7 @@ const archiveRow = async (row) => {
 			archived: !row.archived,
 		})
 		toast.success(row.archived ? __('Restored from archive') : __('Archived'))
-		offset.value = 0
-		reload()
+		resetAndReload()
 	} catch (err) {
 		toast.error(resourceErrorMessage(err, __('Error')))
 	}
@@ -320,8 +333,7 @@ const deleteRow = async (row) => {
 	try {
 		await callAction('lms.lms.homework_api.delete_homework', { name: row.name })
 		toast.success(__('Homework deleted'))
-		offset.value = 0
-		reload()
+		resetAndReload()
 	} catch (err) {
 		toast.error(resourceErrorMessage(err, __('Error')))
 	}

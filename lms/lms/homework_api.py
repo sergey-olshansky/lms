@@ -153,55 +153,81 @@ def _group_titles(rows: list) -> None:
 
 
 def _compose_library_counts(rows: list) -> None:
-	"""Materialize the «N lessons · M quizzes» column for one page, batched:
-	embedded quizzes are counted through the placement index, not per-lesson HTML."""
-	lesson_names: list[str] = []
-	by_template: dict[str, list[str]] = {}
+	"""Materialize the «N lessons · M quizzes» column for one page, batched (R20):
+	four queries per page, never one per row. Embedded quizzes are counted through
+	the placement index, not per-lesson HTML; standalone assignments count as
+	materials too (R10)."""
 	template_names = [row.name for row in rows]
 	if not template_names:
 		return
+
+	lessons_by_template: dict[str, set] = {}
+	quizzes_by_template: dict[str, set] = {}
+	assignments_by_template: dict[str, set] = {}
+	lesson_names: set = set()
 	for row in frappe.get_all(
 		"LMS Homework Source",
 		filters={"parent": ("in", template_names), "parenttype": "LMS Homework"},
-		fields=["parent", "source_type", "lesson", "quiz"],
+		fields=["parent", "source_type", "lesson", "quiz", "assignment"],
 	):
 		if row.source_type == "Lesson" and row.lesson:
-			by_template.setdefault(row.parent, []).append(row.lesson)
-			lesson_names.append(row.lesson)
-	by_template = {k: list(set(v)) for k, v in by_template.items()}
+			lessons_by_template.setdefault(row.parent, set()).add(row.lesson)
+			lesson_names.add(row.lesson)
+		elif row.source_type == "Quiz" and row.quiz:
+			quizzes_by_template.setdefault(row.parent, set()).add(row.quiz)
+		elif row.source_type == "Assignment" and row.assignment:
+			assignments_by_template.setdefault(row.parent, set()).add(row.assignment)
 
-	quiz_count_by_lesson: dict[str, int] = {}
+	embedded_by_lesson: dict[str, set] = {}
 	if lesson_names:
 		for placement in frappe.get_all(
 			"LMS Lesson Assessment",
 			filters={
-				"parent": ("in", lesson_names),
+				"parent": ("in", list(lesson_names)),
 				"parenttype": "Course Lesson",
 				"assessment_type": "LMS Quiz",
 				"instructor_only": 0,
 			},
 			fields=["parent", "assessment_name"],
 		):
-			quiz_count_by_lesson.setdefault(placement.parent, set()).add(placement.assessment_name)
+			embedded_by_lesson.setdefault(placement.parent, set()).add(placement.assessment_name)
+
+	issued_templates = set(
+		frappe.get_all(
+			"LMS Homework Assignment",
+			filters={"homework": ("in", template_names)},
+			pluck="homework",
+		)
+	)
 
 	for row in rows:
-		lessons = by_template.get(row.name, [])
-		quizzes = sum(len(quiz_count_by_lesson.get(lesson, set())) for lesson in lessons)
-		# Standalone quiz rows are their own quiz count.
-		standalone = frappe.db.count(
-			"LMS Homework Source",
-			filters={"parent": row.name, "parenttype": "LMS Homework", "source_type": "Quiz"},
-		)
+		lessons = lessons_by_template.get(row.name, set())
+		quizzes = quizzes_by_template.get(row.name, set())
+		assignments = assignments_by_template.get(row.name, set())
+		embedded = set().union(*(embedded_by_lesson.get(lesson, set()) for lesson in lessons))
 		row["lessons_count"] = len(lessons)
-		row["quizzes_count"] = quizzes + standalone
-		row["has_materials"] = bool(lessons or standalone)
-		row["has_assignments"] = bool(frappe.db.exists("LMS Homework Assignment", {"homework": row.name}))
+		row["quizzes_count"] = len(quizzes | embedded)
+		row["assignments_count"] = len(assignments)
+		row["has_materials"] = bool(lessons or quizzes or assignments)
+		row["has_assignments"] = row.name in issued_templates
+
+
+def _require_homework_access(name: str):
+	"""The library door every template operation shares (R03): the owner or
+	privileged staff. ``frappe.get_doc`` reads without a permission check, so a
+	whitelisted endpoint naming another teacher's -- or a student's -- homework
+	must be refused here, not by a hidden button."""
+	doc = frappe.get_doc("LMS Homework", name)
+	if doc.owner != frappe.session.user and not _is_privileged():
+		frappe.throw(_("You can only work with your own homework."), frappe.PermissionError)
+	return doc
 
 
 @frappe.whitelist()
 def get_homework(name: str) -> dict:
-	"""One compilation with its items, for the edit form."""
-	doc = frappe.get_doc("LMS Homework", name)
+	"""One compilation with its items, for the edit form. Each item carries its
+	own working link (R18), so the teacher can view a source before issuing."""
+	doc = _require_homework_access(name)
 	items = [
 		{
 			"source_type": row.source_type,
@@ -212,6 +238,19 @@ def get_homework(name: str) -> dict:
 		}
 		for row in doc.items
 	]
+	numbers = _lesson_numbers_by_course({item["course"] for item in items if item["course"]})
+	for item in items:
+		number = (
+			numbers.get(item["course"], {}).get(item["name"])
+			if item["source_type"] == "Lesson"
+			else None
+		)
+		if number:
+			item["route"] = {"type": "lesson", "course": item["course"], "number": number}
+		elif item["source_type"] == "Quiz":
+			item["route"] = {"type": "quiz", "quiz": item["name"], "course": item["course"]}
+		elif item["source_type"] == "Assignment":
+			item["route"] = {"type": "assignment", "assignment": item["name"], "course": item["course"]}
 	return {
 		"name": doc.name,
 		"title": doc.title,
@@ -234,12 +273,14 @@ def save_homework(
 ) -> dict:
 	"""Create or update a compilation. Re-saving updates in place -- no duplicates
 	(A04, A05). ``days`` is checked raw here: Frappe would silently truncate a
-	fraction before the controller's validate ever sees it."""
+	fraction before the controller's validate ever sees it. The composition is
+	canonicalized from the database (R04): client-sent courses, titles and paths
+	are never trusted, and unknown or unreachable sources are refused."""
 	days = homework_service.validate_days_raw(days)
 
-	normalized = homework_sources.normalize_selection(items or [])
+	normalized = homework_sources.canonicalize_selection(items or [])
 	if name:
-		doc = frappe.get_doc("LMS Homework", name)
+		doc = _require_homework_access(name)
 	else:
 		doc = frappe.new_doc("LMS Homework")
 	doc.title = title
@@ -267,7 +308,7 @@ def save_homework(
 @frappe.whitelist()
 def copy_homework(name: str) -> dict:
 	"""A fresh template with new ids, same sources, no assignments inherited (8.1)."""
-	source = frappe.get_doc("LMS Homework", name)
+	source = _require_homework_access(name)
 	doc = frappe.new_doc("LMS Homework")
 	doc.title = f"{source.title} ({_('copy')})"
 	doc.days = source.days
@@ -294,7 +335,7 @@ def copy_homework(name: str) -> dict:
 def archive_homework(name: str, archived: bool = True) -> dict:
 	"""Archiving hides a compilation from the list and blocks new assignments but
 	never closes or cancels issued ones (spec 8.1)."""
-	doc = frappe.get_doc("LMS Homework", name)
+	doc = _require_homework_access(name)
 	doc.archived = 1 if archived else 0
 	doc.save()
 	return {"name": doc.name, "archived": bool(doc.archived)}
@@ -304,6 +345,7 @@ def archive_homework(name: str, archived: bool = True) -> dict:
 def delete_homework(name: str) -> dict:
 	"""Only a never-issued compilation can be deleted; the doctype refuses a
 	deleted-in-flight history (spec 8.1)."""
+	_require_homework_access(name)
 	frappe.delete_doc("LMS Homework", name)
 	return {"deleted": True}
 
@@ -441,10 +483,13 @@ def get_homework_board(
 	if status:
 		filters["status"] = status
 	if course:
-		filters["name"] = ("in", _assignments_with_course(target, course) or ["__none__"])
+		filters["name"] = ("in", _assignments_with_course(target, course, include_cancelled) or ["__none__"])
+	# R16: overdue is an ACTIVE-work flag -- To Do / In Progress past the deadline.
+	# Work submitted on time is judged late-by-review at most; Done is never
+	# overdue. The filter survives the per-column construction below.
 	if overdue:
 		filters["due_at"] = ("<", now_datetime())
-		filters["status"] = ("!=", STATUS_DONE)
+		filters["status"] = ("in", [STATUS_TO_DO, STATUS_IN_PROGRESS])
 
 	column_offsets = frappe.parse_json(offsets) if offsets else {}
 	now = now_datetime()
@@ -453,8 +498,11 @@ def get_homework_board(
 		if status and status != column_status:
 			columns.append({"status": column_status, "count": 0, "cards": [], "has_more": False})
 			continue
-		column_filters = {k: v for k, v in filters.items() if k != "status"}
+		column_filters = dict(filters)
 		column_filters["status"] = column_status
+		if overdue and column_status not in (STATUS_TO_DO, STATUS_IN_PROGRESS):
+			columns.append({"status": column_status, "count": 0, "cards": [], "has_more": False})
+			continue
 		count = frappe.db.count("LMS Homework Assignment", column_filters)
 		offset = int(column_offsets.get(column_status, 0))
 		rows = frappe.get_all(
@@ -524,33 +572,71 @@ def _attach_continue_targets(rows: list) -> None:
 				targets[row.parent] = {"type": "lesson", "course": row.course, "number": number}
 			else:
 				targets[row.parent] = {"type": "quiz", "quiz": row.quiz, "course": row.course}
+		elif row.requirement_type == "Open Assignment" and row.reference_assignment:
+			targets[row.parent] = {
+				"type": "assignment",
+				"assignment": row.reference_assignment,
+				"course": row.course,
+			}
 	for row in rows:
 		row["continue_target"] = targets.get(row.name)
 
 
 def _lesson_numbers_by_course(courses: set) -> dict[str, dict[str, str]]:
-	"""course -> {lesson name -> route number} straight out of the app's own
-	outline builder, so a homework link and the course sidebar can never disagree
-	-- including task #28's multi-segment numbers ("2-1-3": section path 2-1,
-	third lesson)."""
-	from lms.lms.utils import get_course_outline
+	"""course -> {lesson name -> route number} with the outline's own numbering
+	rules, including task #28's multi-segment numbers ("2-1-3": section path 2-1,
+	third lesson) -- but through the NARROW identity queries (R20), never
+	get_course_outline, which would drag every lesson's body/content along just
+	to label a link."""
+	from lms.lms.utils import get_outline_sections
 
 	maps: dict[str, dict[str, str]] = {}
 	for course in courses:
+		roots = frappe.get_all(
+			"Chapter Reference",
+			filters={"parent": course},
+			fields=["chapter", "idx"],
+			order_by="idx",
+		)
+		root_names = [row.chapter for row in roots]
+		section_rows = get_outline_sections(root_names) if root_names else []
+		all_sections = root_names + [row.name for row in section_rows]
+		lesson_rows = (
+			frappe.get_all(
+				"Lesson Reference",
+				filters={"parent": ("in", all_sections), "parenttype": "Course Chapter"},
+				fields=["parent", "idx", "lesson"],
+				order_by="parent, idx",
+			)
+			if all_sections
+			else []
+		)
+
+		lessons_by_section: dict[str, list] = {}
+		sections_by_parent: dict[str, list] = {}
+		for row in lesson_rows:
+			if row.lesson:
+				lessons_by_section.setdefault(row.parent, []).append(row)
+		for row in section_rows:
+			sections_by_parent.setdefault(row.chapter_name, []).append(row)
+
 		numbers: dict[str, str] = {}
 
-		def walk(sections) -> None:
-			for section in sections or []:
-				for lesson in section.get("lessons") or []:
-					if lesson.get("number"):
-						numbers[lesson.name] = lesson.number
-				walk(section.get("sections"))
+		def walk(section: str, path: str) -> None:
+			lesson_position = 0
+			section_position = 0
+			for child in sorted(
+				lessons_by_section.get(section, []),
+				key=lambda row: row.idx,
+			):
+				lesson_position += 1
+				numbers[child.lesson] = f"{path}-{lesson_position}"
+			for child in sections_by_parent.get(section, []):
+				section_position += 1
+				walk(child.name, f"{path}-{section_position}")
 
-		try:
-			outline = get_course_outline(course, progress=False)
-		except Exception:
-			outline = []
-		walk(outline)
+		for root in roots:
+			walk(root.chapter, str(root.idx))
 		maps[course] = numbers
 	return maps
 
@@ -569,30 +655,39 @@ def authorize_board(target: str) -> None:
 		frappe.throw(_("You cannot view this student's homework board."), frappe.PermissionError)
 
 
-def _assignments_with_course(student: str, course: str) -> list[str]:
-	rows = frappe.get_all(
-		"LMS Homework Requirement",
-		filters={"parenttype": "LMS Homework Assignment", "course": course},
-		fields=["parent"],
+def _assignments_with_course(student: str, course: str, include_cancelled: bool = False) -> list[str]:
+	# get_all with pluck returns plain strings, not documents (R09).
+	names = set(
+		frappe.get_all(
+			"LMS Homework Requirement",
+			filters={"parenttype": "LMS Homework Assignment", "course": course},
+			pluck="parent",
+		)
 	)
-	names = {row.parent for row in rows}
 	if not names:
 		return []
 	return list(
-		{
-			row.name
-			for row in frappe.get_all(
+		set(
+			frappe.get_all(
 				"LMS Homework Assignment",
-				filters={"student": student, "cancelled": 0, "name": ("in", list(names))},
+				filters={
+					"student": student,
+					"cancelled": 1 if include_cancelled else 0,
+					"name": ("in", list(names)),
+				},
 				pluck="name",
 			)
-		}
+		)
 	)
 
 
 def _decorate_card(row: dict, now) -> None:
 	row["due_at_iso"] = datetime_to_iso(row.due_at)
-	row["overdue"] = bool(row.due_at and row.due_at < now and row.status != STATUS_DONE)
+	# R16: only unfinished active work is overdue; Review/Done are judged by the
+	# submission moment instead (submitted_late), never by the review's length.
+	row["overdue"] = bool(
+		row.due_at and row.due_at < now and row.status in (STATUS_TO_DO, STATUS_IN_PROGRESS)
+	)
 	row["submitted_late"] = bool(
 		row.due_at and row.submitted_for_review_at and row.submitted_for_review_at > row.due_at
 	)
@@ -623,7 +718,7 @@ def get_homework_assignment(name: str) -> dict:
 		"assigned_at_iso": datetime_to_iso(doc.assigned_at),
 		"due_at": doc.due_at,
 		"due_at_iso": datetime_to_iso(doc.due_at),
-		"overdue": bool(doc.due_at and doc.due_at < now and doc.status != STATUS_DONE),
+		"overdue": bool(doc.due_at and doc.due_at < now and doc.status in (STATUS_TO_DO, STATUS_IN_PROGRESS)),
 		"submitted_late": bool(
 			doc.due_at and doc.submitted_for_review_at and doc.submitted_for_review_at > doc.due_at
 		),
@@ -659,15 +754,33 @@ def get_homework_assignment(name: str) -> dict:
 	}
 	# Spec 5.3.3: every material row carries its own working link to the real
 	# course page, not only the first unfinished one. Numbers come from the
-	# outline builder, multi-segment under task #28 ("2-1-3").
+	# outline builder, multi-segment under task #28 ("2-1-3"). Course titles ship
+	# with the assignment itself (R18): a student must not need the teacher's
+	# course list to read their own checklist.
 	course_names = {row.course for row in doc.requirements if row.course}
 	numbers = _lesson_numbers_by_course(course_names)
+	payload["course_titles"] = (
+		{
+			row.name: row.title
+			for row in frappe.get_all(
+				"LMS Course", filters={"name": ("in", list(course_names))}, fields=["name", "title"]
+			)
+		}
+		if course_names
+		else {}
+	)
 	for formatted, row in zip(payload["requirements"], doc.requirements, strict=True):
 		number = numbers.get(row.course, {}).get(row.lesson) if row.lesson else None
 		if number:
 			formatted["route"] = {"type": "lesson", "course": row.course, "number": number}
 		elif row.quiz:
 			formatted["route"] = {"type": "quiz", "quiz": row.quiz, "course": row.course}
+		elif row.reference_assignment:
+			formatted["route"] = {
+				"type": "assignment",
+				"assignment": row.reference_assignment,
+				"course": row.course,
+			}
 	return payload
 
 
@@ -687,6 +800,7 @@ def format_requirement(row) -> dict:
 	}
 	status = row.status if source_alive(row) else "Unavailable"
 	return {
+		"id": row.name,
 		"requirement_type": row.requirement_type,
 		"course": row.course,
 		"chapter_title": row.chapter_title,
@@ -718,6 +832,12 @@ def continue_target(doc) -> dict | None:
 			if number:
 				return {"type": "lesson", "lesson": row.lesson, "course": row.course, "number": number}
 			return {"type": "quiz", "quiz": row.quiz, "course": row.course}
+		if row.requirement_type == "Open Assignment" and row.reference_assignment:
+			return {
+				"type": "assignment",
+				"assignment": row.reference_assignment,
+				"course": row.course,
+			}
 	return None
 
 
@@ -734,6 +854,13 @@ def open_homework(assignment: str) -> dict:
 def record_material_opened(lesson: str) -> dict:
 	"""Called from a successfully loaded lesson page: a confirmed opening."""
 	return homework_service.record_lesson_opened(lesson)
+
+
+@frappe.whitelist()
+def record_assignment_material_opened(assignment: str) -> dict:
+	"""Called from the assignment's own page once the student has it open (R10):
+	a confirmed opening of a standalone written assignment."""
+	return homework_service.record_assignment_opened(assignment)
 
 
 @frappe.whitelist()

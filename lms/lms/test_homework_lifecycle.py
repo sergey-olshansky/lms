@@ -530,6 +530,196 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 		self.assertEqual(lesson_rows[0]["status"], "Unavailable")
 		self.assertEqual(lesson_rows[0]["state_label"], "Unavailable")
 
+	def test_open_answer_pending_even_with_passing_auto_part(self):
+		"""R07: a mixed quiz whose auto questions already clear the threshold is
+		STILL not a success while the open answer is ungraded -- the percentage
+		alone must not issue a final verdict."""
+		self._enroll(self.student)
+
+		auto = frappe.new_doc("LMS Question")
+		auto.update({"question": "2+2?", "type": "Choices", "option_1": "4", "is_correct_1": 1})
+		auto.save()
+		open_q = frappe.new_doc("LMS Question")
+		open_q.update({"question": "Explain", "type": "Open Ended"})
+		open_q.save()
+		quiz = frappe.new_doc("LMS Quiz")
+		quiz.update({"title": "HW Mixed Quiz", "passing_percentage": 50, "total_marks": 10})
+		quiz.append("questions", {"question": auto.name, "marks": 5, "type": "Choices"})
+		quiz.append("questions", {"question": open_q.name, "marks": 5, "type": "Open Ended"})
+		quiz.save()
+
+		lesson = self._lesson("Mixed lesson", QUIZ_BLOCK.format(quiz.name))
+		template = self._template("Mixed", [lesson])
+		name = self._assign(template, self.student, "key-mixed")["name"]
+
+		frappe.set_user(self.student.email)
+		homework_service.record_lesson_opened(lesson.name)
+		submit_quiz(
+			quiz.name,
+			json.dumps(
+				[
+					{"question_name": auto.name, "answer": ["4"]},
+					{"question_name": open_q.name, "answer": "My essay"},
+				]
+			),
+		)
+
+		doc = frappe.get_doc("LMS Homework Assignment", name)
+		row = next(row for row in doc.requirements if row.requirement_type == "Pass Quiz")
+		self.assertEqual(row.status, "Awaiting Grading")
+		self.assertEqual(doc.status, "In Progress")
+
+		# A partial FINAL grade (3 of 5) is a verdict, not a pending state.
+		frappe.set_user(self.teacher.email)
+		submission = frappe.get_all(
+			"LMS Quiz Submission",
+			filters={"quiz": quiz.name, "member": self.student.email},
+			pluck="name",
+		)[0]
+		submission_doc = frappe.get_doc("LMS Quiz Submission", submission)
+		for result_row in submission_doc.result:
+			if result_row.question_type == "Open Ended":
+				result_row.marks = 3
+		submission_doc.save()
+
+		doc = frappe.get_doc("LMS Homework Assignment", name)
+		row = next(row for row in doc.requirements if row.requirement_type == "Pass Quiz")
+		self.assertEqual(row.status, "Completed")
+		self.assertEqual(doc.status, "Review")
+
+	def test_threshold_raise_keeps_earlier_pass(self):
+		"""R07: the verdict is read off the attempt's own snapshotted threshold;
+		raising the live threshold later never un-passes a valid attempt."""
+		self._enroll(self.student)
+		template = self._template("Threshold snapshot", [self.lesson_quiz])
+		name = self._assign(template, self.student, "key-threshold-snapshot")["name"]
+
+		frappe.set_user(self.student.email)
+		homework_service.record_lesson_opened(self.lesson_quiz.name)
+		self._submit(self.student, correct=True)
+		self.assertEqual(frappe.get_value("LMS Homework Assignment", name, "status"), "Review")
+
+		frappe.set_user(self.teacher.email)
+		frappe.db.set_value("LMS Quiz", self.quiz.name, "passing_percentage", 100)
+		homework_service.recompute_quiz_requirements(self.student.email, self.quiz.name)
+		statuses = self._statuses(name)
+		self.assertEqual(statuses[("Pass Quiz", self.quiz.name)], "Completed")
+		self.assertEqual(frappe.get_value("LMS Homework Assignment", name, "status"), "Review")
+
+	def test_locked_unselected_lesson_does_not_block(self):
+		"""R05: only the SELECTED materials gate the issue -- a sequentially
+		locked lesson the composition does not name must not block it."""
+		self._enroll(self.student)
+		frappe.set_user(self.teacher.email)
+		frappe.db.set_value("LMS Course", self.course.name, "enforce_lesson_completion", 1)
+
+		template = self._template("First lesson only", [self.lesson_plain])
+		frappe.set_user(self.teacher.email)
+		precheck = homework_api.precheck_assignment(template, self.student.email, 3)
+		self.assertEqual(precheck["reasons"], [])
+		created = self._assign(template, self.student, "key-first-lesson")
+		self.assertTrue(created["created"])
+
+	def test_standalone_assignment_only_composition(self):
+		"""R10: a compilation of standalone written assignments is issuable; the
+		requirement is the confirmed opening, with no invented auto-assessment."""
+		self._enroll(self.student)
+		written = self._create_assignment(title="HW Written Task")
+		frappe.db.set_value("LMS Assignment", written.name, "course", self.course.name)
+
+		frappe.set_user(self.teacher.email)
+		result = homework_api.save_homework(
+			title="Written only",
+			days=4,
+			items=[
+				{
+					"source_type": "Assignment",
+					"name": written.name,
+					"course": self.course.name,
+					"title": written.title,
+					"chapter": "",
+					"path": f"Course / {written.title}",
+				}
+			],
+		)
+		created = self._assign(result["name"], self.student, "key-written-only")
+		self.assertTrue(created["created"])
+
+		name = created["name"]
+		doc = frappe.get_doc("LMS Homework Assignment", name)
+		row = doc.requirements[0]
+		self.assertEqual(row.requirement_type, "Open Assignment")
+		self.assertEqual(doc.status, "To Do")
+
+		frappe.set_user(self.student.email)
+		homework_service.record_assignment_opened(written.name)
+		doc = frappe.get_doc("LMS Homework Assignment", name)
+		self.assertEqual(doc.requirements[0].status, "Completed")
+		self.assertEqual(doc.status, "Review")
+
+	def test_actions_blocked_after_revoke(self):
+		"""R06: a recalled assignment is frozen history for every action."""
+		name = self._drive_to_review("key-frozen")
+		homework_service.revoke(name, "Issued by mistake")
+
+		frappe.set_user(self.teacher.email)
+		for action in (
+			lambda: homework_service.accept(name),
+			lambda: homework_service.return_for_revision(name, "x"),
+			lambda: homework_service.reopen(name, "x"),
+			lambda: homework_service.change_deadline(name, 9),
+		):
+			with self.assertRaises(frappe.PermissionError):
+				action()
+
+		frappe.set_user(self.student.email)
+		with self.assertRaises(frappe.PermissionError):
+			homework_service.resubmit(name)
+
+	def test_client_cannot_edit_assignment_through_rest(self):
+		"""R02: the managed fields move only through the named actions; a direct
+		document write by the teacher himself is refused."""
+		self._enroll(self.student)
+		template = self._template("REST guard", [self.lesson_plain])
+		name = self._assign(template, self.student, "key-rest-guard")["name"]
+
+		frappe.set_user(self.teacher.email)
+		doc = frappe.get_doc("LMS Homework Assignment", name)
+		doc.status = "Done"
+		with self.assertRaises(frappe.PermissionError):
+			doc.save()
+
+		doc = frappe.get_doc("LMS Homework Assignment", name)
+		doc.needs_revision = 1
+		with self.assertRaises(frappe.PermissionError):
+			doc.save()
+
+		frappe.set_user(self.teacher.email)
+		fresh = frappe.get_doc({"doctype": "LMS Homework Assignment", "student": self.student.email})
+		with self.assertRaises(frappe.PermissionError):
+			fresh.insert()
+
+	def test_foreign_template_access_refused(self):
+		"""R03: the library door is checked per endpoint, not by the list query."""
+		self._enroll(self.student)
+		template = self._template("Private", [self.lesson_plain])
+		frappe.set_user(self.teacher.email)
+
+		if not frappe.db.exists("User", "hw-other-teacher@example.com"):
+			self._create_user(
+				"hw-other-teacher@example.com", "Oleg", "Other", ["Course Creator", "LMS Student"]
+			)
+		frappe.set_user("hw-other-teacher@example.com")
+		with self.assertRaises(frappe.PermissionError):
+			homework_api.get_homework(template)
+		with self.assertRaises(frappe.PermissionError):
+			homework_api.copy_homework(template)
+		with self.assertRaises(frappe.PermissionError):
+			homework_api.archive_homework(template)
+		frappe.set_user(self.student.email)
+		with self.assertRaises(frappe.PermissionError):
+			homework_api.get_homework(template)
+
 	def test_board_counts_and_course_filter(self):
 		self._enroll(self.student)
 		template = self._template("Board counts", [self.lesson_plain])

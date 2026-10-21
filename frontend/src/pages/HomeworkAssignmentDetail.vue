@@ -132,7 +132,7 @@
 						{{ detail.data.last_revision_comment }}
 					</p>
 					<Button
-						v-if="detail.data.viewer_is_student"
+						v-if="detail.data.viewer_is_student && !detail.data.cancelled"
 						variant="outline"
 						size="sm"
 						class="mt-2"
@@ -222,12 +222,11 @@
 										{{ __('Open') }}
 									</router-link>
 									<router-link
-										v-if="
-											row.proof_type === 'LMS Quiz Submission' && row.proof_name
-										"
+										v-if="row.quiz"
 										:to="{
-											name: 'QuizSubmission',
-											params: { submission: row.proof_name },
+											name: 'QuizPage',
+											params: { quizID: row.quiz },
+											query: { hw: props.assignmentID },
 										}"
 										class="shrink-0 text-xs text-ink-gray-5 underline"
 									>
@@ -296,13 +295,11 @@
 												{{ quiz.state_label }}
 											</span>
 											<router-link
-												v-if="
-													quiz.proof_type === 'LMS Quiz Submission' &&
-													quiz.proof_name
-												"
+												v-if="quiz.quiz"
 												:to="{
-													name: 'QuizSubmission',
-													params: { submission: quiz.proof_name },
+													name: 'QuizPage',
+													params: { quizID: quiz.quiz },
+													query: { hw: props.assignmentID },
 												}"
 												class="shrink-0 text-[10px] text-ink-gray-5 underline"
 											>
@@ -442,10 +439,11 @@ import {
 	Dialog,
 	Dropdown,
 	FormControl,
+	call,
 	createResource,
 	toast,
 } from 'frappe-ui'
-import { computed, inject, onMounted, ref } from 'vue'
+import { computed, inject, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/Layouts/pages/PageHeader.vue'
 import { lessonRouteParams } from '@/utils/homeworkSelection'
@@ -484,21 +482,24 @@ const detail = createResource({
 	makeParams: () => ({ name: props.assignmentID }),
 })
 
-const opener = createResource({
-	url: 'lms.lms.homework_api.open_homework',
-	makeParams: () => ({ assignment: props.assignmentID }),
-})
-
 onMounted(async () => {
 	// Start execution on the student's first open, then read the state the
 	// opening produced (a fully pre-credited card arrives already in Review).
+	// frappe-ui's `call` returns a real promise -- wiring resolve/reject through
+	// resource.update() never settles, which used to hang the page before the
+	// detail request could even start (R01). The server decides the role: a
+	// student's open starts the card, a teacher's is refused as a preview.
 	try {
-		await new Promise((resolve, reject) => {
-			opener.update({ onSuccess: resolve, onError: reject })
-			opener.reload()
+		await call('lms.lms.homework_api.open_homework', {
+			assignment: props.assignmentID,
 		})
-	} catch {
-		// A teacher's open is refused by design; the detail still renders.
+	} catch (error) {
+		const message = String(
+			error?.message || error?.messages?.[0] || error || ''
+		)
+		if (!message.includes("student's own opening")) {
+			toast.error(resourceErrorMessage(error, __('Error')))
+		}
 	}
 	detail.reload()
 })
@@ -540,18 +541,10 @@ const groupedRequirements = computed(() => {
 	return groups
 })
 
-const courseTitles = ref({})
+// R18: the course titles ship with the assignment payload itself -- the
+// student's checklist must not depend on the teacher's course list.
+const courseTitles = computed(() => detail.data?.course_titles || {})
 const courseTitle = (name) => courseTitles.value[name] || name
-// Fetch course titles lazily for readable group headings.
-createResource({
-	url: 'lms.lms.homework_api.get_homework_courses',
-	onSuccess(data) {
-		courseTitles.value = Object.fromEntries(
-			data.map((row) => [row.name, row.title])
-		)
-	},
-	auto: true,
-})
 
 const isDone = (row) =>
 	row.status === 'Completed' || row.status === 'Completed Earlier'
@@ -583,6 +576,20 @@ const rowKey = (row) =>
 	`${row.requirement_type}:${
 		row.lesson || row.quiz || row.reference_assignment
 	}`
+
+// R18: a detail left open goes stale while the other side works; a controlled
+// refetch on visibility/focus keeps it current, with listeners cleaned up.
+const refetchIfVisible = () => {
+	if (document.visibilityState === 'visible' && detail.data) detail.reload()
+}
+onMounted(() => {
+	window.addEventListener('focus', refetchIfVisible)
+	document.addEventListener('visibilitychange', refetchIfVisible)
+})
+onUnmounted(() => {
+	window.removeEventListener('focus', refetchIfVisible)
+	document.removeEventListener('visibilitychange', refetchIfVisible)
+})
 
 const breadcrumbs = computed(() => [
 	{ label: __('Homework execution'), route: { name: 'HomeworkExecution' } },
@@ -617,6 +624,13 @@ const rowRoute = (route) => {
 			query: { hw: props.assignmentID },
 		}
 	}
+	if (route.type === 'assignment') {
+		return {
+			name: 'AssignmentSubmission',
+			params: { assignmentID: route.assignment, submissionName: 'new' },
+			query: { hw: props.assignmentID },
+		}
+	}
 	return null
 }
 
@@ -636,6 +650,12 @@ const continueWorking = () => {
 		router.push({
 			name: 'QuizPage',
 			params: { quizID: target.quiz },
+			query: { hw: props.assignmentID },
+		})
+	} else if (target.type === 'assignment' && target.assignment) {
+		router.push({
+			name: 'AssignmentSubmission',
+			params: { assignmentID: target.assignment, submissionName: 'new' },
 			query: { hw: props.assignmentID },
 		})
 	}
@@ -667,7 +687,7 @@ const teacherMenu = computed(() => [
 	},
 ])
 
-const call = (url, params) =>
+const callAction = (url, params) =>
 	new Promise((resolve, reject) => {
 		createResource({
 			url,
@@ -693,7 +713,7 @@ const runAction = async (promise, successMessage) => {
 
 const accept = () =>
 	runAction(
-		call('lms.lms.homework_api.accept_homework', {
+		callAction('lms.lms.homework_api.accept_homework', {
 			assignment: props.assignmentID,
 		}),
 		'Accepted'
@@ -701,7 +721,7 @@ const accept = () =>
 
 const resubmit = () =>
 	runAction(
-		call('lms.lms.homework_api.resubmit_homework', {
+		callAction('lms.lms.homework_api.resubmit_homework', {
 			assignment: props.assignmentID,
 		}),
 		'Sent for review'
@@ -717,7 +737,7 @@ const runCommentAction = () => {
 		}
 		commentDialog.value = ''
 		return runAction(
-			call('lms.lms.homework_api.change_homework_deadline', {
+			callAction('lms.lms.homework_api.change_homework_deadline', {
 				assignment: props.assignmentID,
 				days,
 			}),
@@ -735,7 +755,7 @@ const runCommentAction = () => {
 			? 'lms.lms.homework_api.return_homework'
 			: 'lms.lms.homework_api.reopen_homework'
 	return runAction(
-		call(url, { assignment: props.assignmentID, comment }),
+		callAction(url, { assignment: props.assignmentID, comment }),
 		'Saved'
 	)
 }
@@ -748,7 +768,7 @@ const revoke = async () => {
 	}
 	revokeOpen.value = false
 	await runAction(
-		call('lms.lms.homework_api.revoke_homework', {
+		callAction('lms.lms.homework_api.revoke_homework', {
 			assignment: props.assignmentID,
 			reason,
 		}),

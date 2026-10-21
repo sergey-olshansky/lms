@@ -23,6 +23,7 @@ from frappe import _
 from frappe.utils import cint, now_datetime
 
 from lms.lms.homework_sources import (
+	REQUIREMENT_OPEN_ASSIGNMENT,
 	REQUIREMENT_OPEN_LESSON,
 	REQUIREMENT_PASS_QUIZ,
 	REQUIREMENT_REFERENCE,
@@ -37,7 +38,11 @@ STATUS_DONE = "Done"
 
 COMPLETED_STATUSES = {"Completed", "Completed Earlier"}
 # Reference rows are links, not checkable work: never counted, never gating.
-CHECKABLE_TYPES = {REQUIREMENT_OPEN_LESSON, REQUIREMENT_PASS_QUIZ}
+CHECKABLE_TYPES = {
+	REQUIREMENT_OPEN_LESSON,
+	REQUIREMENT_PASS_QUIZ,
+	REQUIREMENT_OPEN_ASSIGNMENT,
+}
 
 MAX_HOMEWORK_DAYS = 3650
 
@@ -144,12 +149,24 @@ def create_assignment(
 	for row in requirements:
 		assignment.append("requirements", row)
 	assignment.flags.homework_service = True
-	assignment.insert()
+	try:
+		assignment.insert(ignore_permissions=True)
+	except frappe.DuplicateEntryError:
+		# Two tabs confirming the same logical issue race on the unique key (R19):
+		# the loser returns the winner's assignment instead of erroring -- one
+		# logical operation, one card.
+		if not idempotency_key:
+			raise
+		existing = frappe.db.get_value("LMS Homework Assignment", {"assignment_key": idempotency_key})
+		if existing:
+			frappe.clear_last_message()
+			return {"created": False, "name": existing, "idempotent": True}
+		raise
 
 	_refresh_counts(assignment)
 	_add_history(assignment, "assigned", None, STATUS_TO_DO)
 	assignment.flags.homework_service = True
-	assignment.save()
+	assignment.save(ignore_permissions=True)
 
 	return {"created": True, "name": assignment.name}
 
@@ -189,7 +206,7 @@ def source_alive(row) -> bool:
 		return bool(frappe.db.exists("Course Lesson", row.lesson))
 	if row.get("requirement_type") == "Pass Quiz" and row.get("quiz"):
 		return bool(frappe.db.exists("LMS Quiz", row.quiz))
-	if row.get("requirement_type") == "Reference" and row.get("reference_assignment"):
+	if row.get("requirement_type") in ("Reference", "Open Assignment") and row.get("reference_assignment"):
 		return bool(frappe.db.exists("LMS Assignment", row.reference_assignment))
 	return True
 
@@ -198,32 +215,48 @@ def source_alive(row) -> bool:
 
 
 def passed_quiz_evidence(member: str, quiz: str) -> str | None:
-	"""The name of one passing submission, or None.
+	"""The name of one finally-successful submission, or None.
 
-	The rule is the one the app already uses for lesson completion
-	(get_quiz_progress): a saved submission whose percentage meets the quiz's
-	passing threshold. One valid pass is enough; later failed attempts never
-	subtract it (A23) -- the query simply keeps looking for any passing row.
+	Verdicts are read off the saved attempt itself (R07): its own percentage
+	against its own snapshotted passing threshold -- raising the live threshold
+	later never retroactively un-passes a valid attempt -- and only attempts whose
+	manual grading is finished. One final pass is enough; later failed attempts
+	never subtract it (A23).
 	"""
 	if not quiz or not frappe.db.exists("LMS Quiz", quiz):
 		return None
-	passing = frappe.db.get_value("LMS Quiz", quiz, "passing_percentage") or 0
-	return (
-		frappe.get_all(
-			"LMS Quiz Submission",
-			filters={"quiz": quiz, "member": member, "percentage": (">=", passing)},
-			order_by="creation desc",
-			pluck="name",
-			limit=1,
+	candidates = frappe.get_all(
+		"LMS Quiz Submission",
+		filters={"quiz": quiz, "member": member},
+		order_by="creation desc",
+		pluck="name",
+		limit_page_length=50,
+	)
+	for name in candidates:
+		submission = frappe.db.get_value(
+			"LMS Quiz Submission", name, ["percentage", "passing_percentage", "owner"], as_dict=True
 		)
-		or [None]
-	)[0]
+		if not submission:
+			continue
+		threshold = submission.passing_percentage
+		if threshold is None:
+			threshold = frappe.db.get_value("LMS Quiz", quiz, "passing_percentage") or 0
+		if (submission.percentage or 0) < threshold:
+			continue
+		if _submission_awaiting_grading(name):
+			continue
+		return name
+	return None
 
 
 def quiz_awaiting_grading(member: str, quiz: str) -> bool:
-	"""Whether the newest submission has an answered open-ended answer still awaiting
-	marks (spec 6.2): the attempt is not a failure, it is unjudged -- "Ожидает
-	проверки". Mirrors the #34 report's row status without depending on its UI."""
+	"""Whether the newest submission still awaits its manual grading (spec 6.2):
+	the attempt is not a failure, it is unjudged -- "Ожидает проверки".
+
+	The signal is real, not a marks heuristic (R07): an answered open-ended
+	submission is unjudged while nobody but its author has saved it. The member
+	cannot edit a submission after the fact, so any later save is the grader's.
+	A finally graded partial score (3 of 5) is a verdict, not a pending state."""
 	latest = frappe.get_all(
 		"LMS Quiz Submission",
 		filters={"quiz": quiz, "member": member},
@@ -233,19 +266,23 @@ def quiz_awaiting_grading(member: str, quiz: str) -> bool:
 	)
 	if not latest:
 		return False
+	return _submission_awaiting_grading(latest[0])
+
+
+def _submission_awaiting_grading(submission_name: str) -> bool:
+	"""One submission: answered open-ended rows exist and no grader has saved it."""
 	rows = frappe.get_all(
 		"LMS Quiz Result",
-		filters={"parent": latest[0], "parenttype": "LMS Quiz Submission"},
-		fields=["question_type", "answer", "marks", "marks_out_of"],
+		filters={"parent": submission_name, "parenttype": "LMS Quiz Submission"},
+		fields=["question_type", "answer"],
 	)
-	for row in rows:
-		if (
-			row.question_type == "Open Ended"
-			and (row.answer or "").strip()
-			and cint(row.marks) < cint(row.marks_out_of)
-		):
-			return True
-	return False
+	has_open_answer = any(row.question_type == "Open Ended" and (row.answer or "").strip() for row in rows)
+	if not has_open_answer:
+		return False
+	submission = frappe.db.get_value(
+		"LMS Quiz Submission", submission_name, ["owner", "modified_by"], as_dict=True
+	)
+	return bool(submission and submission.modified_by == submission.owner)
 
 
 # --- Student events (spec 6.1, 6.3, 7) ------------------------------------------
@@ -270,7 +307,7 @@ def mark_started(assignment_name: str) -> dict:
 		assignment.status = STATUS_IN_PROGRESS
 	_add_history(assignment, "started", from_status, assignment.status)
 	assignment.flags.homework_service = True
-	assignment.save()
+	assignment.save(ignore_permissions=True)
 
 	# A fully pre-credited composition goes straight through to Review on the same
 	# first opening (A21): both events are recorded, no intermediate screen needed.
@@ -284,14 +321,39 @@ def record_lesson_opened(lesson: str) -> dict:
 	student that includes the lesson -- working the course directly counts just as
 	much as working through the homework link (spec 6.3, A22).
 
-	Two tabs can race on the same row; Frappe's modified-check turns that into a
-	TimestampMismatchError, and each assignment is then re-read and applied once
-	more from its current state -- no rollback, the losing write never landed.
+	The student's right to open THIS lesson is re-checked at event time (R04):
+	revoked enrollment, a later sequential lock or an unpublished course leaves
+	the requirement untouched instead of crediting a visit that was never allowed.
 	"""
+	from lms.lms.permissions import can_access_lesson
+
 	user = frappe.session.user
 	if not lesson or not frappe.db.exists("Course Lesson", lesson):
 		return {"updated": 0}
+	if not can_access_lesson(lesson, user=user):
+		return {"updated": 0}
 
+	return _record_opening_of(user, lesson=lesson)
+
+
+def record_assignment_opened(assignment_ref: str) -> dict:
+	"""A confirmed opening of a standalone written Assignment by the session
+	student (R10): the material is real and addressable, so opening it is the
+	agreed condition -- its own submission UI and grading are untouched (spec 6.1
+	forbids inventing an automatic assessment for the written answer)."""
+	user = frappe.session.user
+	if not assignment_ref or not frappe.db.exists("LMS Assignment", assignment_ref):
+		return {"updated": 0}
+	from lms.lms.permissions import can_access_assessment
+
+	if not can_access_assessment("LMS Assignment", assignment_ref, user=user):
+		return {"updated": 0}
+
+	return _record_opening_of(user, assignment=assignment_ref)
+
+
+def _record_opening_of(user: str, lesson: str | None = None, assignment: str | None = None) -> dict:
+	"""Credit one confirmed opening across the student's active assignments."""
 	assignment_names = frappe.get_all(
 		"LMS Homework Assignment",
 		filters={"student": user, "cancelled": 0, "status": ("in", [STATUS_TO_DO, STATUS_IN_PROGRESS])},
@@ -299,49 +361,53 @@ def record_lesson_opened(lesson: str) -> dict:
 	)
 	updated = 0
 	for name in assignment_names:
-		assignment = frappe.get_doc("LMS Homework Assignment", name)
-		if not _apply_lesson_opening(assignment, lesson):
+		assignment_doc = frappe.get_doc("LMS Homework Assignment", name)
+		if not _apply_material_opening(assignment_doc, lesson=lesson, assignment=assignment):
 			continue
 		try:
-			assignment.flags.homework_service = True
-			assignment.save()
+			assignment_doc.flags.homework_service = True
+			assignment_doc.save(ignore_permissions=True)
 		except frappe.TimestampMismatchError:
-			assignment = frappe.get_doc("LMS Homework Assignment", name)
-			if not _apply_lesson_opening(assignment, lesson):
+			assignment_doc = frappe.get_doc("LMS Homework Assignment", name)
+			if not _apply_material_opening(assignment_doc, lesson=lesson, assignment=assignment):
 				continue
-			assignment.flags.homework_service = True
-			assignment.save()
+			assignment_doc.flags.homework_service = True
+			assignment_doc.save(ignore_permissions=True)
 		updated += 1
-		_maybe_auto_review(assignment)
+		_maybe_auto_review(assignment_doc)
 	return {"updated": updated}
 
 
-def _apply_lesson_opening(assignment, lesson: str) -> bool:
+def _apply_material_opening(assignment_doc, lesson: str | None = None, assignment: str | None = None) -> bool:
 	"""Idempotently credit the opening on one assignment. Returns False when the
 	row has nothing left to do here (also the dedupe across concurrent events)."""
 	touched = False
-	for row in assignment.requirements:
-		if (
-			row.requirement_type == REQUIREMENT_OPEN_LESSON
-			and row.lesson == lesson
-			and row.status not in COMPLETED_STATUSES
-			and row.status != "Unavailable"
-		):
-			row.status = "Completed"
-			row.completed_at = now_datetime()
-			row.proof_type = "Lesson View"
-			row.proof_name = lesson
-			touched = True
+	for row in assignment_doc.requirements:
+		if row.status in COMPLETED_STATUSES or row.status == "Unavailable":
+			continue
+		opens_lesson = lesson and row.requirement_type == REQUIREMENT_OPEN_LESSON and row.lesson == lesson
+		opens_assignment = (
+			assignment
+			and row.requirement_type == REQUIREMENT_OPEN_ASSIGNMENT
+			and row.reference_assignment == assignment
+		)
+		if not (opens_lesson or opens_assignment):
+			continue
+		row.status = "Completed"
+		row.completed_at = now_datetime()
+		row.proof_type = "Assignment View" if opens_assignment else "Lesson View"
+		row.proof_name = assignment if opens_assignment else lesson
+		touched = True
 	if not touched:
 		return False
-	if not assignment.first_opened_at:
+	if not assignment_doc.first_opened_at:
 		# Working a material directly also starts the card (spec 7).
-		assignment.first_opened_at = now_datetime()
-		from_status = assignment.status
-		if assignment.status == STATUS_TO_DO:
-			assignment.status = STATUS_IN_PROGRESS
-		_add_history(assignment, "started", from_status, assignment.status)
-	_refresh_counts(assignment)
+		assignment_doc.first_opened_at = now_datetime()
+		from_status = assignment_doc.status
+		if assignment_doc.status == STATUS_TO_DO:
+			assignment_doc.status = STATUS_IN_PROGRESS
+		_add_history(assignment_doc, "started", from_status, assignment_doc.status)
+	_refresh_counts(assignment_doc)
 	return True
 
 
@@ -349,8 +415,11 @@ def resubmit(assignment_name: str) -> dict:
 	"""After a teacher's return: the student sends the finished work for review
 	again. Unfinished work is refused with the reason (A27)."""
 	assignment = _get_owned_assignment(assignment_name)
+	_refuse_cancelled(assignment)
 	if assignment.status != STATUS_IN_PROGRESS or not assignment.needs_revision:
 		frappe.throw(_("This homework is not waiting for your rework."))
+	if _any_requirement_unavailable(assignment):
+		frappe.throw(_("Some materials are no longer available. Ask the teacher to fix the homework."))
 	if not _all_requirements_confirmed(assignment):
 		frappe.throw(_("Some requirements are still incomplete. Finish them before resubmitting."))
 
@@ -359,15 +428,33 @@ def resubmit(assignment_name: str) -> dict:
 	assignment.submitted_for_review_at = now_datetime()
 	_add_history(assignment, "resubmitted", STATUS_IN_PROGRESS, STATUS_REVIEW)
 	assignment.flags.homework_service = True
-	assignment.save()
+	assignment.save(ignore_permissions=True)
 	return {"status": STATUS_REVIEW}
 
 
 # --- Teacher actions (spec 7, 4.1, 8.1) -----------------------------------------
 
 
+def _refuse_cancelled(assignment) -> None:
+	"""A recalled assignment is frozen history: no action may move it (R06)."""
+	if assignment.cancelled:
+		frappe.throw(
+			_("This homework was recalled and stays as history only."),
+			frappe.PermissionError,
+		)
+
+
+def _any_requirement_unavailable(assignment) -> bool:
+	return any(
+		row.status == "Unavailable" or not source_alive(row)
+		for row in assignment.requirements
+		if row.requirement_type in CHECKABLE_TYPES
+	)
+
+
 def accept(assignment_name: str, comment: str | None = None) -> dict:
 	assignment = _get_teachable_assignment(assignment_name)
+	_refuse_cancelled(assignment)
 	if assignment.status == STATUS_DONE:
 		# A repeated confirmation is not a second audit row (A25).
 		return {"status": STATUS_DONE}
@@ -392,7 +479,7 @@ def accept(assignment_name: str, comment: str | None = None) -> dict:
 	assignment.needs_revision = 0
 	_add_history(assignment, "accepted", STATUS_REVIEW, STATUS_DONE, comment)
 	assignment.flags.homework_service = True
-	assignment.save()
+	assignment.save(ignore_permissions=True)
 	return {"status": STATUS_DONE}
 
 
@@ -402,6 +489,7 @@ def return_for_revision(assignment_name: str, comment: str) -> dict:
 		frappe.throw(_("A comment is required when returning homework for rework."))
 
 	assignment = _get_teachable_assignment(assignment_name)
+	_refuse_cancelled(assignment)
 	if assignment.status != STATUS_REVIEW:
 		frappe.throw(_("Only homework in Review can be returned for rework."))
 
@@ -412,7 +500,7 @@ def return_for_revision(assignment_name: str, comment: str) -> dict:
 	assignment.reviewed_at = now_datetime()
 	_add_history(assignment, "returned_for_revision", STATUS_REVIEW, STATUS_IN_PROGRESS, comment)
 	assignment.flags.homework_service = True
-	assignment.save()
+	assignment.save(ignore_permissions=True)
 	return {"status": STATUS_IN_PROGRESS}
 
 
@@ -422,6 +510,7 @@ def reopen(assignment_name: str, comment: str) -> dict:
 		frappe.throw(_("A comment is required when reopening accepted homework."))
 
 	assignment = _get_teachable_assignment(assignment_name)
+	_refuse_cancelled(assignment)
 	if assignment.status != STATUS_DONE:
 		frappe.throw(_("Only accepted homework can be reopened."))
 
@@ -432,13 +521,14 @@ def reopen(assignment_name: str, comment: str) -> dict:
 	assignment.reviewed_at = now_datetime()
 	_add_history(assignment, "reopened", STATUS_DONE, STATUS_IN_PROGRESS, comment)
 	assignment.flags.homework_service = True
-	assignment.save()
+	assignment.save(ignore_permissions=True)
 	return {"status": STATUS_IN_PROGRESS}
 
 
 def change_deadline(assignment_name: str, days) -> dict:
 	days = validate_days_raw(days)
 	assignment = _get_teachable_assignment(assignment_name)
+	_refuse_cancelled(assignment)
 
 	old_due = assignment.due_at
 	assignment.days = days
@@ -454,7 +544,7 @@ def change_deadline(assignment_name: str, days) -> dict:
 		),
 	)
 	assignment.flags.homework_service = True
-	assignment.save()
+	assignment.save(ignore_permissions=True)
 	return {"due_at": assignment.due_at}
 
 
@@ -475,7 +565,7 @@ def revoke(assignment_name: str, reason: str) -> dict:
 	# stay, and later course events stop updating the card (spec 8.1).
 	_add_history(assignment, "revoked", assignment.status, assignment.status, reason)
 	assignment.flags.homework_service = True
-	assignment.save()
+	assignment.save(ignore_permissions=True)
 	return {"cancelled": True}
 
 
@@ -491,41 +581,110 @@ def on_quiz_submission_update(doc, method: str | None = None) -> None:
 	recompute_quiz_requirements(doc.member, doc.quiz)
 
 
-def on_quiz_submission_trash(doc, method: str | None = None) -> None:
-	"""A deleted (annulled) submission can also take the last proof with it."""
+def on_quiz_submission_delete(doc, method: str | None = None) -> None:
+	"""after_delete hook: the annulled submission is gone from the database by
+	now -- on_trash fires before the delete, so the recalculation would still
+	see the passing row it is supposed to lose (R08)."""
 	if not doc.get("member") or not doc.get("quiz"):
 		return
 	recompute_quiz_requirements(doc.member, doc.quiz)
 
 
 def recompute_quiz_requirements(member: str, quiz: str) -> None:
+	"""Addressed recalculation (R20): only the assignments of this member that
+	actually carry a requirement on this quiz, found through the requirement
+	rows -- never every card of the student, and never another student's."""
+	parents = {
+		row
+		for row in frappe.get_all(
+			"LMS Homework Requirement",
+			filters={"parenttype": "LMS Homework Assignment", "quiz": quiz},
+			pluck="parent",
+		)
+	}
+	if not parents:
+		return
 	assignments = frappe.get_all(
 		"LMS Homework Assignment",
-		filters={"student": member, "cancelled": 0},
+		filters={"name": ("in", list(parents)), "student": member, "cancelled": 0},
 		pluck="name",
 	)
 	for name in assignments:
-		assignment = frappe.get_doc("LMS Homework Assignment", name)
-		touched = False
-		for row in assignment.requirements:
-			if row.requirement_type != REQUIREMENT_PASS_QUIZ or row.quiz != quiz:
-				continue
+		_recompute_one_assignment(name, member=member, quiz=quiz)
+
+
+def _recompute_one_assignment(name: str, *, member: str | None = None, quiz: str | None = None) -> None:
+	assignment = frappe.get_doc("LMS Homework Assignment", name)
+	touched = _refresh_availability(assignment)
+	for row in assignment.requirements:
+		if quiz and row.requirement_type == REQUIREMENT_PASS_QUIZ and row.quiz == quiz:
 			if row.status == "Unavailable":
 				continue
 			touched |= _refresh_quiz_requirement(assignment, row, member, quiz)
-		if not touched:
-			continue
-		_refresh_counts(assignment)
-		assignment.flags.homework_service = True
-		try:
-			assignment.save()
-		except frappe.TimestampMismatchError:
-			# This runs inside the quiz submission's own save; a concurrent homework
-			# write must never fail the submission. The next event (or this one
-			# re-fired by the other writer) catches the requirement up.
-			frappe.clear_last_message()
-			continue
-		_maybe_auto_review(assignment)
+	if not touched:
+		return
+	_refresh_counts(assignment)
+	assignment.flags.homework_service = True
+	try:
+		assignment.save(ignore_permissions=True)
+	except frappe.TimestampMismatchError:
+		# This runs inside the quiz submission's own save; a concurrent homework
+		# write must never fail the submission. Recover deterministically (R19):
+		# one immediate retry from the fresh row, and if the conflict persists,
+		# an after-commit job that cannot be lost -- never a shrug that leaves
+		# the last quiz result off the card.
+		frappe.clear_last_message()
+		_recompute_with_retry_or_enqueue(name, member=member, quiz=quiz)
+		return
+	_maybe_auto_review(assignment)
+
+
+def _recompute_with_retry_or_enqueue(name: str, *, member: str, quiz: str) -> None:
+	"""The conflict-recovery half of R19: exactly one fresh retry, then a queued
+	after-commit recompute. The student's quiz save has already succeeded; the
+	requirement must catch up without anyone having to re-submit."""
+	fresh = frappe.get_doc("LMS Homework Assignment", name)
+	fresh.flags.homework_service = True
+	for row in fresh.requirements:
+		if row.requirement_type == REQUIREMENT_PASS_QUIZ and row.quiz == quiz:
+			if row.status != "Unavailable":
+				_refresh_quiz_requirement(fresh, row, member, quiz)
+	_refresh_availability(fresh)
+	_refresh_counts(fresh)
+	try:
+		fresh.save(ignore_permissions=True)
+		_maybe_auto_review(fresh)
+		return
+	except frappe.TimestampMismatchError:
+		frappe.clear_last_message()
+	if not frappe.flags.in_test:
+		frappe.enqueue(
+			recompute_quiz_requirements,
+			queue="short",
+			enqueue_after_commit=True,
+			member=member,
+			quiz=quiz,
+		)
+
+
+def _refresh_availability(assignment) -> bool:
+	"""Persist the truth about deleted sources (R06): a checkable row whose
+	material is gone reads Unavailable in the database itself, so counts and
+	transitions agree with what the detail page shows -- no stale "100% done"
+	over a dead source."""
+	changed = False
+	for row in assignment.requirements:
+		alive = source_alive(row)
+		if not alive and row.status != "Unavailable":
+			row.status = "Unavailable"
+			row.completed_at = None
+			row.proof_type = None
+			row.proof_name = None
+			changed = True
+		elif alive and row.status == "Unavailable":
+			row.status = "Pending"
+			changed = True
+	return changed
 
 
 def _refresh_quiz_requirement(assignment, row, member: str, quiz: str) -> bool:
@@ -543,6 +702,12 @@ def _refresh_quiz_requirement(assignment, row, member: str, quiz: str) -> bool:
 		row.completed_at = now_datetime()
 		row.proof_type = "LMS Quiz Submission"
 		row.proof_name = proof
+		if not row.lesson and not assignment.first_opened_at and assignment.status == STATUS_TO_DO:
+			# A standalone quiz passed straight from the course: the student is
+			# working the material, which starts the card (spec 7, R10).
+			assignment.first_opened_at = now_datetime()
+			assignment.status = STATUS_IN_PROGRESS
+			_add_history(assignment, "started", STATUS_TO_DO, STATUS_IN_PROGRESS)
 		return True
 
 	# No passing submission. An invalidated earlier proof is a real event (spec 7,
@@ -590,8 +755,19 @@ def _any_requirement_unavailable(assignment) -> bool:
 
 def _maybe_auto_review(assignment) -> None:
 	"""In Progress + everything confirmed + nothing unavailable + no pending
-	rework -> Review, recorded once. Reads and refreshes never re-fire it."""
+	rework -> Review, recorded once. Reads and refreshes never re-fire it.
+
+	Availability is re-derived from the database first (R06): a deleted source
+	must turn its row Unavailable before this decision, not after it on some
+	later page view, so a card can never ride a stale Completed into Review."""
+	availability_changed = _refresh_availability(assignment)
 	if not _eligible_for_auto_review(assignment):
+		if availability_changed:
+			assignment.flags.homework_service = True
+			try:
+				assignment.save(ignore_permissions=True)
+			except frappe.TimestampMismatchError:
+				frappe.clear_last_message()
 		return
 
 	assignment.status = STATUS_REVIEW
@@ -599,7 +775,7 @@ def _maybe_auto_review(assignment) -> None:
 	_add_history(assignment, "submitted_for_review", STATUS_IN_PROGRESS, STATUS_REVIEW)
 	assignment.flags.homework_service = True
 	try:
-		assignment.save()
+		assignment.save(ignore_permissions=True)
 	except frappe.TimestampMismatchError:
 		# Raced with another writer: re-read and apply once from current state, so a
 		# finished card can never be stranded in In Progress (A19).
@@ -611,7 +787,7 @@ def _maybe_auto_review(assignment) -> None:
 		_add_history(fresh, "submitted_for_review", STATUS_IN_PROGRESS, STATUS_REVIEW)
 		fresh.flags.homework_service = True
 		try:
-			fresh.save()
+			fresh.save(ignore_permissions=True)
 		except frappe.TimestampMismatchError:
 			frappe.log_error(
 				title="Homework auto-review skipped after write race",

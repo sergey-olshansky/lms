@@ -4,6 +4,9 @@
  * are at least LMS Students); the teacher's "Homework" library appears only
  * for staff, mirroring Quizzes/Assignments. The routes they name must exist in
  * the real route table, which is importable without frappe-ui.
+ *
+ * R17: the library also has an authorised phone entrance -- mobileNavLinks adds
+ * it to the You page's staff lists for instructors and never for students.
  */
 import { describe, expect, it, vi } from 'vitest'
 
@@ -27,6 +30,10 @@ const { userResource, settingsStore } = vi.hoisted(() => ({
 	settingsStore: {
 		settings: { data: {} },
 		programs: { data: { enrolled: [], published: [] } },
+		sidebarSettings: { data: null },
+		loadSidebarSettings: async () => {
+			settingsStore.sidebarSettings.data = { sidebar_rows: [] }
+		},
 	},
 }))
 
@@ -34,9 +41,20 @@ vi.mock('@/stores/user', () => ({
 	usersStore: () => ({ userResource }),
 }))
 vi.mock('@/stores/settings', () => ({ useSettings: () => settingsStore }))
+// mobileNavLinks asks the server about Programs for non-staff viewers; without
+// this the student run rejects and the phone lists keep the previous viewer's
+// rows -- exactly the staleness the store's memo guards against.
+vi.mock('frappe-ui', () => ({
+	call: async () => ({ enrolled: [], published: [] }),
+}))
 
 import { getSidebarLinks } from '@/utils/index'
 import { routes } from '@/routes'
+import {
+	ensureMobileNavLinks,
+	otherLinks,
+	sidebarLinks,
+} from '@/stores/mobileNavLinks'
 
 const labels = (forMobile = false) =>
 	getSidebarLinks(forMobile)
@@ -61,7 +79,7 @@ describe('homework navigation', () => {
 		expect(all).toContain('Homework Execution')
 	})
 
-	it('keeps the library off the mobile bar, like Quizzes', () => {
+	it('keeps the library off the mobile bar itself, like Quizzes', () => {
 		userResource.data = {
 			name: 't@example.com',
 			is_instructor: 1,
@@ -89,5 +107,34 @@ describe('homework navigation', () => {
 		}
 		const detail = routes.find((route) => route.name === 'HomeworkDetail')
 		expect(detail?.path).toBe('/homework/assignment/:assignmentID')
+	})
+})
+
+describe('homework on the phone (R17)', () => {
+	it('lists the library on the You page for an instructor', async () => {
+		await ensureMobileNavLinks({
+			isSignedIn: true,
+			isModerator: false,
+			isInstructor: true,
+			isEvaluator: false,
+			hasUserInfo: true,
+		})
+		const other = otherLinks.value.map((link) => link.label)
+		expect(other).toContain('Quizzes')
+		expect(other).toContain('Homework')
+		expect(sidebarLinks.value.map((link) => link.label)).not.toContain(
+			'Homework'
+		)
+	})
+
+	it('never lists the library for a plain student', async () => {
+		await ensureMobileNavLinks({
+			isSignedIn: true,
+			isModerator: false,
+			isInstructor: false,
+			isEvaluator: false,
+			hasUserInfo: true,
+		})
+		expect(otherLinks.value.map((link) => link.label)).not.toContain('Homework')
 	})
 })

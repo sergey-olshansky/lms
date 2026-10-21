@@ -81,6 +81,15 @@
 									{{ item.path }}
 								</span>
 							</span>
+							<router-link
+								v-if="item.route"
+								:to="itemRoute(item.route)"
+								class="shrink-0 text-xs text-ink-gray-5 underline"
+								:data-testid="`preview-${item.name}`"
+								v-external
+							>
+								{{ __('Open') }}
+							</router-link>
 							<button
 								type="button"
 								class="rounded-4 p-1 text-ink-gray-5 transition-colors hover:bg-surface-gray-2 hover:text-ink-gray-7"
@@ -133,14 +142,7 @@
 
 <script setup>
 import { Button, FormControl, createResource, toast } from 'frappe-ui'
-import {
-	computed,
-	inject,
-	nextTick,
-	reactive,
-	ref,
-	watch,
-} from 'vue'
+import { computed, inject, nextTick, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import FormShell from '@/components/FormShell.vue'
 import HeaderButton from '@/components/HeaderButton.vue'
@@ -148,6 +150,7 @@ import Select from '@/components/Controls/Select.vue'
 import HomeworkMaterialPicker from '@/components/Modals/HomeworkMaterialPicker.vue'
 import HomeworkAssignDialog from '@/components/Modals/HomeworkAssignDialog.vue'
 import { useFormRoute } from '@/composables/useFormRoute'
+import { lessonRouteParams } from '@/utils/homeworkSelection'
 import { resourceErrorMessage } from '@/utils/resource'
 
 const props = defineProps({ homeworkID: { type: String, default: 'new' } })
@@ -208,6 +211,7 @@ const existing = createResource({
 			title: item.label,
 			chapter: '',
 			path: item.path,
+			route: item.route || null,
 		}))
 		nextTick(() => {
 			hydrating.value = false
@@ -245,18 +249,17 @@ const openPicker = () => {
 	pickerOpen.value = true
 }
 
-// Only "Add selected" mutates the composition; a cancelled picker changes
+// Only "Add selected" mutates the composition, and it REPLACES the whole set
+// (R13): unchecking an attached material removes it. A cancelled picker changes
 // nothing (A08). Parent-and-child picks arrive deduped by key (A07).
 const onPickerConfirm = (entries) => {
-	const seen = new Set(
-		form.items.map((item) => `${item.source_type}:${item.name}`)
-	)
-	for (const entry of entries) {
+	const seen = new Set()
+	form.items = entries.filter((entry) => {
 		const key = `${entry.source_type}:${entry.name}`
-		if (seen.has(key)) continue
+		if (seen.has(key)) return false
 		seen.add(key)
-		form.items.push(entry)
-	}
+		return true
+	})
 	pickerOpen.value = false
 }
 
@@ -270,10 +273,41 @@ const typeIcon = (type) => {
 	return 'lucide-file-text'
 }
 
+// The teacher can view a source before issuing (R18): lesson numbers, quiz and
+// assignment pages come from the server-provided route of each stored item.
+const itemRoute = (route) => {
+	if (!route) return null
+	if (route.type === 'lesson' && route.number) {
+		return {
+			name: 'Lesson',
+			params: {
+				courseName: route.course,
+				...lessonRouteParams(route.number),
+			},
+		}
+	}
+	if (route.type === 'quiz') {
+		return { name: 'QuizPage', params: { quizID: route.quiz } }
+	}
+	if (route.type === 'assignment') {
+		return {
+			name: 'AssignmentSubmission',
+			params: { assignmentID: route.assignment, submissionName: 'new' },
+		}
+	}
+	return null
+}
+
 const save = createResource({
 	url: 'lms.lms.homework_api.save_homework',
 	makeParams: () => ({
-		name: isNew.value ? null : props.homeworkID,
+		// R14: after the first save of a new compilation, this form edits the
+		// created record -- cancelling the assign dialog and saving again must
+		// update the same template, never spawn a second one.
+		name:
+			props.homeworkID && props.homeworkID !== 'new'
+				? props.homeworkID
+				: savedName.value || null,
 		title: form.title,
 		days: Number(form.days),
 		details: form.details,

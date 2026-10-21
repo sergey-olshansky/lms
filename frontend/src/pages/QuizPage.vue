@@ -1,5 +1,13 @@
 <template>
 	<PageHeader v-if="!fromLesson" :breadcrumbs="breadcrumbs" />
+	<!-- Task #35 (R10): a standalone quiz reached through ?hw= carries the
+	homework context: the way back, live progress, and the card's start. -->
+	<HomeworkContextBanner
+		v-if="homeworkContext"
+		:assignment-id="homeworkContext"
+		start
+		data-testid="homework-back-banner"
+	/>
 	<div
 		class="md:w-7/12 md:mx-auto mx-4 py-10"
 		:class="{ 'pt-4 md:w-full': fromLesson }"
@@ -11,14 +19,20 @@
 import Quiz from '@/components/Quiz.vue'
 import { createResource, usePageMeta } from 'frappe-ui'
 import PageHeader from '@/components/Layouts/pages/PageHeader.vue'
+import HomeworkContextBanner from '@/components/HomeworkContextBanner.vue'
 import { computed, inject, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { sessionStore } from '../stores/session'
 
 const { brand } = sessionStore()
 const user = inject('$user')
+const route = useRoute()
 const router = useRouter()
 const fromLesson = ref(false)
+
+const homeworkContext = computed(() =>
+	typeof route.query.hw === 'string' ? route.query.hw : ''
+)
 
 onMounted(() => {
 	if (!user.data) {

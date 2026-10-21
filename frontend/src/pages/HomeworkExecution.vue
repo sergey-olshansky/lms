@@ -187,8 +187,8 @@
 // `student` URL parameter is never the authority, the server re-checks it. A
 // teacher picks a student and the whole board state is re-fetched with the new
 // target, so no card of the previous student survives the switch (A33).
-import { Button, FormControl, createResource, toast } from 'frappe-ui'
-import { computed, inject, onMounted, ref, watch } from 'vue'
+import { Button, FormControl, call, createResource, toast } from 'frappe-ui'
+import { computed, inject, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/Layouts/pages/PageHeader.vue'
 import Select from '@/components/Controls/Select.vue'
@@ -238,9 +238,14 @@ const emptyColumns = () =>
 const columns = ref(emptyColumns())
 const offsets = ref({})
 
-const board = createResource({
-	url: 'lms.lms.homework_api.get_homework_board',
-	makeParams: () => ({
+// R11: every fetch carries a generation number; a late answer of an earlier
+// generation is dropped, so fast student switches can never paint the previous
+// student's board (the resource contract alone cannot guarantee ordering).
+let boardGeneration = 0
+
+const fetchBoard = ({ merge = false } = {}) => {
+	const generation = ++boardGeneration
+	const request = call('lms.lms.homework_api.get_homework_board', {
 		student: student.value || null,
 		search: search.value,
 		status: statusFilter.value || null,
@@ -248,15 +253,43 @@ const board = createResource({
 		course: courseFilter.value || null,
 		offsets: JSON.stringify(offsets.value),
 		include_cancelled: cancelledOnly.value,
-	}),
-	onSuccess(data) {
+	})
+	request
+		.then((data) => {
+			if (generation !== boardGeneration) return
+			applyBoard(data, { merge })
+		})
+		.catch((error) => {
+			if (generation !== boardGeneration) return
+			toast.error(resourceErrorMessage(error, __('Error')))
+			console.error(error)
+		})
+	return request
+}
+
+// R12: a load-more for one column appends that column's new page (deduped by
+// name) and leaves every other column's loaded cards alone; a fresh board
+// replaces the columns. A failed fetch keeps what is on screen.
+const applyBoard = (data, { merge }) => {
+	if (!merge) {
 		columns.value = data.columns
-	},
-	onError(err) {
-		toast.error(resourceErrorMessage(err, __('Error')))
-		console.error(err)
-	},
-})
+		return
+	}
+	columns.value = columns.value.map((current) => {
+		const fresh = data.columns.find(
+			(column) => column.status === current.status
+		)
+		if (!fresh) return current
+		if (!current.cards.length) return fresh
+		const seen = new Set(current.cards.map((card) => card.name))
+		const appended = fresh.cards.filter((card) => !seen.has(card.name))
+		return {
+			...fresh,
+			cards: [...current.cards, ...appended],
+			has_more: fresh.has_more,
+		}
+	})
+}
 
 const reloadBoard = () => {
 	// A different board target means no card of the previous one may linger on
@@ -264,7 +297,7 @@ const reloadBoard = () => {
 	// re-isolated on student change), and paging resets with it.
 	columns.value = emptyColumns()
 	offsets.value = {}
-	board.reload()
+	fetchBoard()
 }
 
 onMounted(() => {
@@ -333,10 +366,24 @@ const openCard = (card) => {
 	router.push({ name: 'HomeworkDetail', params: { assignmentID: card.name } })
 }
 
-const continueCard = (card) => {
+const continueCard = async (card) => {
 	const target = card.continue_target
 	if (!target) return openCard(card)
-	if (target.type === 'lesson' && target.course && target.number) {
+	// R10: continuing straight from the card IS the student starting the work
+	// -- the card's first open is recorded before the jump, and a teacher's
+	// preview open is simply refused by the server.
+	try {
+		await call('lms.lms.homework_api.open_homework', { assignment: card.name })
+	} catch {
+		// Teacher preview or already started: either way, the jump proceeds.
+	}
+	if (target.type === 'assignment' && target.assignment) {
+		router.push({
+			name: 'AssignmentSubmission',
+			params: { assignmentID: target.assignment, submissionName: 'new' },
+			query: { hw: card.name },
+		})
+	} else if (target.type === 'lesson' && target.course && target.number) {
 		router.push({
 			name: 'Lesson',
 			params: {
@@ -361,8 +408,23 @@ const loadMore = (status) => {
 		...offsets.value,
 		[status]: (offsets.value[status] || 0) + 10,
 	}
-	board.reload()
+	fetchBoard({ merge: true })
 }
+
+// R18: a board left open goes stale while the student works elsewhere; a
+// controlled refetch on tab visibility and window focus keeps it current, with
+// the listener cleaned up on unmount.
+const refetchIfIdle = () => {
+	if (document.visibilityState === 'visible') fetchBoard({ merge: false })
+}
+onMounted(() => {
+	window.addEventListener('focus', refetchIfIdle)
+	document.addEventListener('visibilitychange', refetchIfIdle)
+})
+onUnmounted(() => {
+	window.removeEventListener('focus', refetchIfIdle)
+	document.removeEventListener('visibilitychange', refetchIfIdle)
+})
 
 const breadcrumbs = computed(() => [
 	{ label: __('Homework execution'), route: { name: 'HomeworkExecution' } },

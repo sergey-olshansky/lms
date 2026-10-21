@@ -195,10 +195,12 @@ doc_events = {
 	"LMS Assignment": {"validate": CHILD_ROW_MOVE_GATE},
 	# Task #35: every saved quiz submission (first attempt or a re-graded open
 	# answer) and every annulled one recomputes the affected homework requirements,
-	# targeted by member and quiz -- never a scan of all assignments.
+	# targeted by member and quiz -- never a scan of all assignments. The delete
+	# half rides after_delete: on_trash fires before the row leaves the database,
+	# so the recalculation would still see the passing proof it must lose.
 	"LMS Quiz Submission": {
 		"on_update": "lms.lms.homework_service.on_quiz_submission_update",
-		"on_trash": "lms.lms.homework_service.on_quiz_submission_trash",
+		"after_delete": "lms.lms.homework_service.on_quiz_submission_delete",
 	},
 	"LMS Question": {"validate": CHILD_ROW_MOVE_GATE},
 	"LMS Quiz Question": {"validate": CHILD_ROW_MOVE_GATE},

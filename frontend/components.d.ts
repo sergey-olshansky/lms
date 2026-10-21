@@ -72,6 +72,7 @@ declare module 'vue' {
     GoogleCalendarDetail: typeof import('./src/components/Settings/GoogleCalendar/GoogleCalendarDetail.vue')['default']
     HeaderButton: typeof import('./src/components/HeaderButton.vue')['default']
     HomeworkAssignDialog: typeof import('./src/components/Modals/HomeworkAssignDialog.vue')['default']
+    HomeworkContextBanner: typeof import('./src/components/HomeworkContextBanner.vue')['default']
     HomeworkGroupsDialog: typeof import('./src/components/Modals/HomeworkGroupsDialog.vue')['default']
     HomeworkMaterialPicker: typeof import('./src/components/Modals/HomeworkMaterialPicker.vue')['default']
     HomeworkTreeNodeRow: typeof import('./src/components/HomeworkTreeNodeRow.vue')['default']

@@ -29,11 +29,13 @@ from lms.lms.utils import (
 	get_ordered_lesson_rows,
 )
 
-# Requirement types stored on LMS Homework Requirement. "Reference" rows are
-# addressable materials without an automatic condition (a standalone Assignment):
-# shown in the checklist as links, excluded from totals and auto-review.
+# Requirement types stored on LMS Homework Requirement. A standalone Assignment
+# is a checkable opening condition (R10): the material is real and addressable,
+# and spec 6.1 forbids inventing an automatic assessment of the written answer.
+# "Reference" remains readable for rows issued before that rule.
 REQUIREMENT_OPEN_LESSON = "Open Lesson"
 REQUIREMENT_PASS_QUIZ = "Pass Quiz"
+REQUIREMENT_OPEN_ASSIGNMENT = "Open Assignment"
 REQUIREMENT_REFERENCE = "Reference"
 
 
@@ -261,35 +263,114 @@ def _titles(doctype: str, names: list[str]) -> dict[str, str]:
 # --- Selection normalization (spec 3.4, 6.4) ----------------------------------
 
 
-def normalize_selection(selection: list[dict]) -> list[dict]:
-	"""A confirmed picker selection -> deduplicated template item rows.
+def canonicalize_selection(selection: list[dict]) -> list[dict]:
+	"""A confirmed picker selection -> canonical, deduplicated template items.
 
-	The picker sends one row per selected leaf (lesson / standalone quiz / standalone
-	assignment) with its course context and readable path. Selecting a parent and
-	its child both simply resolves to the same leaf, and the dedup by (type, name)
-	keeps one instance (A07). Containers never survive here: only assignable leaves.
+	Nothing the client sent about a source is trusted (R04): existence, the real
+	course, the real title and the readable path all come from the database, and
+	every course must be one the session teacher may source from. Unknown source
+	types and dangling or unreachable ids are refused with a reason, never
+	dropped -- a silently vanishing mandatory material must not look like a valid
+	composition. Selecting a parent and its child both resolves to the same leaf,
+	and the dedup by (type, name) keeps one instance (A07).
 	"""
+	if selection is None:
+		selection = []
+	if not isinstance(selection, list):
+		frappe.throw(_("The material selection must be a list."))
+
 	items: dict[tuple, dict] = {}
-	for entry in selection or []:
-		source_type = entry.get("source_type")
-		name = entry.get("name")
+	for entry in selection:
+		source_type = entry.get("source_type") if isinstance(entry, dict) else None
+		name = entry.get("name") if isinstance(entry, dict) else None
 		if source_type not in ("Lesson", "Quiz", "Assignment") or not name:
+			frappe.throw(
+				_("Unsupported material in the selection: {0}.").format(
+					frappe.bold(str(source_type or name))
+				),
+				frappe.ValidationError,
+			)
+		key = (source_type, name)
+		if key in items:
 			continue
-		course = entry.get("course")
-		title = entry.get("title") or name
-		chapter = entry.get("chapter") or ""
-		path = entry.get("path") or _display_path(course, chapter, title)
-		items[(source_type, name)] = {
-			"source_type": source_type,
-			"lesson": name if source_type == "Lesson" else None,
-			"quiz": name if source_type == "Quiz" else None,
-			"assignment": name if source_type == "Assignment" else None,
-			"course": course,
-			"label": title,
-			"path": path,
-			"chapter_title": chapter,
-		}
+		items[key] = _canonical_item(source_type, name)
 	return list(items.values())
+
+
+def _canonical_item(source_type: str, name: str) -> dict:
+	"""One source resolved from the database: existence, course, label, path."""
+	if source_type == "Lesson":
+		row = frappe.db.get_value("Course Lesson", name, ["name", "title", "course", "chapter"], as_dict=True)
+		if not row:
+			frappe.throw(_("Lesson {0} no longer exists.").format(frappe.bold(name)))
+		chapter = (
+			frappe.db.get_value("Course Chapter", row.chapter, ["title", "is_scorm_package"], as_dict=True)
+			if row.chapter
+			else None
+		)
+		if chapter and chapter.is_scorm_package:
+			# SCORM packages are their own playback world; their internal tests never
+			# become LMS quizzes (spec 3.4). Not selectable as homework material.
+			frappe.throw(
+				_("Lesson {0} is part of a SCORM package and cannot be homework material.").format(
+					frappe.bold(row.title)
+				)
+			)
+		return {
+			"source_type": source_type,
+			"lesson": name,
+			"quiz": None,
+			"assignment": None,
+			"course": row.course,
+			"label": row.title,
+			"path": _display_path(row.course, chapter.title if chapter else None, row.title),
+		}
+
+	if source_type == "Quiz":
+		row = frappe.db.get_value("LMS Quiz", name, ["name", "title", "course"], as_dict=True)
+		if not row:
+			frappe.throw(_("Quiz {0} no longer exists.").format(frappe.bold(name)))
+		course = row.course or _course_of_placed("LMS Quiz", name)
+		if not course:
+			frappe.throw(_("Quiz {0} is not reachable from any course.").format(frappe.bold(row.title)))
+		return {
+			"source_type": source_type,
+			"lesson": None,
+			"quiz": name,
+			"assignment": None,
+			"course": course,
+			"label": row.title,
+			"path": _display_path(course, None, row.title),
+		}
+
+	row = frappe.db.get_value("LMS Assignment", name, ["name", "title", "course"], as_dict=True)
+	if not row:
+		frappe.throw(_("Assignment {0} no longer exists.").format(frappe.bold(name)))
+	course = row.course or _course_of_placed("LMS Assignment", name)
+	if not course:
+		frappe.throw(_("Assignment {0} is not reachable from any course.").format(frappe.bold(row.title)))
+	return {
+		"source_type": source_type,
+		"lesson": None,
+		"quiz": None,
+		"assignment": name,
+		"course": course,
+		"label": row.title,
+		"path": _display_path(course, None, row.title),
+	}
+
+
+def _course_of_placed(assessment_type: str, name: str) -> str | None:
+	"""The course of a lesson this assessment is embedded in, for items without
+	their own course stamp."""
+	lesson = frappe.db.get_value(
+		"LMS Lesson Assessment",
+		{"assessment_type": assessment_type, "assessment_name": name, "parenttype": "Course Lesson"},
+		"parent",
+	)
+	if not lesson:
+		return None
+	return frappe.db.get_value("Course Lesson", lesson, "course")
 
 
 def expand_requirements(items: list) -> list[dict]:
@@ -355,7 +436,7 @@ def expand_requirements(items: list) -> list[dict]:
 		elif item.get("source_type") == "Assignment" and item.get("assignment"):
 			rows.append(
 				{
-					"requirement_type": REQUIREMENT_REFERENCE,
+					"requirement_type": REQUIREMENT_OPEN_ASSIGNMENT,
 					"course": item.get("course"),
 					"chapter_title": "",
 					"lesson": None,
@@ -418,17 +499,27 @@ def validate_sources_for_student(items: list, student: str) -> list[str]:
 
 	Issuing never grants course access implicitly and never bypasses the sequential
 	lesson gate: a missing enrollment or a locked lesson blocks with a reason the
-	teacher can act on (A10).
+	teacher can act on (A10). Only the SELECTED materials gate the issue -- a
+	locked lesson the composition does not name is not this homework's business
+	(R05). Each course must still be one the issuing teacher may source from
+	(R04); the items themselves are canonical database rows by the time they
+	arrive here.
 	"""
 	reasons: list[str] = []
 	courses = {item.course for item in items if item.course}
+	selected_lessons = {item.lesson for item in items if item.source_type == "Lesson" and item.lesson}
 
 	for course in courses:
+		if not can_source_from(course):
+			course_title = frappe.db.get_value("LMS Course", course, "title") or course
+			reasons.append(
+				_("You cannot assign materials from the course {0}.").format(frappe.bold(course_title))
+			)
 		if not get_membership(course, student):
 			course_title = frappe.db.get_value("LMS Course", course, "title") or course
 			reasons.append(_("Student is not enrolled in the course {0}.").format(frappe.bold(course_title)))
 
-	locked = _locked_lessons_for_student(courses, student)
+	locked = _locked_lessons_for_student(courses, student) & selected_lessons
 	if locked:
 		titles = _titles("Course Lesson", list(locked))
 		for lesson in sorted(locked, key=lambda name: titles.get(name, name)):

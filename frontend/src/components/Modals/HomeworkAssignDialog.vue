@@ -264,10 +264,19 @@ watch(
 		days.value = props.presetDays || 7
 		confirmExtra.value = false
 		precheck.data = null
+		// R19: one key per logical issue, minted when the dialog opens. A retry
+		// after a network timeout reuses it (the server returns the same card);
+		// only a confirmed deliberate extra issue mints a new one.
+		operationKey.value = mintKey()
 		students.reload()
 		if (props.homework) homeworkDoc.reload()
 	}
 )
+
+const mintKey = () =>
+	crypto.randomUUID ? crypto.randomUUID() : `hw-${Date.now()}-${Math.random()}`
+
+const operationKey = ref('')
 
 watch([student, days], () => {
 	if (props.open && student.value) precheck.reload()
@@ -275,11 +284,10 @@ watch([student, days], () => {
 
 const assign = async (force) => {
 	assigning.value = true
-	// A fresh key per deliberate issue: retrying the SAME request reuses the key
-	// and returns the same card; a confirmed extra issue must differ (A11).
-	const key =
-		(crypto.randomUUID ? crypto.randomUUID() : `hw-${Date.now()}`) +
-		(force ? '-x' : '')
+	// The SAME logical operation keeps its key across retries (R19): a re-click
+	// after a failed request returns the existing card rather than issuing a
+	// second one; the confirmed extra issue below mints a fresh key (A11).
+	const key = force ? mintKey() : operationKey.value
 	try {
 		const result = await assignCall(force, key)
 		if (result && result.already_active && !force) {

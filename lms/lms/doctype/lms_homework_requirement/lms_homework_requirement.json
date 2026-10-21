@@ -25,7 +25,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Requirement Type",
-   "options": "Open Lesson\nPass Quiz\nReference"
+   "options": "Open Lesson\nPass Quiz\nOpen Assignment\nReference"
   },
   {
    "fieldname": "course",

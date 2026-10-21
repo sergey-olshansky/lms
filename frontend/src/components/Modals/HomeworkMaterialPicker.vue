@@ -48,20 +48,33 @@
 
 				<!-- Tree -->
 				<div class="flex min-w-0 flex-1 flex-col gap-2">
-					<FormControl
-						type="text"
-						v-model="materialSearch"
-						:placeholder="__('Search materials')"
-						:aria-label="__('Search materials')"
-					>
-						<template #prefix>
-							<span class="lucide-search size-4 text-ink-gray-5" />
-						</template>
-					</FormControl>
+					<div class="flex items-center gap-2">
+						<FormControl
+							type="text"
+							v-model="materialSearch"
+							:placeholder="__('Search materials')"
+							:aria-label="__('Search materials')"
+							class="flex-1"
+						>
+							<template #prefix>
+								<span class="lucide-search size-4 text-ink-gray-5" />
+							</template>
+						</FormControl>
+						<!-- Spec 3.4.1: an entire course is selectable as one action. -->
+						<Checkbox
+							size="sm"
+							:label="__('Entire course')"
+							:model-value="wholeCourseState === 'checked'"
+							:indeterminate="wholeCourseState === 'indeterminate'"
+							:disabled="!activeCourseLeaves.length"
+							data-testid="picker-select-all"
+							@update:model-value="toggleWholeCourse"
+						/>
+					</div>
 					<div
 						class="flex-1 overflow-y-auto rounded-4 border border-outline-gray-2 p-2"
 					>
-						<div v-if="tree.loading" class="p-4 text-sm text-ink-gray-5">
+						<div v-if="treeLoading" class="p-4 text-sm text-ink-gray-5">
 							{{ __('Loading…') }}
 						</div>
 						<template v-else-if="materialSearch.trim()">
@@ -145,20 +158,24 @@
 </template>
 
 <script setup>
-import {
-	Button,
-	Checkbox,
-	Dialog,
-	FormControl,
-	createResource,
-} from 'frappe-ui'
+import { Button, Checkbox, Dialog, FormControl, call } from 'frappe-ui'
 import { computed, ref, watch } from 'vue'
 import TreeNodeRow from '@/components/HomeworkTreeNodeRow.vue'
-import { flattenWithPaths, toggleNode } from '@/utils/homeworkSelection'
+import {
+	collectLeafKeys,
+	flattenWithPaths,
+	toggleNode,
+} from '@/utils/homeworkSelection'
 
 // The spacious material picker (spec 3.4). It holds ONE selection Set across
 // course switches, searches and reloads; only "Add selected" hands it to the
 // form, and Cancel changes nothing (A08).
+//
+// R13: the confirm hands over the WHOLE edited set -- unchecking an attached
+// material removes it. The trees of every course an attached item lives in are
+// preloaded on open, so their indexes exist even if the teacher never browsed
+// them; a selected key whose tree still failed to load keeps its stored item
+// rather than silently dropping.
 const props = defineProps({
 	open: { type: Boolean, default: false },
 	courses: { type: Array, default: () => [] },
@@ -173,11 +190,18 @@ const materialSearch = ref('')
 const activeCourse = ref('')
 const selected = ref(new Set())
 const expanded = ref(new Set())
+const treeNodes = ref([])
+const treeLoading = ref(false)
 
 // Per-course leaf indexes (key -> node + readable path), built from each loaded
 // tree and kept for the whole picker session: the confirmed selection may span
 // several courses and must not be lost on switch (spec 3.4.3).
 const indexesByCourse = ref(new Map())
+
+// R11: trees load through real promises with a generation counter; the index is
+// stored under the REQUESTED course -- a slow answer for course A arriving while
+// course B is open can neither relabel A's materials as B's nor repaint B's tree.
+let treeGeneration = 0
 
 const filteredCourses = computed(() => {
 	if (!courseSearch.value.trim()) return props.courses
@@ -187,24 +211,56 @@ const filteredCourses = computed(() => {
 	)
 })
 
-const tree = createResource({
-	url: 'lms.lms.homework_api.get_homework_course_tree',
-	makeParams() {
-		return { course: activeCourse.value }
-	},
-	onSuccess(data) {
-		const index = flattenWithPaths(data.nodes || [])
-		indexesByCourse.value.set(activeCourse.value, index)
-		// The chosen course opens expanded to its first level.
-		expanded.value = new Set((data.nodes || []).map((node) => node.key))
-	},
-})
+const loadTree = (course) => {
+	const generation = ++treeGeneration
+	treeLoading.value = true
+	return call('lms.lms.homework_api.get_homework_course_tree', { course })
+		.then((data) => {
+			indexesByCourse.value.set(course, flattenWithPaths(data.nodes || []))
+			treesByCourse.set(course, data.nodes || [])
+			if (generation === treeGeneration && course === activeCourse.value) {
+				paintCourseTree(course)
+			}
+		})
+		.finally(() => {
+			if (generation === treeGeneration) treeLoading.value = false
+		})
+}
+
+const paintCourseTree = (course) => {
+	const nodes = treesByCourse.get(course) || []
+	treeNodes.value = nodes
+	expanded.value = new Set(nodes.map((node) => node.key))
+}
 
 const visibleNodes = computed(() =>
-	(tree.data?.nodes || []).filter(
+	treeNodes.value.filter(
 		(node) => node.assignable !== false || (node.children || []).length > 0
 	)
 )
+
+const activeCourseLeaves = computed(() => {
+	const nodes = visibleNodes.value.flatMap((node) => collectLeafKeys(node))
+	return [...new Set(nodes)]
+})
+
+const wholeCourseState = computed(() => {
+	const leaves = activeCourseLeaves.value
+	if (!leaves.length) return 'unchecked'
+	const picked = leaves.filter((key) => selected.value.has(key)).length
+	if (picked === 0) return 'unchecked'
+	if (picked === leaves.length) return 'checked'
+	return 'indeterminate'
+})
+
+const toggleWholeCourse = (checked) => {
+	const next = new Set(selected.value)
+	for (const key of activeCourseLeaves.value) {
+		if (checked) next.add(key)
+		else next.delete(key)
+	}
+	selected.value = next
+}
 
 const searchHits = computed(() => {
 	const index = indexesByCourse.value.get(activeCourse.value)
@@ -217,17 +273,35 @@ const searchHits = computed(() => {
 	return hits.slice(0, 100)
 })
 
+// Whole node trees per course, for repainting a cached course without a fetch.
+const treesByCourse = new Map()
+
 watch(
 	() => props.open,
-	(isOpen) => {
+	async (isOpen) => {
 		if (!isOpen) return
-		// Restore the attached items as checked leaves once their trees load;
-		// keys are stable across sessions (lesson:/quiz:/assignment: + docname).
+		// Restore the attached items as checked leaves; keys are stable across
+		// sessions (lesson:/quiz:/assignment: + docname).
 		selected.value = new Set(props.initialItems.map(itemToKey))
 		if (!activeCourse.value && props.courses.length) {
 			activeCourse.value = props.courses[0].name
 		}
-		if (activeCourse.value) tree.reload()
+		// R13: preload the trees of every course an attached item lives in, so
+		// the confirm can rebuild the whole set -- including removing an
+		// unchecked item from a course the teacher never opened this round.
+		const initialCourses = [
+			...new Set(props.initialItems.map((item) => item.course).filter(Boolean)),
+		]
+		const missing = initialCourses.filter(
+			(course) => !treesByCourse.has(course)
+		)
+		if (missing.length)
+			await Promise.allSettled(missing.map((course) => loadTree(course)))
+		if (activeCourse.value && !treesByCourse.has(activeCourse.value)) {
+			await loadTree(activeCourse.value)
+		} else if (activeCourse.value) {
+			paintCourseTree(activeCourse.value)
+		}
 	}
 )
 
@@ -238,8 +312,13 @@ const itemToKey = (item) => {
 	}:${item.name}`
 }
 
-watch(activeCourse, () => {
-	if (activeCourse.value) tree.reload()
+watch(activeCourse, async (course) => {
+	if (!course) return
+	if (treesByCourse.has(course)) {
+		paintCourseTree(course)
+		return
+	}
+	await loadTree(course)
 })
 
 const selectCourse = (name) => {
@@ -265,6 +344,9 @@ const onToggleExpand = (key) => {
 }
 
 const confirmSelection = () => {
+	// The whole edited set: every selected key resolved through its loaded
+	// index, plus any still-selected item whose tree never loaded (kept as it
+	// was stored -- never silently dropped).
 	const entries = []
 	const seen = new Set()
 	for (const [courseName, index] of indexesByCourse.value) {
@@ -287,6 +369,14 @@ const confirmSelection = () => {
 				path: found.path,
 			})
 		}
+	}
+	for (const item of props.initialItems) {
+		const key = itemToKey(item)
+		if (!selected.value.has(key)) continue
+		const dedupeKey = `${item.source_type}:${item.name}`
+		if (seen.has(dedupeKey)) continue
+		seen.add(dedupeKey)
+		entries.push(item)
 	}
 	emit('confirm', entries)
 }
