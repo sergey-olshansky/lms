@@ -243,10 +243,11 @@ const offsets = ref({})
 // student's board (the resource contract alone cannot guarantee ordering).
 let boardGeneration = 0
 
-// The page boundary of a column moves ONLY with a response that was actually
-// applied (B08): `offsets` holds the number of cards each column has loaded.
-// A failed or superseded fetch restores the boundary from the cards on screen,
-// so a retry asks for the very same page instead of skipping ten cards.
+// The confirmed depth of a column moves ONLY with a response that was actually
+// applied (B08/C03): `offsets` holds the number of cards each column shows after
+// the last accepted window. A failed or superseded fetch leaves the boundary
+// alone (or restores it from the cards on screen), so a retry asks for the same
+// logical page instead of skipping ten cards.
 const fetchBoard = ({ merge = false, offsets: requestedOffsets } = {}) => {
 	const generation = ++boardGeneration
 	const request = call('lms.lms.homework_api.get_homework_board', {
@@ -262,6 +263,11 @@ const fetchBoard = ({ merge = false, offsets: requestedOffsets } = {}) => {
 		.then((data) => {
 			if (generation !== boardGeneration) return
 			applyBoard(data, { merge })
+			// C03: the confirmed depth follows what was actually applied -- the
+			// authoritative window, never the number the request hoped for.
+			offsets.value = Object.fromEntries(
+				columns.value.map((column) => [column.status, column.cards.length])
+			)
 		})
 		.catch((error) => {
 			if (generation !== boardGeneration) return
@@ -282,34 +288,14 @@ const restoreOffsetsFromColumns = () => {
 	offsets.value = restored
 }
 
-// R12/B08: the server answers with the column's whole loaded DEPTH from the
-// top, so merging means: refreshed content for every known card, newly visible
-// cards appended, and cards that fell out of the requested window kept (a
-// transiently short response can never drop cards off the screen). A fresh
-// board replaces the columns; a failed fetch keeps what is on screen.
+// C02: the server answers with each column's whole requested window FROM THE
+// TOP, so every applied response -- load-more and refresh alike -- is
+// authoritative for that window. A card missing from the fresh window has
+// moved to another column or been recalled; keeping it would leave a stale
+// duplicate beside a count that disagrees. `merge` stays in the signature for
+// the call sites; with full-depth windows, replacing IS the merge.
 const applyBoard = (data, { merge }) => {
-	if (!merge) {
-		columns.value = data.columns
-		return
-	}
-	columns.value = columns.value.map((current) => {
-		const fresh = data.columns.find(
-			(column) => column.status === current.status
-		)
-		if (!fresh) return current
-		if (!current.cards.length) return fresh
-		const byName = new Map(current.cards.map((card) => [card.name, card]))
-		const refreshed = fresh.cards.map((card) => {
-			const known = byName.get(card.name)
-			return known ? { ...known, ...card } : card
-		})
-		const freshNames = new Set(fresh.cards.map((card) => card.name))
-		const kept = current.cards.filter((card) => !freshNames.has(card.name))
-		return {
-			...fresh,
-			cards: [...refreshed, ...kept],
-		}
-	})
+	columns.value = data.columns
 }
 
 const reloadBoard = () => {
@@ -425,18 +411,17 @@ const continueCard = async (card) => {
 }
 
 const loadMore = (status) => {
-	// B08: depth paging -- offsets hold how many cards each column has loaded,
-	// and the boundary moves ONLY with a response that was actually applied.
-	const previous = offsets.value[status] || 0
-	offsets.value = { ...offsets.value, [status]: previous + 10 }
-	const pending = fetchBoard({ merge: true })
-	// A dispatch that hands nothing back never reached the server: restore the
-	// boundary synchronously so the retry asks for the same page again. The
-	// promise path restores from the applied columns in fetchBoard itself, on
-	// both rejection and stale-generation discard.
-	if (!pending || typeof pending.then !== 'function') {
+	// C03: the first page is always on screen before this button exists, so the
+	// confirmed depth starts at the page size; each accepted load-more raises
+	// the requested window by one page. The requested depth moves first and
+	// rolls back on rejection, so an error retries the same logical page; the
+	// confirmed depth itself is re-derived from the applied columns.
+	const previous = offsets.value[status] || 10
+	const requested = previous + 10
+	offsets.value = { ...offsets.value, [status]: requested }
+	fetchBoard({ merge: true }).catch(() => {
 		offsets.value = { ...offsets.value, [status]: previous }
-	}
+	})
 }
 
 // R18/B08: a board left open goes stale while the student works elsewhere; a

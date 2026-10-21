@@ -1424,9 +1424,13 @@ const openAttemptReport = (attempt: QuizAttempt): void => {
 	reportAttempt.value = attempt
 }
 
-// B11: the addressed attempt (the homework checklist's proof link). Fetched
-// from the member-filtered list, so a stale or foreign name simply opens
-// nothing; the modal itself re-checks read permissions on its document load.
+// B11/C05: the addressed attempt (the homework checklist's proof link). The
+// lookup is by name only -- read permissions are the server's business, and a
+// teacher following the link must find the STUDENT's submission, which a
+// current-user member filter would always hide. When nothing readable comes
+// back, the modal still mounts on a minimal stub so its own permission-checked
+// document load shows the standard error/retry UI instead of silently landing
+// on the plain quiz page.
 watch(
 	() => props.reportSubmission,
 	(submission) => {
@@ -1435,7 +1439,6 @@ watch(
 			doctype: 'LMS Quiz Submission',
 			filters: {
 				name: submission,
-				member: user.data?.name,
 			},
 			fields: [
 				'name',
@@ -1447,9 +1450,13 @@ watch(
 			],
 		})
 			.then((rows) => {
-				if (rows?.length) reportAttempt.value = rows[0]
+				reportAttempt.value = rows?.length
+					? rows[0]
+					: ({ name: submission } as QuizAttempt)
 			})
-			.catch(() => {})
+			.catch(() => {
+				reportAttempt.value = { name: submission } as QuizAttempt
+			})
 	},
 	{ immediate: true }
 )

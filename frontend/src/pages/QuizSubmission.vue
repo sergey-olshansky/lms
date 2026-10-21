@@ -109,11 +109,21 @@
 								>
 									{{ __('Marks:') }}
 								</span>
+								<!-- Task #35 (C01): a typed value IS the verdict --
+								     including a deliberate 0 -- and writes the row's
+								     graded flag in the same edit; clearing the input
+								     takes the verdict back. The flag survives the Int
+								     serialization that stores an ungraded answer as 0. -->
 								<FormControl
 									v-if="row.status === 'pending'"
 									v-model="resultRow.marks"
 									type="number"
 									class="w-20"
+									@update:model-value="
+										(value) =>
+											(resultRow.graded =
+												value === null || value === '' ? 0 : 1)
+									"
 								/>
 								<span
 									v-else
@@ -414,7 +424,9 @@ const questionsByName = computed(
 // clears the same allowlist every external window of the app does.
 const downloadPdf = () => {
 	openExternal(
-		`/api/method/lms.lms.doctype.lms_quiz.quiz_attempt_report.download_attempt_report_pdf?submission=${encodeURIComponent(props.submission)}`
+		`/api/method/lms.lms.doctype.lms_quiz.quiz_attempt_report.download_attempt_report_pdf?submission=${encodeURIComponent(
+			props.submission
+		)}`
 	)
 }
 

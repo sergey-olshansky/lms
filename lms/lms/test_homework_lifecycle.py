@@ -498,6 +498,9 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 		self.assertEqual(doc.status, "In Progress")  # no false success yet
 
 		# The teacher grades; the submission's save recomputes the homework.
+		# C01: a verdict is marks AND the explicit graded flag together -- the
+		# grading page writes both; the controller accepts the flag only from a
+		# permitted grader.
 		frappe.set_user(self.teacher.email)
 		submission = frappe.get_all(
 			"LMS Quiz Submission",
@@ -507,6 +510,7 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 		submission_doc = frappe.get_doc("LMS Quiz Submission", submission)
 		for result_row in submission_doc.result:
 			result_row.marks = result_row.marks_out_of
+			result_row.graded = 1
 		submission_doc.save()
 
 		doc = frappe.get_doc("LMS Homework Assignment", name)
@@ -569,7 +573,8 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 		self.assertEqual(row.status, "Awaiting Grading")
 		self.assertEqual(doc.status, "In Progress")
 
-		# A partial FINAL grade (3 of 5) is a verdict, not a pending state.
+		# A partial FINAL grade (3 of 5) is a verdict, not a pending state:
+		# marks plus the explicit graded flag (C01), as the grading page sends.
 		frappe.set_user(self.teacher.email)
 		submission = frappe.get_all(
 			"LMS Quiz Submission",
@@ -580,6 +585,7 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 		for result_row in submission_doc.result:
 			if result_row.question_type == "Open Ended":
 				result_row.marks = 3
+				result_row.graded = 1
 		submission_doc.save()
 
 		doc = frappe.get_doc("LMS Homework Assignment", name)
@@ -921,12 +927,16 @@ class TestHomeworkRound2(BaseTestUtils, IntegrationTestCase):
 			limit=1,
 		)[0]
 
-	# --- B02: the grading signal is per-answer, not modified_by ---------------
+	# --- C01: the grading signal survives Int serialization -------------------
 
 	def test_partial_autosave_of_two_open_answers_still_awaits(self):
 		"""The grading page autosaves one typed mark at a time: one graded answer
 		of two leaves the attempt unjudged; a FINAL ZERO on the second is the
-		completing verdict, and only then may the card reach Review."""
+		completing verdict, and only then may the card reach Review.
+
+		Also pins the storage contract this rests on (C01): ``marks`` is Int, so
+		an ungraded open answer reloads from the database as 0 -- the explicit
+		``graded`` flag is what separates it from a deliberate zero."""
 		self._enroll(self.student)
 		questions = []
 		for prompt in ("Explain gravity", "Explain entropy"):
@@ -944,16 +954,18 @@ class TestHomeworkRound2(BaseTestUtils, IntegrationTestCase):
 		# Pass Quiz requirement is the two-answer quiz, not self.quiz.
 		lesson = self._lesson("Two open lesson", QUIZ_BLOCK.format(quiz.name))
 		template = self._template("Two open answers", lessons=[lesson])
-		name = self._assign(template, self.student, "key-b02")["name"]
+		name = self._assign(template, self.student, "key-c01")["name"]
 
 		frappe.set_user(self.student.email)
 		homework_service.record_lesson_opened(lesson.name)
+		# The quiz client sends answers as LISTS (SavedAnswer); a bare string is
+		# rejected by _validate_quiz_results before anything is stored.
 		submit_quiz(
 			quiz.name,
 			json.dumps(
 				[
-					{"question_name": questions[0].name, "answer": "First essay"},
-					{"question_name": questions[1].name, "answer": "Second essay"},
+					{"question_name": questions[0].name, "answer": ["First essay"]},
+					{"question_name": questions[1].name, "answer": ["Second essay"]},
 				]
 			),
 		)
@@ -963,13 +975,25 @@ class TestHomeworkRound2(BaseTestUtils, IntegrationTestCase):
 		row = next(row for row in doc.requirements if row.requirement_type == "Pass Quiz")
 		self.assertEqual(row.status, "Awaiting Grading")
 
-		# Autosave after grading ONLY the first answer: the second row's marks
-		# stay NULL, so the attempt is still unjudged -- modified_by already
-		# names the teacher and says nothing.
+		# The storage round-trip the reviewer asked to pin down: reloaded from
+		# the DB, the ungraded answer's marks READ AS 0 (Int serialization of a
+		# missing value) and graded is 0 -- exactly why the flag, not the
+		# number, decides.
+		submission = frappe.get_doc("LMS Quiz Submission", self._submission_of(quiz.name, self.student.email))
+		open_rows = [r for r in submission.result if r.question_type == "Open Ended"]
+		self.assertEqual(open_rows[0].marks, 0)
+		self.assertEqual(open_rows[1].marks, 0)
+		self.assertFalse(open_rows[0].graded)
+		self.assertFalse(open_rows[1].graded)
+
+		# Autosave after grading ONLY the first answer (marks plus the flag the
+		# grading page writes with it): the second row stays unflagged, so the
+		# attempt is still unjudged -- its numeric 0 says nothing.
 		frappe.set_user(self.teacher.email)
 		submission = frappe.get_doc("LMS Quiz Submission", self._submission_of(quiz.name, self.student.email))
 		open_rows = [r for r in submission.result if r.question_type == "Open Ended"]
 		open_rows[0].marks = 5
+		open_rows[0].graded = 1
 		submission.save()
 
 		doc = frappe.get_doc("LMS Homework Assignment", name)
@@ -978,11 +1002,12 @@ class TestHomeworkRound2(BaseTestUtils, IntegrationTestCase):
 		self.assertEqual(doc.status, "In Progress")
 		self.assertIsNone(homework_service.passed_quiz_evidence(self.student.email, quiz.name))
 
-		# The final zero on the second answer completes the grading.
+		# The final zero on the second answer completes the grading: the same
+		# numeric value it already stored, but now with a verdict behind it.
 		submission = frappe.get_doc("LMS Quiz Submission", self._submission_of(quiz.name, self.student.email))
 		open_rows = [r for r in submission.result if r.question_type == "Open Ended"]
-		self.assertIsNone(open_rows[1].marks)
 		open_rows[1].marks = 0
+		open_rows[1].graded = 1
 		submission.save()
 
 		doc = frappe.get_doc("LMS Homework Assignment", name)
@@ -990,6 +1015,38 @@ class TestHomeworkRound2(BaseTestUtils, IntegrationTestCase):
 		self.assertEqual(row.status, "Completed")
 		self.assertEqual(row.proof_name, submission.name)
 		self.assertEqual(doc.status, "Review")
+
+	def test_open_answer_flag_cannot_be_self_awarded(self):
+		"""The grading flag is a grader's act (C01): the member's own save can
+		never finalize an answer, and an outsider recording a verdict is
+		refused by the submission controller."""
+		self._enroll(self.student)
+		question = frappe.new_doc("LMS Question")
+		question.update({"question": "Explain something", "type": "Open Ended"})
+		question.save()
+		quiz = frappe.new_doc("LMS Quiz")
+		quiz.update({"title": "HW2 Flag Quiz", "passing_percentage": 50, "total_marks": 5})
+		quiz.append("questions", {"question": question.name, "marks": 5, "type": "Open Ended"})
+		quiz.save()
+
+		frappe.set_user(self.student.email)
+		submit_quiz(quiz.name, json.dumps([{"question_name": question.name, "answer": ["My essay"]}]))
+		submission = frappe.get_doc(
+			"LMS Quiz Submission", self._submission_of(quiz.name, self.student.email)
+		)
+		# The author tries to finalize their own answer.
+		submission.result[0].graded = 1
+		submission.save()
+		submission = frappe.get_doc("LMS Quiz Submission", submission.name)
+		self.assertFalse(submission.result[0].graded)
+		self.assertTrue(homework_service._submission_awaiting_grading(submission.name))
+
+		# A teacher with no review right on this quiz cannot record a verdict.
+		outsider = self.student2
+		frappe.set_user(outsider.email)
+		submission.result[0].graded = 1
+		with self.assertRaises(frappe.PermissionError):
+			submission.save()
 
 	# --- B03: the whole attempt history is consulted --------------------------
 
@@ -1022,6 +1079,10 @@ class TestHomeworkRound2(BaseTestUtils, IntegrationTestCase):
 		evidence = homework_service.passed_quiz_evidence(self.student.email, self.quiz.name)
 		self.assertEqual(evidence, old_pass)
 
+		# C07: annulment is a staff act, not a student one -- LMS Student holds
+		# no delete on quiz submissions. The teacher's delete fires the
+		# after_delete hook, and the credit goes with the attempt.
+		frappe.set_user(self.teacher.email)
 		frappe.delete_doc("LMS Quiz Submission", old_pass)
 		self.assertIsNone(homework_service.passed_quiz_evidence(self.student.email, self.quiz.name))
 
@@ -1095,11 +1156,15 @@ class TestHomeworkRound2(BaseTestUtils, IntegrationTestCase):
 		homework_service.recompute_quiz_requirements(self.student.email, self.quiz.name)
 		doc = frappe.get_doc("LMS Homework Assignment", name)
 		self.assertEqual(doc.status, "Review")
-		# The recovery writes history once, not per recompute (A32).
+		# C07: two review CYCLES legitimately record two submitted_for_review
+		# events -- dedupe means a recompute must not add a third, not that the
+		# first cycle's event disappears. Count the increment, then the no-op.
+		events = [row for row in doc.history if row.event == "submitted_for_review"]
+		self.assertEqual(len(events), 2)
 		homework_service.recompute_quiz_requirements(self.student.email, self.quiz.name)
 		doc = frappe.get_doc("LMS Homework Assignment", name)
 		self.assertEqual(
-			len([row for row in doc.history if row.event == "submitted_for_review"]), 1
+			len([row for row in doc.history if row.event == "submitted_for_review"]), 2
 		)
 
 	# --- B07: the whole snapshot is guarded, evidence and history included ----
@@ -1164,9 +1229,13 @@ class TestHomeworkRound2(BaseTestUtils, IntegrationTestCase):
 				items=[{"source_type": "Lesson", "name": foreign_lesson.name}],
 			)
 
-		# Direct document write: the same invariant in the doctype controller.
-		doc = frappe.new_doc("LMS Homework")
-		doc.update(
+		# Direct document writes land on two distinct refusals (C07):
+		# a MALFORMED row claims the lesson lives in this teacher's course --
+		# that is a data lie and raises ValidationError; an HONEST row names the
+		# foreign course and is refused for lack of sourcing rights
+		# (PermissionError). Both blocked, by the branch that fits the case.
+		forged = frappe.new_doc("LMS Homework")
+		forged.update(
 			{
 				"title": "Forged row",
 				"days": 2,
@@ -1183,8 +1252,29 @@ class TestHomeworkRound2(BaseTestUtils, IntegrationTestCase):
 				],
 			}
 		)
+		with self.assertRaises(frappe.ValidationError):
+			forged.insert()
+
+		honest = frappe.new_doc("LMS Homework")
+		honest.update(
+			{
+				"title": "Honest foreign row",
+				"days": 2,
+				"items": [
+					{
+						"source_type": "Lesson",
+						"lesson": foreign_lesson.name,
+						"quiz": None,
+						"assignment": None,
+						"course": other_course.name,
+						"label": "Someone else's lesson",
+						"path": "Someone else's lesson",
+					}
+				],
+			}
+		)
 		with self.assertRaises(frappe.PermissionError):
-			doc.insert()
+			honest.insert()
 
 		# And issuance re-resolves anyway: a forged stored course cannot borrow
 		# this teacher's rights (defense in depth).
@@ -1211,3 +1301,62 @@ class TestHomeworkRound2(BaseTestUtils, IntegrationTestCase):
 			card["continue_target"],
 			{"type": "assignment", "assignment": written.name, "course": self.course.name},
 		)
+
+	# --- C06: deferred events freeze on recalled cards; workers keep counts ---
+
+	def test_cancelled_card_frozen_for_deferred_events(self):
+		"""A recalled card is history: even the recovery paths that re-apply
+		events after write races -- the queued opening job and the quiz-retry
+		recompute -- must leave its rows, counters, status and audit alone."""
+		self._enroll(self.student)
+		template = self._template("Frozen deferred", lessons=[self.lesson_quiz])
+		name = self._assign(template, self.student, "key-c06-frozen")["name"]
+
+		frappe.set_user(self.student.email)
+		homework_service.mark_started(name)
+		frappe.set_user(self.teacher.email)
+		homework_service.revoke(name, "Not this semester")
+
+		before = frappe.get_doc("LMS Homework Assignment", name)
+		before_rows = {row.name: row.status for row in before.requirements}
+		before_events = [row.event for row in before.history]
+
+		# The queued opening job fires after the recall.
+		frappe.set_user(self.student.email)
+		homework_service.apply_opening_job(
+			self.student.email, name, lesson=self.lesson_quiz.name, attempt=1
+		)
+		# And the quiz-retry recompute path with a fresh pass on record.
+		frappe.set_user(self.teacher.email)
+		homework_service._recompute_with_retry_or_enqueue(
+			name, member=self.student.email, quiz=self.quiz.name
+		)
+
+		after = frappe.get_doc("LMS Homework Assignment", name)
+		self.assertEqual({row.name: row.status for row in after.requirements}, before_rows)
+		self.assertEqual([row.event for row in after.history], before_events)
+		self.assertEqual(after.status, before.status)
+		self.assertEqual(after.first_opened_at, before.first_opened_at)
+		self.assertEqual(after.completed_requirements, before.completed_requirements)
+
+	def test_worker_recompute_refreshes_counters_with_availability(self):
+		"""The queued catch-up worker saves row transitions together with their
+		aggregates: a Completed row turning Unavailable drops the counter in the
+		same write, never leaving a stale '1 of 1 done' over a dead source."""
+		self._enroll(self.student)
+		template = self._template("Worker counters", lessons=[self.lesson_quiz])
+		name = self._assign(template, self.student, "key-c06-counters")["name"]
+
+		frappe.set_user(self.student.email)
+		homework_service.record_lesson_opened(self.lesson_quiz.name)
+		self._submit(self.student, correct=True)
+
+		frappe.set_user(self.teacher.email)
+		frappe.delete_doc("Course Lesson", self.lesson_quiz.name)
+
+		homework_service.recompute_assignment(name)
+		doc = frappe.get_doc("LMS Homework Assignment", name)
+		lesson_row = next(row for row in doc.requirements if row.requirement_type == "Open Lesson")
+		self.assertEqual(lesson_row.status, "Unavailable")
+		self.assertEqual(doc.total_requirements, 2)
+		self.assertEqual(doc.completed_requirements, 1)

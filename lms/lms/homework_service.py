@@ -299,29 +299,28 @@ def quiz_awaiting_grading(member: str, quiz: str) -> bool:
 
 
 def _submission_awaiting_grading(submission_name: str) -> bool:
-	"""One submission: does any answered open-ended question still have no
+	"""One submission: does any answered open-ended question still lack a
 	recorded verdict?
 
-	The signal is the grader's own field, not a save timestamp (B02): the quiz
-	client submits only ``{question_name, answer}`` (SavedAnswer) and
-	``process_results`` writes ``marks`` for every objective row but none for
-	Open Ended, so an unanswered-by-grader row stores NULL. The grading page
-	binds that NULL into an empty input and writes a verdict -- any verdict: a
-	final zero and a final partial mark are recorded values, indistinguishable
-	from full marks by design. Therefore ``marks IS NULL`` on an answered
-	open-ended row means precisely "no verdict exists yet": the 1-second
-	autosave that graded one answer of two leaves the submission awaiting,
-	and ``modified_by`` -- which the old heuristic read -- is not consulted
-	at all, because it says nothing about WHICH answers were judged."""
+	The signal is the explicit ``graded`` flag on the row (C01), not the marks
+	value and not ``modified_by``. ``marks`` is an Int field whose serialization
+	stores a missing value as 0, so an untouched answer and a final zero are
+	numerically identical in the database; the flag is what the grading page
+	writes when a verdict -- any verdict: full, partial, or a deliberate 0 -- is
+	entered, and what the controller lets only a permitted grader set. A
+	1-second autosave that graded one answer of two leaves the other unflagged
+	and the submission awaiting. Attempts recorded before the flag existed read
+	as unjudged until a grader re-opens and finalizes them: no fact of manual
+	grading is ever invented for them."""
 	rows = frappe.get_all(
 		"LMS Quiz Result",
 		filters={"parent": submission_name, "parenttype": "LMS Quiz Submission"},
-		fields=["question_type", "answer", "marks"],
+		fields=["question_type", "answer", "graded"],
 	)
 	return any(
 		row.question_type == "Open Ended"
 		and (row.answer or "").strip()
-		and row.marks is None
+		and not row.graded
 		for row in rows
 	)
 
@@ -407,12 +406,16 @@ def _record_opening_of(user: str, lesson: str | None = None, assignment: str | N
 	return {"updated": updated}
 
 
-def _persist_opening(name: str, user: str, lesson: str | None = None, assignment: str | None = None) -> bool:
+def _persist_opening(
+	name: str, user: str, lesson: str | None = None, assignment: str | None = None, attempt: int = 1
+) -> bool:
 	"""Apply and persist one opening on one card, racing other writers safely.
 
 	Repeated write conflicts never lose the credit (B06): after one fresh retry
 	the opening is re-applied by a queued job, so a card cannot stay un-credited
-	or un-started because somebody else saved first."""
+	or un-started because somebody else saved first. The whole chain is frozen
+	for a recalled card (C06): every application point re-checks ``cancelled``,
+	so a deferred event on revoked work is a no-op, not a change of history."""
 	doc = frappe.get_doc("LMS Homework Assignment", name)
 	if not _apply_material_opening(doc, lesson=lesson, assignment=assignment):
 		return True
@@ -433,28 +436,57 @@ def _persist_opening(name: str, user: str, lesson: str | None = None, assignment
 			return True
 		except frappe.TimestampMismatchError:
 			frappe.clear_last_message()
-			if not frappe.flags.in_test:
-				frappe.enqueue(
-					apply_opening_job,
-					queue="short",
-					enqueue_after_commit=True,
-					user=user,
-					name=name,
-					lesson=lesson,
-					assignment=assignment,
-				)
+			_enqueue_opening_job(user, name, lesson=lesson, assignment=assignment, attempt=attempt)
 	return False
 
 
-def apply_opening_job(user: str, name: str, lesson: str | None = None, assignment: str | None = None) -> None:
+def _enqueue_opening_job(user: str, name: str, lesson: str | None, assignment: str | None, attempt: int) -> None:
+	"""The bounded recovery tail for deferred openings (C06): at most a few
+	queued re-applications, then an observable log entry -- never an endless
+	self-re-enqueue, and never silently dropped either."""
+	if frappe.flags.in_test:
+		frappe.log_error(
+			title="Homework opening deferred after repeated write races",
+			message=f"assignment={name} user={user} attempt={attempt}",
+		)
+		return
+	if attempt >= 3:
+		frappe.log_error(
+			title="Homework opening kept losing write races",
+			message=f"assignment={name} user={user} attempts={attempt}",
+		)
+		return
+	frappe.enqueue(
+		apply_opening_job,
+		queue="short",
+		enqueue_after_commit=True,
+		user=user,
+		name=name,
+		lesson=lesson,
+		assignment=assignment,
+		attempt=attempt + 1,
+	)
+
+
+def apply_opening_job(
+	user: str, name: str, lesson: str | None = None, assignment: str | None = None, attempt: int = 1
+) -> None:
 	"""Queued re-application of one confirmed opening after repeated write races
-	(B06): the opening is a recorded fact, not a request to be retried by hand."""
-	_persist_opening(name, user, lesson=lesson, assignment=assignment)
+	(B06): the opening is a recorded fact, not a request to be retried by hand.
+	A card recalled before the job runs is frozen history -- the cancelled
+	check inside makes this a safe no-op (C06)."""
+	_persist_opening(name, user, lesson=lesson, assignment=assignment, attempt=attempt)
 
 
 def _apply_material_opening(assignment_doc, lesson: str | None = None, assignment: str | None = None) -> bool:
 	"""Idempotently credit the opening on one assignment. Returns False when the
-	row has nothing left to do here (also the dedupe across concurrent events)."""
+	row has nothing left to do here (also the dedupe across concurrent events).
+
+	A recalled card is frozen history (C06): every deferred or retried caller
+	lands here, so this is the one place the freeze is enforced -- a queued
+	opening must never complete, start or otherwise move revoked work."""
+	if assignment_doc.cancelled:
+		return False
 	touched = False
 	for row in assignment_doc.requirements:
 		if row.status in COMPLETED_STATUSES or row.status == "Unavailable":
@@ -724,8 +756,12 @@ def _recompute_one_assignment(name: str, *, member: str | None = None, quiz: str
 def _recompute_with_retry_or_enqueue(name: str, *, member: str, quiz: str) -> None:
 	"""The conflict-recovery half of R19: exactly one fresh retry, then a queued
 	after-commit recompute. The student's quiz save has already succeeded; the
-	requirement must catch up without anyone having to re-submit."""
+	requirement must catch up without anyone having to re-submit. A card
+	recalled between the conflict and the retry is frozen here (C06): the fresh
+	row is re-read and its cancellation checked before anything is applied."""
 	fresh = frappe.get_doc("LMS Homework Assignment", name)
+	if fresh.cancelled:
+		return
 	fresh.flags.homework_service = True
 	for row in fresh.requirements:
 		if row.requirement_type == REQUIREMENT_PASS_QUIZ and row.quiz == quiz:
@@ -739,14 +775,23 @@ def _recompute_with_retry_or_enqueue(name: str, *, member: str, quiz: str) -> No
 		return
 	except frappe.TimestampMismatchError:
 		frappe.clear_last_message()
-	if not frappe.flags.in_test:
-		frappe.enqueue(
-			recompute_quiz_requirements,
-			queue="short",
-			enqueue_after_commit=True,
-			member=member,
-			quiz=quiz,
+	# The bounded queue carries the rest (C06): the worker re-checks the card,
+	# refreshes rows AND counters, and retries the transition itself.
+	if frappe.flags.in_test:
+		frappe.log_error(
+			title="Homework recompute deferred after repeated write races",
+			message=f"assignment={name} member={member} quiz={quiz}",
 		)
+		return
+	frappe.enqueue(
+		recompute_assignment,
+		queue="short",
+		enqueue_after_commit=True,
+		name=name,
+		member=member,
+		quiz=quiz,
+		attempt=1,
+	)
 
 
 def _refresh_availability(assignment) -> bool:
@@ -839,9 +884,12 @@ def _maybe_auto_review(assignment) -> None:
 	must turn its row Unavailable before this decision, not after it on some
 	later page view, so a card can never ride a stale Completed into Review.
 	Counters move in the SAME write (B04): a row that just turned Unavailable
-	must not leave a stale "1 of 1 done" on the card. A write race is recovered
+	must not leave a stale "1 of 1 done" on the card. A recalled card is frozen
+	history (C06): no rows, no counters, no audit. A write race is recovered
 	once from fresh state with every guard re-checked, then handed to the real
 	queue (B06) -- never shrugged off with the card stranded in In Progress."""
+	if assignment.cancelled:
+		return
 	availability_changed = _refresh_availability(assignment)
 	if availability_changed:
 		_refresh_counts(assignment)
@@ -895,14 +943,16 @@ def _recover_auto_review_after_race(assignment) -> None:
 		_enqueue_assignment_recompute(fresh.name)
 
 
-def _enqueue_assignment_recompute(name: str, attempt: int = 1) -> None:
-	"""The finite, observable recovery path (B06): the real short queue re-runs
-	the full catch-up for one card. Under tests no worker exists, so the deferral
-	is logged instead -- visible in the Error Log, never silent."""
+def _enqueue_assignment_recompute(
+	name: str, attempt: int = 1, member: str | None = None, quiz: str | None = None
+) -> None:
+	"""The finite, observable recovery path (B06/C06): the real short queue
+	re-runs the full catch-up for one card. Under tests no worker exists, so the
+	deferral is logged instead -- visible in the Error Log, never silent."""
 	if frappe.flags.in_test:
 		frappe.log_error(
 			title="Homework recompute deferred after repeated write races",
-			message=f"assignment={name} attempt={attempt}",
+			message=f"assignment={name} attempt={attempt} member={member} quiz={quiz}",
 		)
 		return
 	frappe.enqueue(
@@ -911,30 +961,52 @@ def _enqueue_assignment_recompute(name: str, attempt: int = 1) -> None:
 		enqueue_after_commit=True,
 		name=name,
 		attempt=attempt,
+		member=member,
+		quiz=quiz,
 	)
 
 
-def recompute_assignment(name: str, attempt: int = 1) -> None:
-	"""Queued catch-up for one card (B06): refresh availability and counters,
-	then retry the auto-review transition. The proofs are already stored, so no
-	student action is needed to un-stick a finished card. Re-enqueues itself a
+def recompute_assignment(
+	name: str, member: str | None = None, quiz: str | None = None, attempt: int = 1
+) -> None:
+	"""Queued catch-up for one card (B06/C06): refresh availability, the quiz
+	proof rows when addressed, the counters AND the auto-review transition --
+	the proofs are already stored, so no student action is needed to un-stick a
+	finished card. Counters are recomputed inline (mirroring
+	``_refresh_counts``) so this worker can never save a row transition without
+	its aggregate. A recalled card is frozen history. Re-enqueues itself a
 	bounded number of times should writers keep racing it; past that bound the
 	deferral is logged, and any later event re-triggers this same path."""
 	assignment = frappe.get_doc("LMS Homework Assignment", name)
 	if assignment.cancelled:
 		return
 	changed = _refresh_availability(assignment)
+	if member and quiz:
+		for row in assignment.requirements:
+			if row.requirement_type == REQUIREMENT_PASS_QUIZ and row.quiz == quiz:
+				if row.status != "Unavailable":
+					changed |= _refresh_quiz_requirement(assignment, row, member, quiz)
 	if _apply_auto_review(assignment):
 		changed = True
 	if not changed:
 		return
+	rows = [row for row in assignment.requirements if row.requirement_type in CHECKABLE_TYPES]
+	assignment.total_requirements = len(rows)
+	assignment.completed_requirements = sum(1 for row in rows if row.status in COMPLETED_STATUSES)
+	assignment.lessons_total = sum(1 for row in rows if row.requirement_type == REQUIREMENT_OPEN_LESSON)
+	assignment.quizzes_total = sum(1 for row in rows if row.requirement_type == REQUIREMENT_PASS_QUIZ)
+	assignment.quizzes_completed = sum(
+		1
+		for row in rows
+		if row.requirement_type == REQUIREMENT_PASS_QUIZ and row.status in COMPLETED_STATUSES
+	)
 	assignment.flags.homework_service = True
 	try:
 		assignment.save(ignore_permissions=True)
 	except frappe.TimestampMismatchError:
 		frappe.clear_last_message()
 		if attempt < 3:
-			_enqueue_assignment_recompute(name, attempt + 1)
+			_enqueue_assignment_recompute(name, attempt + 1, member=member, quiz=quiz)
 		else:
 			frappe.log_error(
 				title="Homework recompute kept losing write races",

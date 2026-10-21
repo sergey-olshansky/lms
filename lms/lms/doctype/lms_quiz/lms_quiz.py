@@ -613,6 +613,9 @@ def process_results(results: list, quiz_details: dict):
 			else:
 				result["marks"] = -quiz_details.marks_to_cut if quiz_details.enable_negative_marking else 0
 			result["is_correct"] = 1 if correct else 0
+			# The machine's verdict is a verdict (task #35, C01): objective rows
+			# arrive graded, only open-ended answers wait for a human one.
+			result["graded"] = 1
 
 		else:
 			is_open_ended = True
@@ -769,6 +772,8 @@ def merge_credited_results(quiz_questions: dict, credited: dict, results: list) 
 		result["marks"] = marks
 		result["marks_out_of"] = marks
 		result["is_correct"] = 1
+		# Carried answers carry their verdict with them (task #35, C01).
+		result["graded"] = 1
 
 	for question_name, source in credited.items():
 		if question_name in submitted:
@@ -785,6 +790,7 @@ def merge_credited_results(quiz_questions: dict, credited: dict, results: list) 
 				"marks": cint(current.marks),
 				"marks_out_of": cint(current.marks),
 				"is_correct": 1,
+				"graded": 1,
 			}
 		)
 

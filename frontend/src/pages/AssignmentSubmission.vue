@@ -1,17 +1,17 @@
 <template>
 	<PageHeader v-if="!fromLesson" :breadcrumbs="breadcrumbs" />
-	<!-- Task #35 (R10/B10): a written assignment opened through the homework
-	     carries its context; the confirmed opening is the agreed condition for
-	     it. The opening is recorded only after the material actually loaded and
-	     rendered (the child's `displayed` event) and only when the banner's
-	     payload says the viewer IS the student -- a teacher's preview fires no
-	     student action at all. -->
+	<!-- Task #35 (R10/B10/C04): a written assignment opened through the
+	     homework carries its context; the confirmed opening is the agreed
+	     condition for it. The opening is recorded after the material actually
+	     loaded and rendered (the child's `displayed` event) for EVERY visitor
+	     of the material's own page -- ?hw= or not: working the course directly
+	     counts just as much (A22), and the server itself finds only this
+	     student's applicable assignments and refuses everyone else's events. -->
 	<HomeworkContextBanner
 		v-if="homeworkContext"
 		ref="homeworkBanner"
 		:assignment-id="homeworkContext"
 		data-testid="homework-back-banner"
-		@summary="onHomeworkSummary"
 	/>
 	<div class="overflow-hidden h-[calc(100vh-3.2rem)]">
 		<Assignment
@@ -62,29 +62,22 @@ const homeworkBanner = ref<InstanceType<typeof HomeworkContextBanner> | null>(
 	null
 )
 
-// B10: the opening needs BOTH facts -- the material was really shown, and the
-// viewer really is the student of this card (the banner's structured payload).
-// Whichever arrives first waits for the other; a teacher preview or a stale
-// ?hw= link records nothing.
-const homeworkSummary = ref<{
-	viewer_is_student?: boolean
-} | null>(null)
+// C04: the recorded fact is "this material was really shown to this visitor".
+// It needs no homework UI context -- the banner is for the way back and the
+// live progress, never the right to send the event. The server authorizes:
+// the student's own active assignments are updated, a teacher's preview
+// touches nothing (no assignment of the teacher as student), and an
+// unauthorized viewer is refused there.
 const assignmentDisplayed = ref(false)
 const openingRecorded = ref(false)
 
 watch(
 	() => props.assignmentID,
 	() => {
-		homeworkSummary.value = null
 		assignmentDisplayed.value = false
 		openingRecorded.value = false
 	}
 )
-
-const onHomeworkSummary = (data: { viewer_is_student?: boolean }) => {
-	homeworkSummary.value = data
-	maybeRecordAssignmentOpen()
-}
 
 const onAssignmentDisplayed = () => {
 	assignmentDisplayed.value = true
@@ -92,9 +85,7 @@ const onAssignmentDisplayed = () => {
 }
 
 const maybeRecordAssignmentOpen = () => {
-	if (!homeworkContext.value || openingRecorded.value) return
-	if (!assignmentDisplayed.value || !homeworkSummary.value) return
-	if (!homeworkSummary.value.viewer_is_student) return
+	if (openingRecorded.value || !assignmentDisplayed.value) return
 	openingRecorded.value = true
 	call('lms.lms.homework_api.record_assignment_material_opened', {
 		assignment: props.assignmentID,
