@@ -46,7 +46,7 @@
 				item-key="name"
 				group="chapters"
 				:draggable="'.chapter-item'"
-				:handle="'.outline-drag-handle[data-sortable-level=\"1\"]'"
+				:handle="'.outline-drag-handle-level-1'"
 				:filter="'.outline-section-row, .outline-lesson-row, .scorm-section-row'"
 				:preventOnFilter="false"
 				@end="updateChapterOrder"

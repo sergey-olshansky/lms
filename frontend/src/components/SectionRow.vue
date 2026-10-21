@@ -19,6 +19,7 @@
 					<div
 						v-if="allowEdit && !section.is_scorm_package"
 						class="lucide-grip-vertical outline-drag-handle mt-0.5 size-4 shrink-0 cursor-grab text-ink-gray-5 active:cursor-grabbing"
+						:class="level === 1 ? 'outline-drag-handle-level-1' : ''"
 						:data-sortable-level="currentLevel"
 						:title="__('Drag to reorder')"
 						aria-hidden="true"
