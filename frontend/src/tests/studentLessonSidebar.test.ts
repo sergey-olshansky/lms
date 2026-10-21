@@ -2,7 +2,7 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import StudentLessonSidebar from '@/components/StudentLessonSidebar.vue'
 
-const outline = vi.hoisted(() => [
+const flatOutline = vi.hoisted(() => [
 	{
 		name: 'CH-1',
 		title: 'Chapter 1',
@@ -33,31 +33,100 @@ const outline = vi.hoisted(() => [
 	},
 ])
 
+// Task 28: nested sections render recursively, the ancestor path of the open
+// lesson expands, the badge counts the whole subtree, and lesson links carry
+// the section path as the chapter param.
+const nestedOutline = vi.hoisted(() => [
+	{
+		name: 'CH-1',
+		title: 'Chapter 1',
+		idx: 1,
+		level: 1,
+		total_lesson_count: 3,
+		lessons: [
+			{
+				name: 'L1',
+				title: 'Lesson 1',
+				number: '1-1',
+				locked: 0,
+				is_complete: 0,
+			},
+		],
+		sections: [
+			{
+				name: 'SUB-1',
+				title: 'Subsection',
+				idx: 1,
+				level: 2,
+				total_lesson_count: 2,
+				lessons: [
+					{
+						name: 'L2',
+						title: 'Nested 1',
+						number: '1-1-1',
+						locked: 0,
+						is_complete: 0,
+					},
+					{
+						name: 'L3',
+						title: 'Nested 2',
+						number: '1-1-2',
+						locked: 0,
+						is_complete: 0,
+					},
+				],
+				sections: [],
+			},
+		],
+	},
+])
+
+// Which outline the sidebar's resource resolves with; per-test switchable.
+let servedOutline: unknown[] = flatOutline
+
 vi.mock('vue-router', () => ({
 	useRoute: () => ({ params: {}, query: {} }),
 	useRouter: () => ({ push: vi.fn() }),
 }))
 
 vi.mock('frappe-ui', () => ({
-	createResource: () => ({ data: outline, reload: vi.fn() }),
+	createResource: () => ({
+		get data() {
+			return servedOutline
+		},
+		reload: vi.fn(),
+	}),
+}))
+
+vi.mock('lucide-vue-next', () => ({
+	ChevronDown: { template: '<span />' },
+	Circle: { template: '<span />' },
+	CircleCheck: { template: '<span />' },
+	Cloud: { template: '<span />' },
+	FileText: { template: '<span />' },
+	HelpCircle: { template: '<span />' },
+	LockKeyhole: { template: '<span class="lucide-lock-keyhole" />' },
+	MonitorPlay: { template: '<span />' },
+	NotebookPen: { template: '<span />' },
+	SquareCode: { template: '<span />' },
 }))
 
 vi.stubGlobal('__', (s: string) => s)
 
-const mountSidebar = () =>
+const mountSidebar = (selectedLessonNumber = '1-2') =>
 	mount(StudentLessonSidebar, {
 		props: {
 			courseName: 'COURSE-1',
 			courseTitle: 'Course 1',
 			progress: 33,
-			selectedLessonNumber: '1-2',
+			selectedLessonNumber,
 		},
 		global: {
 			mocks: { __: (s: string) => s },
 			stubs: {
 				'router-link': {
 					props: ['to'],
-					template: '<a><slot /></a>',
+					template: '<a :data-to="JSON.stringify(to)"><slot /></a>',
 				},
 			},
 		},
@@ -91,5 +160,52 @@ describe('StudentLessonSidebar locked lesson', () => {
 		await rows[2].find('.cursor-not-allowed').trigger('click')
 
 		expect(wrapper.emitted('select-lesson')).toBeUndefined()
+	})
+})
+
+describe('StudentLessonSidebar nested sections (task 28)', () => {
+	it('renders the nested section and its lessons', () => {
+		servedOutline = nestedOutline
+		try {
+			const wrapper = mountSidebar('1-1-2')
+			const text = wrapper.text()
+			expect(text).toContain('Chapter 1')
+			expect(text).toContain('Subsection')
+			expect(text).toContain('Nested 2')
+		} finally {
+			servedOutline = flatOutline
+		}
+	})
+
+	it('shows the subtree lesson count on the parent badge', () => {
+		servedOutline = nestedOutline
+		try {
+			const wrapper = mountSidebar('1-1-2')
+			const badges = wrapper.findAll('span.text-ink-gray-5').map((b) => b.text())
+			// The level-1 badge counts all three lessons of its subtree; the
+			// nested one counts its own two. For a flat chapter the two
+			// coincide (legacy parity).
+			expect(badges).toContain('3')
+			expect(badges).toContain('2')
+		} finally {
+			servedOutline = flatOutline
+		}
+	})
+
+	it('links nested lessons with the section path as the chapter param', () => {
+		servedOutline = nestedOutline
+		try {
+			const wrapper = mountSidebar('1-1-2')
+			const link = wrapper
+				.findAll('a[data-to]')
+				.find((a) => a.text().includes('Nested 2'))
+			expect(link).toBeDefined()
+			const to = JSON.parse(link!.attributes('data-to'))
+			expect(to.name).toBe('Lesson')
+			expect(to.params.chapterNumber).toBe('1-1')
+			expect(to.params.lessonNumber).toBe('2')
+		} finally {
+			servedOutline = flatOutline
+		}
 	})
 })

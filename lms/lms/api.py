@@ -44,6 +44,7 @@ from lms.lms.doctype.course_lesson.course_lesson import (
 from lms.lms.doctype.lms_certificate.lms_certificate import evaluates_certificate, get_latest_certificate
 from lms.lms.sidebar import LEGACY_VISIBILITY_FIELDS, ROW_FIELDS, get_sidebar_rows
 from lms.lms.utils import (
+	MAX_SECTION_DEPTH,
 	LMS_ROLES,
 	attach_file_to_doc,
 	can_modify_batch,
@@ -56,6 +57,7 @@ from lms.lms.utils import (
 	get_field_meta,
 	get_instructors,
 	get_lms_route,
+	get_outline_sections,
 	has_course_instructor_role,
 	has_evaluator_role,
 	has_lms_role,
@@ -971,13 +973,15 @@ def delete_lesson(lesson: str, chapter: str):
 
 	lessons = frappe.get_all(
 		"Lesson Reference",
-		{"parent": chapter},
+		{"parent": chapter, "lesson": ["is", "set"]},
 		pluck="lesson",
 		order_by="idx",
 	)
 	lessons.remove(lesson)
 	frappe.db.delete("Lesson Reference", {"parent": chapter, "lesson": lesson})
-	update_index(lessons, chapter)
+	# Renumber every child row, not just the lessons: a mixed section keeps one
+	# contiguous order across lessons and nested sections alike.
+	renumber_children(chapter)
 
 	frappe.db.delete("LMS Course Progress", {"lesson": lesson})
 	frappe.db.delete("LMS Video Watch Duration", {"lesson": lesson})
@@ -1004,22 +1008,26 @@ def create_lesson(chapter: str) -> str:
 	if not can_modify_course(course):
 		frappe.throw(_("You do not have permission to add a lesson."), frappe.PermissionError)
 
+	if frappe.db.get_value("Course Chapter", chapter, "is_scorm_package"):
+		frappe.throw(_("SCORM sections cannot contain lessons."), frappe.ValidationError)
+
+	# Appends at the end of the section's single child order, past any nested
+	# sections: the count is of all child rows, not just lesson rows.
 	idx = frappe.db.count("Lesson Reference", {"parent": chapter}) + 1
 	return add_lesson(_("Untitled lesson"), chapter, course, idx)
 
 
 @frappe.whitelist()
 def update_lesson_index(lesson: str, sourceChapter: str, targetChapter: str, idx: int):
+	"""Move a lesson between (or inside) sections.
+
+	`idx` is the 0-based position among the target section's child rows — the
+	single order that mixes lessons and nested sections. For a flat section
+	(only lesson children) this is exactly the old lesson-position semantics.
+	"""
 	source_course = frappe.db.get_value("Course Chapter", sourceChapter, "course")
 	if not can_modify_course(source_course):
 		frappe.throw(_("You do not have permission to modify this lesson."), frappe.PermissionError)
-
-	if sourceChapter != targetChapter:
-		target_course = frappe.db.get_value("Course Chapter", targetChapter, "course")
-		if not target_course:
-			frappe.throw(_("Chapter {0} does not exist.").format(targetChapter), frappe.DoesNotExistError)
-		if not can_modify_course(target_course):
-			frappe.throw(_("You do not have permission to modify this lesson."), frappe.PermissionError)
 
 	hasMoved = sourceChapter == targetChapter
 	target_course = source_course
@@ -1027,63 +1035,67 @@ def update_lesson_index(lesson: str, sourceChapter: str, targetChapter: str, idx
 		target_course = frappe.db.get_value("Course Chapter", targetChapter, "course")
 		if not can_modify_course(target_course):
 			frappe.throw(_("You do not have permission to modify this lesson."), frappe.PermissionError)
+		if frappe.db.get_value("Course Chapter", targetChapter, "is_scorm_package"):
+			frappe.throw(_("SCORM sections cannot contain lessons."), frappe.ValidationError)
 
-	update_source_chapter(lesson, sourceChapter, idx, hasMoved)
-	if not hasMoved:
-		update_target_chapter(lesson, targetChapter, idx)
+	rows = frappe.get_all(
+		"Lesson Reference",
+		{"parent": sourceChapter},
+		["name", "lesson"],
+		order_by="idx",
+	)
+	source_position = next((i for i, row in enumerate(rows) if row.lesson == lesson), None)
+	if source_position is None:
+		frappe.throw(_("Lesson {0} not found in this section.").format(lesson), frappe.DoesNotExistError)
+
+	if hasMoved:
+		moved = rows.pop(source_position)
+		slot = max(0, min(int(idx), len(rows)))
+		rows.insert(slot, moved)
+		write_child_order(rows)
+	else:
+		frappe.db.delete("Lesson Reference", {"parent": sourceChapter, "lesson": lesson})
+		renumber_children(sourceChapter)
+		new_lesson_reference = frappe.new_doc("Lesson Reference")
+		new_lesson_reference.update(
+			{
+				"lesson": lesson,
+				"parent": targetChapter,
+				"parenttype": "Course Chapter",
+				"parentfield": "lessons",
+			}
+		)
+		new_lesson_reference.insert()
+		target_rows = frappe.get_all(
+			"Lesson Reference",
+			{"parent": targetChapter},
+			["name", "lesson"],
+			order_by="idx",
+		)
+		# The freshly inserted row landed wherever its auto idx sorted it; move it
+		# to the requested slot among the target's child rows.
+		moved_position = next((i for i, row in enumerate(target_rows) if row.lesson == lesson), None)
+		if moved_position is None:
+			frappe.throw(_("Lesson {0} not found in this section.").format(lesson), frappe.DoesNotExistError)
+		moved = target_rows.pop(moved_position)
+		slot = max(0, min(int(idx), len(target_rows)))
+		target_rows.insert(slot, moved)
+		write_child_order(target_rows)
 		# The lesson's own chapter/course must follow it, or progress checks
 		# that read Course Lesson directly keep using the old course.
 		frappe.db.set_value("Course Lesson", lesson, {"chapter": targetChapter, "course": target_course})
 
 
-def update_source_chapter(lesson: str, chapter: str, idx: int, hasMoved: bool = False):
-	lessons = frappe.get_all(
-		"Lesson Reference",
-		{
-			"parent": chapter,
-		},
-		pluck="lesson",
-		order_by="idx",
-	)
-
-	lessons.remove(lesson)
-	if not hasMoved:
-		frappe.db.delete("Lesson Reference", {"parent": chapter, "lesson": lesson})
-	else:
-		lessons.insert(idx, lesson)
-
-	update_index(lessons, chapter)
+def renumber_children(chapter: str) -> None:
+	"""Rewrite a section's child rows to a contiguous 1..n, keeping their order."""
+	rows = frappe.get_all("Lesson Reference", {"parent": chapter}, ["name"], order_by="idx")
+	write_child_order(rows)
 
 
-def update_target_chapter(lesson: str, chapter: str, idx: int):
-	lessons = frappe.get_all(
-		"Lesson Reference",
-		{
-			"parent": chapter,
-		},
-		pluck="lesson",
-		order_by="idx",
-	)
-
-	lessons.insert(idx, lesson)
-	new_lesson_reference = frappe.new_doc("Lesson Reference")
-	new_lesson_reference.update(
-		{
-			"lesson": lesson,
-			"parent": chapter,
-			"parenttype": "Course Chapter",
-			"parentfield": "lessons",
-		}
-	)
-	new_lesson_reference.insert()
-	update_index(lessons, chapter)
-
-
-def update_index(lessons: list, chapter: str):
-	for row in lessons:
-		frappe.db.set_value(
-			"Lesson Reference", {"lesson": row, "parent": chapter}, "idx", lessons.index(row) + 1
-		)
+def write_child_order(rows: list) -> None:
+	"""Set each child row's idx from its position in `rows` (list of row dicts)."""
+	for position, row in enumerate(rows, start=1):
+		frappe.db.set_value("Lesson Reference", row.name, "idx", position)
 
 
 @frappe.whitelist()
@@ -1107,6 +1119,199 @@ def update_chapter_index(chapter: str, course: str, idx: int):
 
 	for i, chapter_name in enumerate(chapters):
 		frappe.db.set_value("Chapter Reference", {"chapter": chapter_name, "parent": course}, "idx", i + 1)
+
+
+@frappe.whitelist(methods=["POST"])
+def update_section_index(section: str, parent: str, idx: int):
+	"""Reorder a nested section inside its parent's single order of mixed children.
+
+	`idx` is a 0-based position among ALL children rows of the parent, so a
+	section swaps places with whatever sits next to it — lesson or section.
+	"""
+	if not isinstance(section, str):
+		frappe.throw(_("section must be a string"))
+	if not isinstance(parent, str):
+		frappe.throw(_("parent must be a string"))
+
+	course = frappe.db.get_value("Course Chapter", parent, "course")
+	if not course:
+		frappe.throw(_("Parent section {0} not found").format(parent), frappe.DoesNotExistError)
+	if not can_modify_course(course):
+		frappe.throw(_("You do not have permission to modify this section."), frappe.PermissionError)
+
+	rows = frappe.get_all(
+		"Lesson Reference",
+		{"parent": parent},
+		["name", "section"],
+		order_by="idx",
+	)
+	position = next((i for i, row in enumerate(rows) if row.section == section), None)
+	if position is None:
+		frappe.throw(_("Section {0} not found in this parent.").format(section), frappe.DoesNotExistError)
+
+	moved = rows.pop(position)
+	slot = max(0, min(int(idx), len(rows)))
+	rows.insert(slot, moved)
+	write_child_order(rows)
+
+
+@frappe.whitelist(methods=["POST"])
+def move_section(section: str, target_parent: str = None, idx: int = None):
+	"""Reparent a section to another section or to the course root.
+
+	Depth rule: the moved subtree keeps its height, so the target's level plus
+	that height may not exceed MAX_SECTION_DEPTH. SCORM sections are leaves and
+	never move; a section cannot land inside its own subtree.
+	"""
+	if not isinstance(section, str):
+		frappe.throw(_("section must be a string"))
+	if target_parent is not None and not isinstance(target_parent, str):
+		frappe.throw(_("target_parent must be a string"))
+
+	section_doc = frappe.db.get_value(
+		"Course Chapter",
+		section,
+		["name", "course", "is_scorm_package", "parent_section"],
+		as_dict=True,
+	)
+	if not section_doc:
+		frappe.throw(_("Section {0} not found").format(section), frappe.DoesNotExistError)
+	if not can_modify_course(section_doc.course):
+		frappe.throw(_("You do not have permission to move this section."), frappe.PermissionError)
+	if section_doc.is_scorm_package:
+		frappe.throw(_("SCORM sections cannot be moved into another section."))
+
+	old_parent = section_doc.parent_section
+
+	if target_parent == old_parent:
+		slot = int(idx or 0)
+		if target_parent:
+			return update_section_index(section, target_parent, slot)
+		return update_chapter_index(section, section_doc.course, slot)
+
+	height = section_subtree_height(section)
+
+	if not target_parent:
+		# To the course root: always legal, the subtree height is at most the cap.
+		if old_parent:
+			frappe.db.delete("Lesson Reference", {"parent": old_parent, "section": section})
+			renumber_children(old_parent)
+		frappe.db.set_value("Course Chapter", section, "parent_section", None)
+		if not frappe.db.exists("Chapter Reference", {"chapter": section, "parent": section_doc.course}):
+			# A section that only ever lived under another section has no root
+			# reference yet. Attach it the way upsert_chapter does, or the moved
+			# section would vanish from the outline instead of becoming a
+			# top-level section of the course.
+			course_doc = frappe.get_doc("LMS Course", section_doc.course)
+			course_doc.append("chapters", {"chapter": section})
+			course_doc.save(ignore_permissions=True)
+		chapter_count = frappe.db.count("Chapter Reference", {"parent": section_doc.course})
+		slot = int(idx) if idx is not None else max(chapter_count - 1, 0)
+		return update_chapter_index(section, section_doc.course, slot)
+
+	target = frappe.db.get_value(
+		"Course Chapter",
+		target_parent,
+		["name", "course", "is_scorm_package"],
+		as_dict=True,
+	)
+	if not target:
+		frappe.throw(_("Parent section {0} not found").format(target_parent), frappe.DoesNotExistError)
+	if target.course != section_doc.course:
+		frappe.throw(_("A section can only be nested inside a section of the same course."))
+	if target.is_scorm_package:
+		frappe.throw(_("SCORM sections cannot contain sections."))
+	if target_parent == section or is_descendant_of(target_parent, section):
+		frappe.throw(_("A section cannot be moved inside itself."))
+
+	if section_depth_of(target_parent) + height > MAX_SECTION_DEPTH:
+		frappe.throw(_("Cannot save: this would exceed 4 section levels"), frappe.ValidationError)
+
+	if old_parent:
+		frappe.db.delete("Lesson Reference", {"parent": old_parent, "section": section})
+		renumber_children(old_parent)
+	else:
+		# A top-level section nested under another one stops being a chapter of
+		# the course: drop its root reference and keep the remaining root
+		# indexes contiguous, or the outline would list it twice.
+		frappe.db.delete("Chapter Reference", {"chapter": section, "parent": section_doc.course})
+		root_rows = frappe.get_all(
+			"Chapter Reference", {"parent": section_doc.course}, ["name"], order_by="idx"
+		)
+		for position, row in enumerate(root_rows, start=1):
+			frappe.db.set_value("Chapter Reference", row.name, "idx", position)
+
+	new_row = frappe.new_doc("Lesson Reference")
+	new_row.update(
+		{
+			"section": section,
+			"parent": target_parent,
+			"parenttype": "Course Chapter",
+			"parentfield": "lessons",
+		}
+	)
+	new_row.insert()
+
+	target_rows = frappe.get_all(
+		"Lesson Reference",
+		{"parent": target_parent},
+		["name", "section"],
+		order_by="idx",
+	)
+	moved_position = next((i for i, row in enumerate(target_rows) if row.section == section), None)
+	if moved_position is None:
+		frappe.throw(_("Section {0} not found in this parent.").format(section), frappe.DoesNotExistError)
+	moved = target_rows.pop(moved_position)
+	slot = int(idx) if idx is not None else len(target_rows)
+	slot = max(0, min(slot, len(target_rows)))
+	target_rows.insert(slot, moved)
+	write_child_order(target_rows)
+
+	frappe.db.set_value("Course Chapter", section, "parent_section", target_parent)
+
+
+def section_depth_of(chapter_name: str) -> int:
+	"""1-based level of a section: 1 for a section directly under the course."""
+	depth = 1
+	current = chapter_name
+	seen = set()
+	while current:
+		if current in seen:
+			frappe.throw(_("Section nesting cannot form a cycle."))
+		seen.add(current)
+		parent = frappe.db.get_value("Course Chapter", current, "parent_section")
+		if not parent:
+			return depth
+		depth += 1
+		if depth > MAX_SECTION_DEPTH:
+			frappe.throw(_("Cannot save: this would exceed 4 section levels"), frappe.ValidationError)
+		current = parent
+	return depth
+
+
+def section_subtree_height(chapter_name: str) -> int:
+	"""Height of a section's subtree counting itself: a leaf section is 1."""
+	rows = get_outline_sections([chapter_name])
+	depth_by_name = {chapter_name: 1}
+	for row in rows:
+		parent_depth = depth_by_name.get(row.chapter_name)
+		if parent_depth is None:
+			continue
+		depth_by_name[row.name] = parent_depth + 1
+	return max(depth_by_name.values())
+
+
+def is_descendant_of(candidate: str, ancestor: str) -> bool:
+	current = candidate
+	seen = set()
+	while current:
+		if current == ancestor:
+			return True
+		if current in seen:
+			return False
+		seen.add(current)
+		current = frappe.db.get_value("Course Chapter", current, "parent_section")
+	return False
 
 
 # Matches SETTINGS_PAGE_LENGTH in the frontend, which pages `start` by this.
@@ -1554,7 +1759,12 @@ def give_discussions_permission():
 # outlive frappe's GET auto-rollback.
 @frappe.whitelist(methods=["POST"])
 def upsert_chapter(
-	title: str, course: str, is_scorm_package: bool, scorm_package: dict = None, name: str = None
+	title: str,
+	course: str,
+	is_scorm_package: bool,
+	scorm_package: dict = None,
+	name: str = None,
+	parent_section: str = None,
 ):
 	if not isinstance(title, str):
 		frappe.throw(_("title must be a string"))
@@ -1562,11 +1772,34 @@ def upsert_chapter(
 		frappe.throw(_("course must be a string"))
 	if name is not None and not isinstance(name, str):
 		frappe.throw(_("name must be a string"))
+	if parent_section is not None and not isinstance(parent_section, str):
+		frappe.throw(_("parent_section must be a string"))
 
 	if not can_modify_course(course):
 		frappe.throw(_("You do not have permission to modify this chapter."), frappe.PermissionError)
 
+	if parent_section and is_scorm_package:
+		frappe.throw(_("SCORM sections cannot be nested inside another section."))
+
+	if name and parent_section:
+		current_parent = frappe.db.get_value("Course Chapter", name, "parent_section")
+		if current_parent != parent_section:
+			frappe.throw(_("Use the move action to change a section's parent."))
+
+	if not name and parent_section:
+		parent = frappe.db.get_value(
+			"Course Chapter", parent_section, ["course", "is_scorm_package"], as_dict=True
+		)
+		if not parent:
+			frappe.throw(_("Parent section {0} not found").format(parent_section), frappe.DoesNotExistError)
+		if parent.course != course:
+			frappe.throw(_("A section can only be nested inside a section of the same course."))
+		if parent.is_scorm_package:
+			frappe.throw(_("SCORM sections cannot contain sections."))
+
 	values = frappe._dict({"title": title, "course": course, "is_scorm_package": is_scorm_package})
+	if parent_section:
+		values["parent_section"] = parent_section
 
 	if name:
 		chapter = frappe.get_doc("Course Chapter", name)
@@ -1620,10 +1853,18 @@ def upsert_chapter(
 		chapter.save()
 
 	if not name:
-		# Link the new chapter into the outline here (was client-side frappe.client.insert in ChapterModal.vue, which didn't reliably persist on CI); keeps the Chapter Reference atomic with the chapter.
-		course_doc = frappe.get_doc("LMS Course", course)
-		course_doc.append("chapters", {"chapter": chapter.name})
-		course_doc.save()
+		if parent_section:
+			# A nested section joins its parent's single child order (the shared
+			# lessons table) as a section row, appended at the end; the chapter's
+			# own validate() is the depth gate on top of the checks above.
+			parent_doc = frappe.get_doc("Course Chapter", parent_section)
+			parent_doc.append("lessons", {"section": chapter.name})
+			parent_doc.save()
+		else:
+			# Link the new chapter into the outline here (was client-side frappe.client.insert in ChapterModal.vue, which didn't reliably persist on CI); keeps the Chapter Reference atomic with the chapter.
+			course_doc = frappe.get_doc("LMS Course", course)
+			course_doc.append("chapters", {"chapter": chapter.name})
+			course_doc.save()
 
 	if is_scorm_package and not len(chapter.lessons):
 		add_lesson(title, chapter.name, course, 1)
@@ -1823,10 +2064,21 @@ def delete_chapter(chapter: str):
 	if frappe.db.get_value("Course Chapter", chapter, "is_scorm_package"):
 		delete_scorm_package(chapter)
 
-	course = frappe.db.get_value("Chapter Reference", {"chapter": chapter}, "parent")
+	parent_section = frappe.db.get_value("Course Chapter", chapter, "parent_section")
+
+	# The whole subtree goes with the section: nested sections and every lesson
+	# under them, exactly as the confirmation dialog counts them.
+	chapter_names = [chapter] + [row.name for row in get_outline_sections([chapter])]
+
+	if parent_section:
+		frappe.db.delete("Lesson Reference", {"parent": parent_section, "section": chapter})
+		renumber_children(parent_section)
+	else:
+		course = frappe.db.get_value("Chapter Reference", {"chapter": chapter}, "parent")
+		frappe.db.delete("Chapter Reference", {"chapter": chapter})
 
 	# Clean up per-lesson dependants before the raw lesson delete below, else discussions/progress orphan at the deleted lessons.
-	lessons = frappe.get_all("Course Lesson", {"chapter": chapter}, pluck="name")
+	lessons = frappe.get_all("Course Lesson", {"chapter": ["in", chapter_names]}, pluck="name")
 	for lesson in lessons:
 		topics = frappe.get_all(
 			"Discussion Topic",
@@ -1841,10 +2093,10 @@ def delete_chapter(chapter: str):
 		# Raw db.delete below skips the controller's on_trash, so unlink back-references here.
 		cleanup_lesson_backreferences(lesson)
 
-	frappe.db.delete("Chapter Reference", {"chapter": chapter})
-	frappe.db.delete("Lesson Reference", {"parent": chapter})
-	frappe.db.delete("Course Lesson", {"chapter": chapter})
-	frappe.db.delete("Course Chapter", chapter)
+	frappe.db.delete("Lesson Reference", {"parent": ["in", chapter_names]})
+	frappe.db.delete("Course Lesson", {"chapter": ["in", chapter_names]})
+	for chapter_name in chapter_names:
+		frappe.db.delete("Course Chapter", chapter_name)
 
 	# reset chapter reference index after deletion
 	if course:

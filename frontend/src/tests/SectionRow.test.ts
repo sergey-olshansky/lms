@@ -1,7 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
-import ChapterRow from '@/components/ChapterRow.vue'
+import SectionRow from '@/components/SectionRow.vue'
 import type { OutlineChapter } from '@/types'
 
 const pushMock = vi.hoisted(() => vi.fn())
@@ -43,7 +43,7 @@ vi.mock('vuedraggable', () => ({
 		props: ['list'],
 		template: `
 			<div>
-				<div v-for="item in list" :key="item.name">
+				<div v-for="item in list" :key="item.key">
 					<slot name="item" :element="item" />
 				</div>
 			</div>
@@ -53,23 +53,26 @@ vi.mock('vuedraggable', () => ({
 
 vi.stubGlobal('__', (s: string) => s)
 
-const chapter: OutlineChapter = {
+const section: OutlineChapter = {
 	name: 'CH-2',
 	title: 'Old Chapter',
 	idx: 2,
+	level: 1,
 	is_scorm_package: 0 as const,
-	lessons: [{ name: 'LESSON-1', title: 'Lesson 1', number: '2-1' }],
+	lessons: [{ name: 'LESSON-1', title: 'Lesson 1', number: '2-1', position: 1 }],
 }
 
 const mountRow = (
-	chapterOverride: OutlineChapter = chapter,
-	allowEdit = true
+	sectionOverride: OutlineChapter = section,
+	allowEdit = true,
+	extraProps: Record<string, unknown> = {}
 ) =>
-	mount(ChapterRow, {
+	mount(SectionRow, {
 		props: {
-			chapter: chapterOverride,
+			section: sectionOverride,
 			courseName: 'course-1',
 			allowEdit,
+			...extraProps,
 		},
 		global: {
 			mocks: { __: (s: string) => s },
@@ -85,7 +88,7 @@ beforeEach(() => {
 	focusMock.mockReset()
 })
 
-describe('ChapterRow inline rename', () => {
+describe('SectionRow inline rename', () => {
 	it('focuses the rename input through its exposed focus()', async () => {
 		const wrapper = mountRow()
 
@@ -95,26 +98,26 @@ describe('ChapterRow inline rename', () => {
 		expect(focusMock).toHaveBeenCalledTimes(1)
 	})
 
-	it('commits on Enter without toggling the chapter disclosure', async () => {
+	it('commits on Enter without toggling the section disclosure', async () => {
 		const wrapper = mountRow()
 
 		expect(wrapper.text()).not.toContain('Lesson 1')
 		await wrapper.get('[title="Old Chapter"]').trigger('dblclick')
 
 		const input = wrapper.get('input')
-		await input.setValue('Renamed Chapter')
+		await input.setValue('Renamed Section')
 		await input.trigger('keydown.enter')
 
 		expect(wrapper.emitted('rename-chapter')?.[0]).toMatchObject([
-			{ chapter, title: 'Renamed Chapter' },
+			{ chapter: section, title: 'Renamed Section' },
 		])
 		expect(wrapper.text()).not.toContain('Lesson 1')
 	})
 })
 
-describe('ChapterRow lesson count', () => {
+describe('SectionRow lesson count', () => {
 	const count = (allowEdit: boolean) =>
-		mountRow(chapter, allowEdit).get('span.text-ink-gray-5').classes()
+		mountRow(section, allowEdit).get('span.text-ink-gray-5').classes()
 
 	it('gives way to the delete action on hover and on touch', () => {
 		expect(count(true)).toEqual(
@@ -125,16 +128,16 @@ describe('ChapterRow lesson count', () => {
 		)
 	})
 
-	it('stays visible when the chapter is not editable', () => {
+	it('stays visible when the section is not editable', () => {
 		expect(count(false)).not.toContain('group-hover:hidden')
 		expect(count(false)).not.toContain('[@media(hover:none)]:hidden')
 	})
 })
 
-describe('ChapterRow locked lesson', () => {
+describe('SectionRow locked lesson', () => {
 	it('renders a lock and no router-link for a locked lesson', () => {
 		const wrapper = mountRow({
-			...chapter,
+			...section,
 			idx: 1,
 			lessons: [
 				{ name: 'LESSON-1', title: 'Lesson 1', number: '2-1', locked: 1 },
@@ -152,7 +155,7 @@ describe('ChapterRow locked lesson', () => {
 	// it is not announced twice.
 	it('exposes the locked state as text, not as aria-label on a div', () => {
 		const wrapper = mountRow({
-			...chapter,
+			...section,
 			idx: 1,
 			lessons: [
 				{ name: 'LESSON-1', title: 'Lesson 1', number: '2-1', locked: 1 },
@@ -171,7 +174,7 @@ describe('ChapterRow locked lesson', () => {
 
 	it('still links an unlocked lesson', () => {
 		const wrapper = mountRow({
-			...chapter,
+			...section,
 			idx: 1,
 			lessons: [
 				{ name: 'LESSON-1', title: 'Lesson 1', number: '2-1', locked: 0 },
@@ -183,11 +186,11 @@ describe('ChapterRow locked lesson', () => {
 		expect(wrapper.text()).not.toContain('Locked')
 	})
 
-	// A SCORM chapter renders no DisclosurePanel, so it never reaches the per-lesson
-	// lock affordance above: it used to look identical to an open chapter, and the
-	// student learned it was locked only after SCORMChapter.vue bounced them back.
-	const scormChapter = (locked: 0 | 1): OutlineChapter => ({
-		...chapter,
+	// A SCORM section renders no DisclosurePanel, so it never reaches the per-lesson
+	// lock affordance above: it used to look identical to an open section, and
+	// the student learned it was locked only after SCORMChapter.vue bounced them back.
+	const scormSection = (locked: 0 | 1): OutlineChapter => ({
+		...section,
 		idx: 1,
 		is_scorm_package: 1 as const,
 		lessons: [
@@ -195,8 +198,8 @@ describe('ChapterRow locked lesson', () => {
 		],
 	})
 
-	it('marks a locked SCORM chapter and refuses to open it', async () => {
-		const wrapper = mountRow(scormChapter(1))
+	it('marks a locked SCORM section and refuses to open it', async () => {
+		const wrapper = mountRow(scormSection(1))
 
 		const lock = wrapper.get('.lucide-lock-keyhole')
 		expect(lock.attributes('aria-hidden')).toBe('true')
@@ -206,8 +209,8 @@ describe('ChapterRow locked lesson', () => {
 		expect(pushMock).not.toHaveBeenCalled()
 	})
 
-	it('still opens an unlocked SCORM chapter', async () => {
-		const wrapper = mountRow(scormChapter(0))
+	it('still opens an unlocked SCORM section', async () => {
+		const wrapper = mountRow(scormSection(0))
 
 		expect(wrapper.find('.lucide-lock-keyhole').exists()).toBe(false)
 
@@ -221,31 +224,130 @@ describe('ChapterRow locked lesson', () => {
 	})
 
 	it('does not emit select-lesson when a locked inline row is clicked', async () => {
-		const wrapper = mount(ChapterRow, {
-			props: {
-				chapter: {
-					...chapter,
-					idx: 1,
-					lessons: [
-						{
-							name: 'LESSON-1',
-							title: 'Lesson 1',
-							number: '2-1',
-							locked: 1,
-						},
-					],
+		const wrapper = mount(
+			SectionRow,
+			{
+				props: {
+					section: {
+						...section,
+						idx: 1,
+						lessons: [
+							{
+								name: 'LESSON-1',
+								title: 'Lesson 1',
+								number: '2-1',
+								locked: 1,
+							},
+						],
+					},
+					courseName: 'course-1',
+					inlineSelect: true,
 				},
-				courseName: 'course-1',
-				inlineSelect: true,
-			},
-			global: {
-				mocks: { __: (s: string) => s },
-				provide: { $user: { data: { name: 'admin@example.com' } } },
-			},
-		})
+				global: {
+					mocks: { __: (s: string) => s },
+					provide: { $user: { data: { name: 'admin@example.com' } } },
+				},
+			}
+		)
 
 		await wrapper.get('.cursor-not-allowed').trigger('click')
 
 		expect(wrapper.emitted('select-lesson')).toBeUndefined()
+	})
+})
+
+describe('SectionRow mixed children (task 28)', () => {
+	const mixed: OutlineChapter = {
+		name: 'CH-1',
+		title: 'Mixed',
+		idx: 1,
+		level: 1,
+		lesson_count: 2,
+		section_count: 1,
+		lessons: [
+			{ name: 'LESSON-A', title: 'First', number: '1-1', position: 1 },
+			{ name: 'LESSON-B', title: 'Second', number: '1-2', position: 3 },
+		],
+		sections: [
+			{
+				name: 'SUB-1',
+				title: 'Nested',
+				idx: 1,
+				level: 2,
+				position: 2,
+				lessons: [
+					{ name: 'LESSON-C', title: 'Nested lesson', number: '1-1-1', position: 1 },
+				],
+			},
+		],
+	}
+
+	it('interleaves lessons and nested sections in the single child order', () => {
+		const wrapper = mountRow(mixed)
+
+		const items = wrapper.findAll('[data-testid="outline-lesson"], .outline-section-row')
+		expect(items).toHaveLength(3)
+		expect(items[0].text()).toContain('First')
+		expect(items[1].text()).toContain('Nested')
+		expect(items[2].text()).toContain('Second')
+	})
+
+	it('shows the combined direct counts for a mixed section', () => {
+		const wrapper = mountRow(mixed)
+
+		expect(wrapper.text()).toContain('1 section · 2 lessons')
+	})
+
+	it('renders the empty-section placeholder for a childless section', () => {
+		const wrapper = mountRow({
+			name: 'CH-EMPTY',
+			title: 'Empty',
+			idx: 1,
+			level: 1,
+			lessons: [],
+			sections: [],
+		})
+
+		expect(wrapper.find('[data-testid="empty-section"]').exists()).toBe(true)
+		expect(wrapper.text()).toContain('Empty section')
+	})
+})
+
+describe('SectionRow depth limit (task 28)', () => {
+	it('disables adding a section at level 4 with a screen-reader reason', () => {
+		const wrapper = mountRow({
+			name: 'CH-L4',
+			title: 'Deepest',
+			idx: 1,
+			level: 4,
+			lessons: [],
+			sections: [],
+		})
+
+		const affordance = wrapper
+			.findAll('[aria-disabled="true"]')
+			.find((el) => el.classes().includes('lucide-folder-plus'))
+		expect(affordance).toBeDefined()
+
+		expect(wrapper.text()).toContain('Maximum depth reached — 4 section levels')
+	})
+
+	it('offers adding a section at level 3 and emits the parent on click', async () => {
+		const level3: OutlineChapter = {
+			name: 'CH-L3',
+			title: 'Third level',
+			idx: 1,
+			level: 3,
+			lessons: [],
+			sections: [],
+		}
+		const wrapper = mountRow(level3)
+
+		const affordance = wrapper.find('.lucide-folder-plus')
+		expect(affordance.exists()).toBe(true)
+		expect(affordance.attributes('aria-disabled')).toBeUndefined()
+
+		await affordance.trigger('click')
+		expect(wrapper.emitted('add-section')?.[0]).toEqual([level3])
 	})
 })

@@ -46,6 +46,9 @@ RE_SLUG_NOTALLOWED = re.compile("[^a-z0-9]+")
 LMS_ROLES = ["Moderator", "Course Creator", "Batch Evaluator", "LMS Student"]
 # Roles that bypass per-record LMS authorization checks (course/batch staff + admins).
 PRIVILEGED_ROLES = {"Moderator", "Course Creator", "Batch Evaluator", "System Manager"}
+# Maximum structural section levels below the course root. Lessons are leaves and
+# never count toward this; the course root itself is not a section level.
+MAX_SECTION_DEPTH = 4
 
 
 def get_lms_path():
@@ -216,22 +219,79 @@ def get_chapters(course: str):
 
 
 def get_lessons(course: str, chapter: dict = None, progress: bool = False):
-	"""Returns lessons of a single chapter (when given) or all lessons of the course."""
+	"""Returns lessons of a single chapter (when given) or all lessons of the course.
+
+	The course-wide walk is the document order of the whole section tree: children
+	interleave by child-table row, so a nested section's lessons sit exactly where
+	the author placed them among its lessons. A flat course degenerates to the old
+	chapter-by-chapter sequence.
+	"""
 	if chapter:
 		return get_lesson_details(chapter, progress=progress)
 
 	lessons = []
 	for chapter in get_chapters(course):
-		lessons += get_lesson_details(chapter, progress=progress)
+		lessons += get_section_lessons(chapter, str(chapter.idx), progress=progress)
+	return lessons
+
+
+def get_section_lessons(chapter: dict, path: str, progress: bool = False) -> list:
+	"""Lessons of one section and its nested sections, in document order."""
+	children = frappe.get_all(
+		"Lesson Reference",
+		{"parent": chapter.name},
+		["lesson", "section", "idx"],
+		order_by="idx",
+	)
+	lessons = []
+	lesson_count = 0
+	section_count = 0
+	for child in children:
+		if child.lesson:
+			lesson_count += 1
+			lesson_details = frappe.db.get_value(
+				"Course Lesson",
+				child.lesson,
+				[
+					"name",
+					"title",
+					"include_in_preview",
+					"body",
+					"creation",
+					"youtube",
+					"quiz_id",
+					"question",
+					"file_type",
+					"instructor_notes",
+					"course",
+					"chapter",
+					"content",
+				],
+				as_dict=True,
+			)
+			if not lesson_details:
+				continue
+			# The suffix is the lesson's position among the section's lessons, not
+			# the raw child-table row: the two drift apart in a mixed section.
+			lesson_details.number = f"{path}-{lesson_count}"
+			lesson_details.icon = get_lesson_icon(lesson_details.body, lesson_details.content)
+			if progress:
+				lesson_details.is_complete = get_progress(lesson_details.course, lesson_details.name)
+			lessons.append(lesson_details)
+		elif child.section:
+			section_count += 1
+			section = frappe.db.get_value("Course Chapter", child.section, ["name"], as_dict=True)
+			if section:
+				lessons += get_section_lessons(section, f"{path}-{section_count}", progress=progress)
 	return lessons
 
 
 def get_lesson_details(chapter: dict, progress: bool = False):
 	lessons = []
 	lesson_list = frappe.get_all(
-		"Lesson Reference", {"parent": chapter.name}, ["lesson", "idx"], order_by="idx"
+		"Lesson Reference", {"parent": chapter.name, "lesson": ["is", "set"]}, ["lesson"], order_by="idx"
 	)
-	for row in lesson_list:
+	for position, row in enumerate(lesson_list, start=1):
 		lesson_details = frappe.db.get_value(
 			"Course Lesson",
 			row.lesson,
@@ -252,7 +312,7 @@ def get_lesson_details(chapter: dict, progress: bool = False):
 			],
 			as_dict=True,
 		)
-		lesson_details.number = f"{chapter.idx}-{row.idx}"
+		lesson_details.number = f"{chapter.idx}-{position}"
 		lesson_details.icon = get_lesson_icon(lesson_details.body, lesson_details.content)
 
 		if progress:
@@ -378,16 +438,71 @@ def get_reviews(course: str):
 
 
 def get_lesson_index(lesson_name: str) -> str:
-	"""Returns the {chapter_index}.{lesson_index} for the lesson."""
+	"""Returns the dash-joined section path plus lesson position for the lesson.
+
+	A lesson in a flat course keeps the exact "{chapter_index}-{lesson_index}"
+	form; one nested three sections deep reads
+	"{chapter}-{section}-{subsection}-{lesson}".
+	"""
 	lesson = frappe.db.get_value("Lesson Reference", {"lesson": lesson_name}, ["idx", "parent"], as_dict=True)
 	if not lesson:
 		return "1-1"
 
-	chapter = frappe.db.get_value("Chapter Reference", {"chapter": lesson.parent}, ["idx"], as_dict=True)
-	if not chapter:
+	# Position among the parent's lessons, not the raw child-table row: in a mixed
+	# section a nested section sitting between two lessons shifts the row idx.
+	position = frappe.db.count(
+		"Lesson Reference",
+		{"parent": lesson.parent, "lesson": ["is", "set"], "idx": ["<=", lesson.idx]},
+	)
+	path = get_section_path(lesson.parent)
+	if not position or not path:
 		return "1-1"
 
-	return f"{chapter.idx}-{lesson.idx}"
+	return f"{path}-{position}"
+
+
+def get_section_path(chapter_name: str) -> str | None:
+	"""Dash-joined sibling positions from the first level-1 section down to a section.
+
+	None when the walk never reaches a chapter attached to the course root, the
+	same case the flat builder answered "1-1" for.
+	"""
+	segments = []
+	current = chapter_name
+	seen = set()
+	for _ in range(MAX_SECTION_DEPTH + 1):
+		if not current or current in seen:
+			return None
+		seen.add(current)
+		parent = frappe.db.get_value("Course Chapter", current, "parent_section")
+		if parent:
+			position = get_section_position(current, parent)
+			if not position:
+				return None
+			segments.append(str(position))
+			current = parent
+		else:
+			root_idx = frappe.db.get_value("Chapter Reference", {"chapter": current}, "idx")
+			if not root_idx:
+				return None
+			segments.append(str(root_idx))
+			return "-".join(reversed(segments))
+	# A stored cycle that validation somehow missed: refuse rather than loop.
+	return None
+
+
+def get_section_position(chapter_name: str, parent: str) -> int | None:
+	"""1-based position of a nested section among its parent's nested sections."""
+	rows = frappe.get_all(
+		"Lesson Reference",
+		{"parent": parent, "section": ["is", "set"]},
+		pluck="section",
+		order_by="idx",
+	)
+	try:
+		return rows.index(chapter_name) + 1
+	except ValueError:
+		return None
 
 
 def get_lesson_url(course: str, lesson_number: str):
@@ -742,10 +857,18 @@ def notify_mentions_via_email(doc: Document, topic: dict):
 
 
 def get_lesson_count(course: str) -> int:
+	"""Lessons attached anywhere in the course's section tree.
+
+	Nested sections are discovered level by level from the root references (max
+	MAX_SECTION_DEPTH levels), and only child rows that reference a lesson are
+	counted: the shared child table also holds the nested-section rows.
+	"""
 	chapter_references = frappe.get_all("Chapter Reference", {"parent": course}, pluck="chapter")
 	if not chapter_references:
 		return 0
-	return frappe.db.count("Lesson Reference", {"parent": ("in", chapter_references)})
+	section_rows = get_outline_sections(chapter_references)
+	chapter_names = chapter_references + [r.name for r in section_rows]
+	return frappe.db.count("Lesson Reference", {"parent": ("in", chapter_names), "lesson": ("is", "set")})
 
 
 STATISTICS_CHARTS = ("New Signups", "Course Enrollments", "Certification")
@@ -1455,8 +1578,13 @@ def get_course_content_stats(course: str) -> dict:
 	"""Counts quiz blocks across a course's lessons."""
 	quiz_count = 0
 
-	for chapter in get_chapters(course):
-		lesson_rows = frappe.get_all("Lesson Reference", {"parent": chapter.name}, ["lesson"])
+	root_chapters = [c.name for c in get_chapters(course)]
+	section_rows = get_outline_sections(root_chapters)
+	chapter_names = root_chapters + [r.name for r in section_rows]
+	for chapter_name in chapter_names:
+		lesson_rows = frappe.get_all(
+			"Lesson Reference", {"parent": chapter_name, "lesson": ["is", "set"]}, ["lesson"]
+		)
 		for row in lesson_rows:
 			content = frappe.db.get_value("Course Lesson", row.lesson, "content")
 			for block in get_editorjs_blocks(content):
@@ -1581,7 +1709,15 @@ def get_categorized_courses(courses: list) -> dict:
 
 @frappe.whitelist(allow_guest=True)  # nosemgrep: frappe-semgrep-rules.rules.security.guest-whitelisted-method
 def get_course_outline(course: str, progress: bool = False) -> list:
-	"""Returns the course outline."""
+	"""Returns the course outline as a recursive tree of sections.
+
+	Every section node carries its direct children as two ordered arrays,
+	``lessons`` and ``sections``, plus ``position`` (the child-table row that
+	places it inside its parent's single manual order of mixed children). A
+	legacy course with no nested sections yields exactly the flat list the old
+	builder produced: same fields, same order, same ``"{chapter}-{lesson}"``
+	numbers.
+	"""
 
 	if not isinstance(course, str):
 		frappe.throw(_("Course must be a string."))
@@ -1596,22 +1732,25 @@ def get_course_outline(course: str, progress: bool = False) -> list:
 	if not chapters:
 		return []
 
+	section_rows = get_outline_sections([c.name for c in chapters])
+	all_chapters = list(chapters) + list(section_rows)
+
 	# get_outline_chapter reads through frappe.qb, which consults no permission layer at
 	# all — not the DocPerm rows, not the permlevel — and this endpoint answers guests.
 	# can_modify_course is the predicate the only reader's own save is refused on.
-	if any(c.is_scorm_package and c.scorm_package for c in chapters) and not can_modify_course(course):
-		for chapter in chapters:
+	if any(c.is_scorm_package and c.scorm_package for c in all_chapters) and not can_modify_course(course):
+		for chapter in all_chapters:
 			chapter.scorm_package = None
 
-	lesson_rows = get_outline_lessons([c.name for c in chapters])
-	files_by_name = get_scorm_files(chapters)
+	lesson_rows = get_outline_lessons([c.name for c in all_chapters])
+	files_by_name = get_scorm_files(all_chapters)
 	completed = get_completed_lessons(course, lesson_rows) if progress else set()
 
 	from lms.lms.permissions import enforces_lesson_completion
 
 	enforce = enforces_lesson_completion(course) if progress else False
 
-	return build_outline(chapters, lesson_rows, files_by_name, completed, progress, enforce)
+	return build_outline(chapters, lesson_rows, section_rows, files_by_name, completed, progress, enforce)
 
 
 def can_view_course(course: str) -> bool:
@@ -1678,6 +1817,51 @@ def get_outline_lessons(chapter_names: list) -> list:
 	).run(as_dict=True)
 
 
+def get_outline_sections(root_chapter_names: list) -> list:
+	"""Nested section rows of a course tree, collected level by level.
+
+	Each row is a Lesson Reference child row that references a Course Chapter
+	instead of a Course Lesson; ordering inside a parent is the child-table idx,
+	i.e. that section's single manual order of mixed children. The level-by-level
+	walk is capped at MAX_SECTION_DEPTH (validation refuses anything deeper, so
+	the cap only bounds corrupt data), and a seen-set stops a stored cycle from
+	bouncing between the same names forever.
+	"""
+	LessonReference = frappe.qb.DocType("Lesson Reference")
+	CourseChapter = frappe.qb.DocType("Course Chapter")
+
+	rows = []
+	pending = list(root_chapter_names)
+	seen = set(root_chapter_names)
+	for _level in range(MAX_SECTION_DEPTH - 1):
+		if not pending:
+			break
+		level_rows = (
+			frappe.qb.from_(LessonReference)
+			.join(CourseChapter)
+			.on(CourseChapter.name == LessonReference.section)
+			.select(
+				LessonReference.parent.as_("chapter_name"),
+				LessonReference.idx.as_("row_idx"),
+				CourseChapter.name.as_("name"),
+				CourseChapter.title.as_("title"),
+				CourseChapter.is_scorm_package.as_("is_scorm_package"),
+				CourseChapter.scorm_package.as_("scorm_package"),
+			)
+			.where(LessonReference.parent.isin(pending))
+			.where(LessonReference.section.notnull())
+			.orderby(LessonReference.parent)
+			.orderby(LessonReference.idx)
+		).run(as_dict=True)
+		level_rows = [r for r in level_rows if r.name not in seen]
+		if not level_rows:
+			break
+		rows.extend(level_rows)
+		seen.update(r.name for r in level_rows)
+		pending = [r.name for r in level_rows]
+	return rows
+
+
 def get_scorm_files(chapters: list) -> dict:
 	file_names = [c.scorm_package for c in chapters if c.is_scorm_package and c.scorm_package]
 	if not file_names:
@@ -1736,49 +1920,122 @@ def compute_locked_lessons(ordered_lesson_names: list, completed: set) -> set:
 
 
 def get_ordered_lesson_rows(course: str) -> list:
-	"""Lesson identity rows for a course, in (chapter idx, lesson idx) order.
+	"""Lesson identity rows for a course, in document (depth-first) order.
 
 	Deliberately narrow. The lock rule needs nothing but names and order, so this must
 	not reuse get_outline_lessons: that selects body and content, the two largest text
 	columns, and every gated lesson view would then transfer the whole course.
 
-	The joins mirror get_outline_chapter / get_outline_lessons exactly (both reference
-	tables inner-joined to their target doctype) so this list and the one build_outline
-	derives its locks from can never diverge over a dangling reference row.
+	The joins mirror get_outline_chapter / get_outline_lessons / get_outline_sections
+	exactly (every reference table inner-joined to its target doctype) so this list and
+	the one build_outline derives its locks from can never diverge over a dangling
+	reference row. Nested sections interleave with lessons by child-table row, and a
+	legacy flat course degenerates to the old (chapter idx, lesson idx) sequence.
 	"""
 	ChapterReference = frappe.qb.DocType("Chapter Reference")
 	CourseChapter = frappe.qb.DocType("Course Chapter")
 	LessonReference = frappe.qb.DocType("Lesson Reference")
 	CourseLesson = frappe.qb.DocType("Course Lesson")
-	return (
+	root_chapters = (
 		frappe.qb.from_(ChapterReference)
 		.join(CourseChapter)
 		.on(CourseChapter.name == ChapterReference.chapter)
-		.join(LessonReference)
-		.on(LessonReference.parent == CourseChapter.name)
-		.join(CourseLesson)
-		.on(CourseLesson.name == LessonReference.lesson)
 		.select(
-			CourseLesson.name.as_("name"),
 			ChapterReference.chapter.as_("chapter_name"),
 			ChapterReference.idx.as_("chapter_idx"),
-			LessonReference.idx.as_("lesson_idx"),
 		)
 		.where(ChapterReference.parent == course)
 		.orderby(ChapterReference.idx)
+	).run(as_dict=True)
+
+	root_names = [c.chapter_name for c in root_chapters]
+	root_idx = {c.chapter_name: c.chapter_idx for c in root_chapters}
+	section_rows = get_outline_sections(root_names)
+
+	lesson_rows = (
+		frappe.qb.from_(LessonReference)
+		.join(CourseLesson)
+		.on(CourseLesson.name == LessonReference.lesson)
+		.select(
+			LessonReference.parent.as_("chapter_name"),
+			LessonReference.idx.as_("lesson_idx"),
+			CourseLesson.name.as_("name"),
+		)
+		.where(LessonReference.parent.isin(root_names + [r.name for r in section_rows]))
+		.orderby(LessonReference.parent)
 		.orderby(LessonReference.idx)
 	).run(as_dict=True)
+
+	children_by_chapter = {}
+	for lr in lesson_rows:
+		children_by_chapter.setdefault(lr.chapter_name, []).append(("lesson", lr.lesson_idx, lr))
+	for row in section_rows:
+		children_by_chapter.setdefault(row.chapter_name, []).append(("section", row.row_idx, row))
+	for children in children_by_chapter.values():
+		children.sort(key=lambda child: child[1])
+
+	# Positions mirror the numbering rules: a lesson is the n-th lesson of its
+	# section, a section the n-th section of its parent.
+	lesson_pos = {}
+	section_pos = {}
+	for chapter_name, children in children_by_chapter.items():
+		lesson_count = 0
+		section_count = 0
+		for kind, _row_idx, payload in children:
+			if kind == "lesson":
+				lesson_count += 1
+				lesson_pos[(chapter_name, payload.name)] = lesson_count
+			else:
+				section_count += 1
+				section_pos[(chapter_name, payload.name)] = section_count
+
+	section_parent = {r.name: r.chapter_name for r in section_rows}
+
+	def section_number(name: str) -> int:
+		parent = section_parent.get(name)
+		if parent is None:
+			return root_idx.get(name) or 0
+		return section_pos.get((parent, name), 0)
+
+	ordered = []
+
+	def walk(name: str, path: str) -> None:
+		for kind, _row_idx, payload in children_by_chapter.get(name, []):
+			if kind == "lesson":
+				lesson_position = lesson_pos.get((payload.chapter_name, payload.name), 0)
+				ordered.append(
+					frappe._dict(
+						name=payload.name,
+						chapter_name=payload.chapter_name,
+						chapter_idx=section_number(payload.chapter_name),
+						lesson_idx=lesson_position,
+						number=f"{path}-{lesson_position}",
+					)
+				)
+			else:
+				child_position = section_pos.get((name, payload.name), 0)
+				walk(payload.name, f"{path}-{child_position}")
+
+	for chapter_name in root_names:
+		walk(chapter_name, str(root_idx.get(chapter_name) or 1))
+	return ordered
 
 
 def build_outline(
 	chapters: list,
 	lesson_rows: list,
+	section_rows: list,
 	files_by_name: dict,
 	completed: set,
 	progress: bool,
 	enforce_completion: bool = False,
 ) -> list:
-	chapter_idx_by_name = {c.name: c.idx for c in chapters}
+	"""Assemble the recursive section tree from the three row queries.
+
+	Document order — the order progress, prev/next and locking walk — is the
+	depth-first traversal of each section's children in child-table row order,
+	whatever mix of lessons and nested sections that order holds.
+	"""
 	lessons_by_chapter = {}
 	for lr in lesson_rows:
 		lesson = frappe._dict(
@@ -1792,14 +2049,36 @@ def build_outline(
 			file_type=lr.file_type,
 			course=lr.course,
 			chapter=lr.chapter,
-			number=f"{chapter_idx_by_name[lr.chapter_name]}-{lr.lesson_idx}",
+			position=lr.lesson_idx,
 		)
 		if progress:
 			lesson.is_complete = lr.name in completed
 		lessons_by_chapter.setdefault(lr.chapter_name, []).append(lesson)
 
+	# Every child row of every section in one per-parent list, mixed and sorted by
+# the child-table idx: this is the single manual order the author edits.
+	children_by_chapter = {}
+	for chapter_name, lessons in lessons_by_chapter.items():
+		children_by_chapter.setdefault(chapter_name, []).extend(
+			("lesson", lesson.position, lesson) for lesson in lessons
+		)
+	for row in section_rows:
+		children_by_chapter.setdefault(row.chapter_name, []).append(("section", row.row_idx, row))
+	for children in children_by_chapter.values():
+		children.sort(key=lambda child: child[1])
+
 	if progress and enforce_completion:
-		ordered_names = [lesson.name for c in chapters for lesson in lessons_by_chapter.get(c.name, [])]
+		ordered_names = []
+
+		def collect_document_order(name: str) -> None:
+			for kind, _row_idx, payload in children_by_chapter.get(name, []):
+				if kind == "lesson":
+					ordered_names.append(payload.name)
+				else:
+					collect_document_order(payload.name)
+
+		for c in chapters:
+			collect_document_order(c.name)
 		locked = compute_locked_lessons(ordered_names, completed)
 		for lessons in lessons_by_chapter.values():
 			for lesson in lessons:
@@ -1808,22 +2087,51 @@ def build_outline(
 					# The quiz is part of the gated lesson, not a separate resource.
 					lesson.quiz_id = None
 
-	outline = []
-	for c in chapters:
-		lessons = lessons_by_chapter.get(c.name, [])
+	def build_section(row, level: int, path: str) -> frappe._dict:
+		lessons = []
+		sections = []
+		for kind, _row_idx, payload in children_by_chapter.get(row.name, []):
+			if kind == "lesson":
+				# A lesson's number suffix is its position among the section's
+				# lessons, not the raw child-table row: in a mixed section the
+				# two drift apart the moment a nested section is inserted.
+				payload.number = f"{path}-{len(lessons) + 1}"
+				lessons.append(payload)
+			else:
+				# The number suffix of a nested section is its position among the
+				# parent's sections, mirroring the lesson rule above.
+				section_pos = len(sections) + 1
+				child = build_section(payload, level + 1, f"{path}-{section_pos}")
+				child.idx = section_pos
+				sections.append(child)
+
 		chapter = frappe._dict(
-			name=c.name,
-			title=c.title,
-			is_scorm_package=c.is_scorm_package,
-			scorm_package=c.scorm_package,
-			idx=c.idx,
+			name=row.name,
+			title=row.title,
+			is_scorm_package=row.is_scorm_package,
+			scorm_package=row.scorm_package,
+			idx=1,
+			level=level,
+			position=row.row_idx if hasattr(row, "row_idx") else row.idx,
+			sections=sections,
 			lessons=lessons,
+			lesson_count=len(lessons),
+			section_count=len(sections),
+			total_lesson_count=len(lessons) + sum(s.total_lesson_count for s in sections),
 		)
 		# The bare docname is what survives a deleted File row; the expansion is what
 		# ChapterForm renders.
-		if c.is_scorm_package and c.scorm_package and c.scorm_package in files_by_name:
-			chapter.scorm_package = files_by_name[c.scorm_package]
-		outline.append(chapter)
+		if row.is_scorm_package and row.scorm_package and row.scorm_package in files_by_name:
+			chapter.scorm_package = files_by_name[row.scorm_package]
+		return chapter
+
+	outline = []
+	for c in chapters:
+		node = build_section(c, 1, str(c.idx))
+		# A level-1 section's position among its siblings is the Chapter
+		# Reference idx, unchanged from the flat builder.
+		node.idx = c.idx
+		outline.append(node)
 	return outline
 
 
@@ -1856,29 +2164,34 @@ def _gate_redirect(course: str) -> dict:
 
 @frappe.whitelist(allow_guest=True)  # nosemgrep: frappe-semgrep-rules.rules.security.guest-whitelisted-method
 @rate_limit(limit=500, seconds=60 * 60)
-def get_lesson(course: str, chapter: int, lesson: int) -> dict:
+def get_lesson(course: str, chapter: str, lesson: int) -> dict:
+	"""Serve one lesson over the whitelisted HTTP API.
+
+	`chapter` is the dash section path ("2" legacy, "2-1-3" nested) and `lesson`
+	is the 1-based position among the section's own lessons. Frappe v16 enforces
+	these annotations on HTTP dispatch — including the string `chapter`, which is
+	why it must NOT be `int` — and casts the query-string `lesson` to int.
+	"""
 	if not guest_access_allowed():
 		return {}
 
-	ChapterReference = frappe.qb.DocType("Chapter Reference")
-	CourseChapter = frappe.qb.DocType("Course Chapter")
-
-	chapter_row = (
-		frappe.qb.from_(ChapterReference)
-		.join(CourseChapter)
-		.on(CourseChapter.name == ChapterReference.chapter)
-		.select(ChapterReference.chapter.as_("name"), CourseChapter.title.as_("title"))
-		.where(ChapterReference.parent == course)
-		.where(ChapterReference.idx == chapter)
-		.limit(1)
-	).run(as_dict=1)
-	if not chapter_row:
+	chapter_name, chapter_title = resolve_section_by_path(course, chapter)
+	if not chapter_name:
 		return _gate_redirect(course)
 
-	chapter_name = chapter_row[0].name
-	chapter_title = chapter_row[0].title
-
-	lesson_name = frappe.db.get_value("Lesson Reference", {"parent": chapter_name, "idx": lesson}, "lesson")
+	# The suffix is a position among the section's lessons; in a mixed section the
+	# raw child-table row idx would point at whatever row happens to hold it.
+	lesson_rows = frappe.get_all(
+		"Lesson Reference",
+		{"parent": chapter_name, "lesson": ["is", "set"]},
+		pluck="lesson",
+		order_by="idx",
+	)
+	try:
+		lesson_position = int(lesson)
+	except (TypeError, ValueError):
+		return _gate_redirect(course)
+	lesson_name = lesson_rows[lesson_position - 1] if 1 <= lesson_position <= len(lesson_rows) else None
 	if not lesson_name:
 		return _gate_redirect(course)
 
@@ -1992,25 +2305,14 @@ def get_video_details(lesson_name: str) -> list:
 	)
 
 
-def get_neighbour_lesson(course: str, chapter: int, lesson: int) -> dict:
-	ChapterReference = frappe.qb.DocType("Chapter Reference")
-	LessonReference = frappe.qb.DocType("Lesson Reference")
+def get_neighbour_lesson(course: str, chapter: str, lesson: int) -> dict:
+	"""Prev/next lesson numbers in document (depth-first) order, dash-path form.
 
-	rows = (
-		frappe.qb.from_(ChapterReference)
-		.join(LessonReference)
-		.on(LessonReference.parent == ChapterReference.chapter)
-		.select(
-			ChapterReference.idx.as_("chapter_idx"),
-			LessonReference.idx.as_("lesson_idx"),
-		)
-		.where(ChapterReference.parent == course)
-		.orderby(ChapterReference.idx)
-		.orderby(LessonReference.idx)
-	).run(as_dict=True)
-
-	numbers = [f"{r.chapter_idx}.{r.lesson_idx}" for r in rows]
-	current = f"{chapter}.{lesson}"
+	The old "{chapter}.{lesson}" dot pairs are gone: a neighbour may now live in a
+	different section, so the number has to carry the whole section path.
+	"""
+	numbers = [row.number for row in get_ordered_lesson_rows(course)]
+	current = f"{chapter}-{lesson}"
 	try:
 		index = numbers.index(current)
 	except ValueError:
@@ -2020,6 +2322,52 @@ def get_neighbour_lesson(course: str, chapter: int, lesson: int) -> dict:
 		"prev": numbers[index - 1] if index > 0 else None,
 		"next": numbers[index + 1] if index + 1 < len(numbers) else None,
 	}
+
+
+def resolve_section_by_path(course: str, chapter: str) -> tuple[str | None, str | None]:
+	"""Resolve a "2-1-3" style section path to (docname, title).
+
+	The first segment indexes the course's level-1 sections; every following
+	segment indexes the nested sections of the section resolved so far. Legacy
+	"2" paths resolve through the first step only, exactly as before.
+	"""
+	segments = []
+	for part in str(chapter).split("-"):
+		try:
+			segments.append(int(part))
+		except (TypeError, ValueError):
+			return None, None
+	if not segments:
+		return None, None
+
+	ChapterReference = frappe.qb.DocType("Chapter Reference")
+	CourseChapter = frappe.qb.DocType("Course Chapter")
+	chapter_row = (
+		frappe.qb.from_(ChapterReference)
+		.join(CourseChapter)
+		.on(CourseChapter.name == ChapterReference.chapter)
+		.select(ChapterReference.chapter.as_("name"), CourseChapter.title.as_("title"))
+		.where(ChapterReference.parent == course)
+		.where(ChapterReference.idx == segments[0])
+		.limit(1)
+	).run(as_dict=1)
+	if not chapter_row:
+		return None, None
+
+	chapter_name = chapter_row[0].name
+	chapter_title = chapter_row[0].title
+	for segment in segments[1:]:
+		children = frappe.get_all(
+			"Lesson Reference",
+			{"parent": chapter_name, "section": ["is", "set"]},
+			pluck="section",
+			order_by="idx",
+		)
+		if segment < 1 or segment > len(children):
+			return None, None
+		chapter_name = children[segment - 1]
+		chapter_title = frappe.db.get_value("Course Chapter", chapter_name, "title")
+	return chapter_name, chapter_title
 
 
 @frappe.whitelist(allow_guest=True)  # nosemgrep: frappe-semgrep-rules.rules.security.guest-whitelisted-method

@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
 	findLessonNameByNumber,
+	flattenLessons,
+	flattenSections,
+	forEachLesson,
+	lessonAncestors,
 	lessonExistsByNumber,
 	lessonExistsByName,
 	isSelectionStale,
 	isLessonInChapter,
+	parseLessonNumber,
 } from '@/utils/courseOutline'
 
 // Two lessons in one chapter. `number` is positional ("chapterIdx-lessonIdx")
@@ -112,5 +117,118 @@ describe('isLessonInChapter (chapter delete takes its lessons)', () => {
 		expect(isLessonInChapter(outline, 'CH-1', null)).toBe(false)
 		expect(isLessonInChapter(outline, 'CH-1', undefined)).toBe(false)
 		expect(isLessonInChapter(null, 'CH-1', 'LESSON-A')).toBe(false)
+	})
+})
+
+// Task 28: a lesson number is a dash-joined section path plus the lesson's
+// position inside its own section — "2" legacy, "2-1-3" nested — and the tree
+// helpers walk nested sections exactly like the flat ones walked chapters.
+describe('parseLessonNumber', () => {
+	it('splits a legacy number into chapter and lesson', () => {
+		expect(parseLessonNumber('3-2')).toEqual({
+			chapterNumber: '3',
+			lessonNumber: '2',
+		})
+	})
+
+	it('keeps the whole section path in the chapter segment', () => {
+		expect(parseLessonNumber('2-1-3-2')).toEqual({
+			chapterNumber: '2-1-3',
+			lessonNumber: '2',
+		})
+	})
+
+	it('tolerates an empty string', () => {
+		expect(parseLessonNumber('')).toEqual({ chapterNumber: '', lessonNumber: '' })
+	})
+})
+
+// A mixed section: children interleave by the child-table row each carries
+// (positions 1..3), so document order is lesson, section, lesson — the single
+// manual order the author edits.
+const tree = [
+	{
+		name: 'CH-1',
+		title: 'Chapter 1',
+		idx: 1,
+		level: 1,
+		lessons: [
+			{ name: 'LESSON-A', title: 'First', number: '1-1', position: 1 },
+			{ name: 'LESSON-B', title: 'Second', number: '1-2', position: 3 },
+		],
+		sections: [
+			{
+				name: 'SUB-1',
+				title: 'Nested',
+				idx: 1,
+				level: 2,
+				position: 2,
+				lessons: [
+					{ name: 'LESSON-C', title: 'Nested lesson', number: '1-1-1', position: 1 },
+				],
+				sections: [],
+			},
+		],
+	},
+	{
+		name: 'CH-2',
+		title: 'Chapter 2',
+		idx: 2,
+		level: 1,
+		lessons: [
+			{ name: 'LESSON-D', title: 'Other chapter', number: '2-1', position: 1 },
+		],
+	},
+]
+
+describe('flattenLessons / forEachLesson (document order)', () => {
+	it('walks lessons depth-first in the mixed child order', () => {
+		expect(flattenLessons(tree).map((l) => l.name)).toEqual([
+			'LESSON-A',
+			'LESSON-C',
+			'LESSON-B',
+			'LESSON-D',
+		])
+	})
+
+	it('visits the owning section alongside each lesson', () => {
+		const visited: Array<[string, string]> = []
+		forEachLesson(tree, (lesson, section) => visited.push([lesson.name, section.name]))
+		expect(visited).toContainEqual(['LESSON-C', 'SUB-1'])
+	})
+})
+
+describe('flattenSections', () => {
+	it('collects sections of every level in document order', () => {
+		expect(flattenSections(tree).map((s) => s.name)).toEqual(['CH-1', 'SUB-1', 'CH-2'])
+	})
+})
+
+describe('lessonAncestors', () => {
+	it('returns the section path down to the lesson holding the number', () => {
+		expect(lessonAncestors(tree, '1-1-1').map((s) => s.name)).toEqual(['CH-1', 'SUB-1'])
+	})
+
+	it('returns a single ancestor for a legacy lesson', () => {
+		expect(lessonAncestors(tree, '2-1').map((s) => s.name)).toEqual(['CH-2'])
+	})
+
+	it('returns an empty path for an unknown number', () => {
+		expect(lessonAncestors(tree, '9-9')).toEqual([])
+	})
+})
+
+describe('tree-aware lookups (task 28)', () => {
+	it('finds nested lessons by number and by name', () => {
+		expect(findLessonNameByNumber(tree, '1-1-1')).toBe('LESSON-C')
+		expect(lessonExistsByName(tree, 'LESSON-C')).toBe(true)
+		expect(lessonExistsByNumber(tree, '1-1-1')).toBe(true)
+		expect(lessonExistsByNumber(tree, '1-2-1')).toBe(false)
+	})
+
+	it('treats a nested lesson as inside its ancestor section', () => {
+		expect(isLessonInChapter(tree, 'SUB-1', 'LESSON-C')).toBe(true)
+		expect(isLessonInChapter(tree, 'CH-1', 'LESSON-C')).toBe(true)
+		expect(isLessonInChapter(tree, 'CH-2', 'LESSON-C')).toBe(false)
 	})
 })

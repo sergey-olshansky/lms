@@ -208,7 +208,7 @@ class TestLessonLockingIntegration(BaseTestUtils):
 		self._enable()
 		from lms.lms.utils import get_lesson
 
-		payload = get_lesson(self.course.name, 1, 2)
+		payload = get_lesson(self.course.name, "1", 2)
 		self.assertEqual(payload.get("locked"), 1)
 		self.assertEqual(payload.get("redirect_to"), "1-1")
 		self.assertNotIn("content", payload)
@@ -226,7 +226,7 @@ class TestLessonLockingIntegration(BaseTestUtils):
 		from lms.lms.utils import get_lesson
 
 		# Chapter 1 has three lessons and there is no chapter 9.
-		for chapter, lesson in ((1, 99), (9, 1)):
+		for chapter, lesson in (("1", 99), ("9", 1)):
 			with self.subTest(chapter=chapter, lesson=lesson):
 				payload = get_lesson(self.course.name, chapter, lesson)
 				self.assertEqual(payload.get("locked"), 1)
@@ -236,13 +236,13 @@ class TestLessonLockingIntegration(BaseTestUtils):
 	def test_a_nonexistent_lesson_number_is_still_empty_without_the_gate(self):
 		from lms.lms.utils import get_lesson
 
-		self.assertEqual(get_lesson(self.course.name, 9, 1), {})
+		self.assertEqual(get_lesson(self.course.name, "9", 1), {})
 
 	def test_get_lesson_serves_the_current_lesson(self):
 		self._enable()
 		from lms.lms.utils import get_lesson
 
-		payload = get_lesson(self.course.name, 1, 1)
+		payload = get_lesson(self.course.name, "1", 1)
 		self.assertFalse(payload.get("locked"))
 		self.assertEqual(payload.get("title"), "Locking Lesson 1")
 
@@ -259,7 +259,7 @@ class TestLessonLockingIntegration(BaseTestUtils):
 
 		from lms.lms.utils import get_lesson
 
-		payload = get_lesson(self.course.name, 1, 3)
+		payload = get_lesson(self.course.name, "1", 3)
 
 		self.assertEqual(payload.get("locked"), 1)
 		self.assertEqual(payload.get("redirect_to"), "1-2")
@@ -277,7 +277,7 @@ class TestLessonLockingIntegration(BaseTestUtils):
 		locked = get_locked_lessons(self.course.name)
 		self.assertIn(self.lessons[2].name, locked)
 
-		payload = get_lesson(self.course.name, 1, 3)
+		payload = get_lesson(self.course.name, "1", 3)
 
 		self.assertEqual(payload.get("locked"), 1)
 		self.assertEqual(payload.get("redirect_to"), "1-2")
@@ -289,7 +289,7 @@ class TestLessonLockingIntegration(BaseTestUtils):
 
 		from lms.lms.utils import get_lesson
 
-		payload = get_lesson(self.course.name, 2, 1)
+		payload = get_lesson(self.course.name, "2", 1)
 		self.assertEqual(payload.get("locked"), 1)
 		self.assertNotIn("is_scorm_package", payload)
 
@@ -298,7 +298,7 @@ class TestLessonLockingIntegration(BaseTestUtils):
 		frappe.set_user(self.author.email)
 		from lms.lms.utils import get_lesson
 
-		payload = get_lesson(self.course.name, 1, 3)
+		payload = get_lesson(self.course.name, "1", 3)
 		self.assertFalse(payload.get("locked"))
 		self.assertEqual(payload.get("title"), "Locking Lesson 3")
 
