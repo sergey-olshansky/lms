@@ -68,6 +68,8 @@ class TestQuizAttemptReport(unittest.TestCase):
 		html_sanitizer.sanitize_rich_text = lambda value: value
 		lms_utils = ModuleType("lms.lms.utils")
 		lms_utils.get_lms_route = lambda path="": f"/lms/{path}"
+		lms_utils.get_readable_files = Mock(return_value={})
+		self.lms_utils = lms_utils
 
 		self.quiz_module = ModuleType("lms.lms.doctype.lms_quiz.lms_quiz")
 		self.quiz_module._can_review_submission = Mock(return_value=True)
@@ -95,6 +97,7 @@ class TestQuizAttemptReport(unittest.TestCase):
 			"_question_live_texts",
 			"_quiz_teacher_recipients",
 			"_absolute_asset_urls",
+			"_inline_private_images",
 			"render_attempt_report_html",
 			"_report_pdf",
 			"_attempt_report_filename",
@@ -229,6 +232,34 @@ class TestRenderAttemptReportHtml(TestQuizAttemptReport):
 		self.assertIn("Q3", html)
 		self.assertIn("1 skipped questions are not included in this report.", html)
 		self.assertIn("Pending review", html)
+
+	def test_inlines_authorized_private_question_images_for_pdf(self):
+		self.live_texts()
+		self.frappe.get_all = Mock(
+			return_value=[
+				Row(
+					name="q1",
+					question='<p><img src="/private/files/task.png" alt="Task"></p>',
+				)
+			]
+		)
+		file_doc = SimpleNamespace(
+			file_name="task.png",
+			get_content=Mock(return_value=b"png-bytes"),
+		)
+		self.lms_utils.get_readable_files.return_value = {
+			"/private/files/task.png": file_doc
+		}
+
+		html = self.ns["render_attempt_report_html"](
+			self.submission_doc(), correct_answers=None
+		)
+
+		self.assertIn("src=\"data:image/png;base64,cG5nLWJ5dGVz\"", html)
+		self.assertNotIn("/private/files/task.png", html)
+		self.lms_utils.get_readable_files.assert_called_once_with(
+			["/private/files/task.png"]
+		)
 
 	def test_renders_the_key_block_only_when_keys_are_given(self):
 		self.live_texts()
