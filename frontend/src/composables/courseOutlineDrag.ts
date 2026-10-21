@@ -16,7 +16,7 @@ export interface OutlineDragEvent {
 export interface OutlineDrop {
 	item: OutlineDragItem
 	sourceParent: string | null
-	targetParent: string
+	targetParent: string | null
 	idx: number
 }
 
@@ -65,6 +65,19 @@ export function createCourseOutlineDrag(options: {
 		state.hoveredTarget = target.name
 	}
 
+	function overRoot(event: DragEvent) {
+		if (
+			event.target instanceof Element &&
+			event.target.closest('[data-section-drop]')
+		)
+			return
+		if (state.item?.kind !== 'section' || state.item.node.is_scorm_package)
+			return
+		event.preventDefault()
+		if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+		state.hoveredTarget = null
+	}
+
 	function drop(event: Event, target: OutlineChapter) {
 		if (state.handled || !state.item || !canDropIntoSection(state.item, target))
 			return
@@ -75,6 +88,25 @@ export function createCourseOutlineDrag(options: {
 			sourceParent: state.sourceParent,
 			targetParent: target.name,
 			idx: (target.lessons?.length ?? 0) + (target.sections?.length ?? 0),
+		})
+	}
+
+	function dropRoot(event: Event) {
+		if (
+			state.handled ||
+			state.item?.kind !== 'section' ||
+			state.item.node.is_scorm_package ||
+			(event.target instanceof Element &&
+				event.target.closest('[data-section-drop]'))
+		)
+			return
+		event.preventDefault()
+		state.handled = true
+		options.onDrop({
+			item: state.item,
+			sourceParent: state.sourceParent,
+			targetParent: null,
+			idx: options.getOutline()?.length ?? 0,
 		})
 	}
 
@@ -91,7 +123,24 @@ export function createCourseOutlineDrag(options: {
 		)
 	}
 
-	function move(_event: unknown, originalEvent: Event): boolean {
+	function move(
+		event: { to?: { el?: HTMLElement } },
+		originalEvent: Event
+	): boolean {
+		const targetParent = event.to?.el?.dataset.chapter ?? null
+		// Cross-parent section drops go through the section/root drop targets.
+		// Returning false here leaves the row intact while those targets enforce
+		// depth and cycle rules before sending the move request.
+		if (
+			state.item?.kind === 'section' &&
+			state.sourceParent !== targetParent
+		) {
+			const target = sectionAtPoint(originalEvent)
+			state.hoveredTarget = target && canDropIntoSection(state.item, target)
+				? target.name
+				: null
+			return false
+		}
 		const target = sectionAtPoint(originalEvent)
 		if (!target || !state.item) {
 			state.hoveredTarget = null
@@ -105,7 +154,10 @@ export function createCourseOutlineDrag(options: {
 		return false
 	}
 
-	function finish(event: { originalEvent?: Event }): boolean {
+	function finish(event: {
+		originalEvent?: Event
+		to?: { dataset?: { chapter?: string } }
+	}): boolean {
 		// Sortable's touch fallback has no native drop event. Resolve the release
 		// point against the same title targets used by mouse/HTML drag-and-drop.
 		if (!state.handled && state.item) {
@@ -117,6 +169,23 @@ export function createCourseOutlineDrag(options: {
 					state.handled = true
 					options.onCancel()
 				}
+			} else if (
+				state.item.kind === 'section' &&
+				isRootDrop(event.originalEvent)
+			) {
+				state.handled = true
+				options.onDrop({
+					item: state.item,
+					sourceParent: state.sourceParent,
+					targetParent: null,
+					idx: options.getOutline()?.length ?? 0,
+				})
+			} else if (
+				state.item?.kind === 'section' &&
+				state.sourceParent !== (event.to?.dataset?.chapter ?? null)
+			) {
+				state.handled = true
+				options.onCancel()
 			}
 		}
 		const handled = state.handled
@@ -126,7 +195,18 @@ export function createCourseOutlineDrag(options: {
 		return handled
 	}
 
-	return { state, start, over, drop, move, finish }
+	function isRootDrop(event?: Event): boolean {
+		const original = event as (MouseEvent & Partial<TouchEvent>) | undefined
+		const point = original?.changedTouches?.[0] ?? original
+		if (!point || !Number.isFinite(point.clientX)) return false
+		return Boolean(
+			document
+				.elementFromPoint(point.clientX, point.clientY)
+				?.closest('[data-outline-root-drop]')
+		)
+	}
+
+	return { state, start, over, drop, overRoot, dropRoot, move, finish }
 }
 
 export const courseOutlineDragKey: InjectionKey<

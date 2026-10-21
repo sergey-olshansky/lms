@@ -36,6 +36,9 @@
 		</div>
 		<div
 			v-else
+			:data-outline-root-drop="allowEdit ? '' : undefined"
+			@dragover="outlineDrag.overRoot"
+			@drop="outlineDrag.dropRoot"
 			:class="{
 				'border-2 rounded-5 py-2 px-2': showOutline && outline.data?.length,
 			}"
@@ -44,10 +47,14 @@
 				:list="outline.data"
 				:disabled="!allowEdit || chapterRenaming"
 				item-key="name"
-				group="chapters"
+				:group="{
+					name: 'outline-items',
+					pull: canTransferRoot,
+					put: canTransferRoot,
+				}"
 				:draggable="'.chapter-item'"
 				:handle="'.outline-drag-handle-level-1'"
-				:filter="'.outline-section-row, .outline-lesson-row, .scorm-section-row'"
+				:filter="'.outline-section-row, .outline-lesson-row, .scorm-section-row, .outline-actions, .outline-disclosure-toggle, input, textarea'"
 				:preventOnFilter="false"
 				:move="outlineDrag.move"
 				@start="outlineDrag.start($event, null)"
@@ -84,7 +91,6 @@
 							@move-lesson="updateOutline"
 							@create-lesson="createLessonInline"
 							@add-section="openAddSection"
-							@move-section="openMoveSection"
 							@reorder-section="reorderSection"
 						/>
 					</div>
@@ -94,12 +100,6 @@
 		<SectionFormModal
 			v-if="allowEdit"
 			ref="sectionForm"
-			:courseName="courseName"
-			:outline="outline"
-		/>
-		<MoveSectionModal
-			v-if="allowEdit"
-			ref="moveForm"
 			:courseName="courseName"
 			:outline="outline"
 		/>
@@ -120,7 +120,6 @@ import Draggable from 'vuedraggable'
 
 import SectionRow from '@/components/SectionRow.vue'
 import SectionFormModal from '@/components/Modals/SectionFormModal.vue'
-import MoveSectionModal from '@/components/Modals/MoveSectionModal.vue'
 import { openFormRoute } from '@/composables/useFormRoute'
 import {
 	flattenLessons,
@@ -179,7 +178,6 @@ const emit = defineEmits<{
 // The chapter whose "Add Lesson" button is mid-create (for the button spinner).
 const creatingLessonChapter = ref<string>('')
 const sectionForm = ref<InstanceType<typeof SectionFormModal> | null>(null)
-const moveForm = ref<InstanceType<typeof MoveSectionModal> | null>(null)
 
 const props = withDefaults(
 	defineProps<{
@@ -319,7 +317,7 @@ const outlineDrag = createCourseOutlineDrag({
 				target_parent: targetParent,
 				idx,
 			})
-		} else if (sourceParent) {
+		} else if (sourceParent && targetParent) {
 			updateLessonIndex.submit({
 				lesson: item.lesson.name,
 				sourceChapter: sourceParent,
@@ -551,10 +549,6 @@ function findAncestorsByName(name: string): OutlineChapter[] {
 	return walk(outline.data ?? [], []) ?? []
 }
 
-function openMoveSection(section: OutlineChapter) {
-	moveForm.value?.open(section)
-}
-
 // Выше/Ниже for a section: level-1 sections reorder within the course's
 // chapter list (the same order the top-level drag writes); a nested section
 // swaps with its previous/next child row of the parent, whatever kind it is.
@@ -611,5 +605,16 @@ function updateChapterOrder(e: DraggableEvent) {
 		course: props.courseName,
 		idx: e.newIndex,
 	})
+}
+
+function canTransferRoot(
+	_to: unknown,
+	_from: unknown,
+	element: HTMLElement
+): boolean {
+	return (
+		element.classList.contains('chapter-item') ||
+		element.classList.contains('outline-section-row')
+	)
 }
 </script>

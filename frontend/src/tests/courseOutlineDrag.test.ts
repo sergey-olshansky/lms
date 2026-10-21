@@ -178,4 +178,67 @@ describe('dropping outline items into section titles', () => {
 		expect(onCancel).toHaveBeenCalledOnce()
 		expect(onDrop).not.toHaveBeenCalled()
 	})
+
+	it('moves a nested section to the course root when dropped on empty root space', () => {
+		const node = section('SOURCE', 2)
+		const root = document.createElement('div')
+		root.dataset.outlineRootDrop = ''
+		Object.defineProperty(document, 'elementFromPoint', {
+			configurable: true,
+			value: vi.fn(() => root),
+		})
+		const onDrop = vi.fn()
+		const drag = createCourseOutlineDrag({
+			getOutline: () => [section('ROOT')],
+			onDrop,
+			onCancel: vi.fn(),
+		})
+		drag.start(start({ kind: 'section', node }), 'PARENT')
+
+		expect(
+			drag.finish({
+				originalEvent: new MouseEvent('mouseup', {
+					clientX: 30,
+					clientY: 40,
+				}),
+				to: { dataset: {} },
+			})
+		).toBe(true)
+		expect(onDrop).toHaveBeenCalledWith({
+			item: { kind: 'section', node },
+			sourceParent: 'PARENT',
+			targetParent: null,
+			idx: 1,
+		})
+	})
+
+	it('cancels a section transfer between parent lists when no section target is hit', () => {
+		Object.defineProperty(document, 'elementFromPoint', {
+			configurable: true,
+			value: vi.fn(() => null),
+		})
+		const onCancel = vi.fn()
+		const drag = createCourseOutlineDrag({
+			getOutline: () => [],
+			onDrop: vi.fn(),
+			onCancel,
+		})
+		drag.start(start({ kind: 'section', node: section('SOURCE', 2) }), 'PARENT-1')
+		const destination = document.createElement('div')
+		destination.dataset.chapter = 'PARENT-2'
+
+		expect(
+			drag.move(
+				{ to: { el: destination } },
+				new MouseEvent('dragover', { clientX: 10, clientY: 20 })
+			)
+		).toBe(false)
+		expect(
+			drag.finish({
+				to: { dataset: { chapter: 'PARENT-2' } },
+				originalEvent: new MouseEvent('mouseup'),
+			})
+		).toBe(true)
+		expect(onCancel).toHaveBeenCalledOnce()
+	})
 })

@@ -130,14 +130,14 @@ describe('SectionRow lesson count', () => {
 	const count = (allowEdit: boolean) =>
 		mountRow(section, allowEdit).get('[data-testid="section-count"]')
 
-	it('stays readable while the always-visible edit actions are shown', () => {
-		expect(count(true).text()).toBe('1')
+	it('keeps the count visible inline with the section title', () => {
+		expect(count(true).text()).toBe('1 lesson')
 		expect(count(true).classes()).not.toContain('group-hover:hidden')
 		expect(count(true).classes()).not.toContain('[@media(hover:none)]:hidden')
 	})
 
 	it('stays visible when the section is not editable', () => {
-		expect(count(false).text()).toBe('1')
+		expect(count(false).text()).toBe('1 lesson')
 		expect(count(false).classes()).not.toContain('group-hover:hidden')
 		expect(count(false).classes()).not.toContain('[@media(hover:none)]:hidden')
 	})
@@ -157,20 +157,19 @@ describe('SectionRow editor actions', () => {
 		expect(wrapper.emitted('create-lesson')).toHaveLength(1)
 	})
 
-	it('aligns actions and the drag handle right and removes duplicate arrow controls', () => {
+	it('keeps the drag affordance left and actions right on the section row', () => {
 		const wrapper = mountRow()
 
 		expect(wrapper.find('button[aria-label="Move up"]').exists()).toBe(false)
 		expect(wrapper.find('button[aria-label="Move down"]').exists()).toBe(false)
-		expect(wrapper.get('button[aria-label="Move to…"]').text()).toBe('')
-		expect(wrapper.get('[role="group"]').classes()).toContain('justify-end')
-		expect(wrapper.get('[role="group"]').findAll('button')).toHaveLength(6)
-		expect(
-			wrapper.get('[role="group"] .outline-drag-handle').element.tagName
-		).toBe('BUTTON')
-		expect(
-			wrapper.get('button[aria-expanded]').find('.outline-drag-handle').exists()
-		).toBe(false)
+		expect(wrapper.find('button[aria-label="Move to…"]').exists()).toBe(false)
+		expect(wrapper.find('button[aria-label="Rename"]').exists()).toBe(false)
+		expect(wrapper.get('[role="group"]').classes()).toContain('outline-actions')
+		expect(wrapper.get('[role="group"]').findAll('button')).toHaveLength(3)
+		expect(wrapper.get('.outline-section-header').classes()).toContain(
+			'outline-drag-handle-level-1'
+		)
+		expect(wrapper.get('.outline-section-header').attributes('data-sortable-level')).toBe('1')
 	})
 
 	it('wraps long section names instead of truncating them beside actions', () => {
@@ -184,7 +183,7 @@ describe('SectionRow editor actions', () => {
 		expect(title.classes()).toContain('whitespace-normal')
 		expect(title.classes()).toContain('break-words')
 		expect(title.classes()).toContain('font-semibold')
-		expect(title.text()).toBe(
+		expect(title.text()).toContain(
 			'A very long section name that needs to remain distinguishable in the editor'
 		)
 	})
@@ -379,7 +378,7 @@ describe('SectionRow mixed children (task 28)', () => {
 })
 
 describe('SectionRow depth limit', () => {
-	it('disables adding a section at level 2 with a screen-reader reason', () => {
+	it('hides the add-section action at level 2', () => {
 		const wrapper = mountRow({
 			name: 'CH-L2',
 			title: 'Deepest',
@@ -389,13 +388,8 @@ describe('SectionRow depth limit', () => {
 			sections: [],
 		})
 
-		const affordance = wrapper.get(
-			'button[aria-label="Maximum depth reached — 2 section levels"]'
-		)
-		expect(affordance.attributes('aria-disabled')).toBe('true')
-		expect((affordance.element as HTMLButtonElement).disabled).toBe(true)
-
-		expect(wrapper.text()).toContain('Maximum depth reached — 2 section levels')
+		expect(wrapper.find('button[aria-label="Add Section"]').exists()).toBe(false)
+		expect(wrapper.get('[role="group"]').findAll('button')).toHaveLength(2)
 	})
 
 	it('offers adding a section at level 1 and emits the parent on click', async () => {
@@ -415,6 +409,24 @@ describe('SectionRow depth limit', () => {
 
 		await affordance.trigger('click')
 		expect(wrapper.emitted('add-section')?.[0]).toEqual([level1])
+	})
+
+	it('renders nested headings bold at lesson size and keeps counts inline', () => {
+		const wrapper = mountRow({
+			name: 'CH-L2',
+			title: 'Nested section',
+			idx: 1,
+			level: 2,
+			lessons: [{ name: 'LESSON-2', title: 'Lesson 2', number: '1-1-1' }],
+		})
+		const title = wrapper.get('[title="Nested section"]')
+		const count = wrapper.get('[data-testid="section-count"]')
+
+		expect(title.classes()).toContain('text-sm')
+		expect(title.classes()).toContain('font-bold')
+		expect(count.text()).toBe('1 lesson')
+		expect(count.element.parentElement).toBe(title.element)
+		expect(wrapper.get('.outline-section-header').attributes('data-sortable-level')).toBe('2')
 	})
 })
 
@@ -448,7 +460,7 @@ describe('SectionRow drag events', () => {
 		expect(wrapper.emitted('move-lesson')).toBeUndefined()
 	})
 
-	it('keeps cross-section transfer enabled only for lessons', () => {
+	it('allows section and lesson rows to enter other section lists', () => {
 		const wrapper = mountRow(parent)
 		const draggable = wrapper.findComponent({ name: 'Draggable' })
 		const group = draggable.props('group')
@@ -459,7 +471,7 @@ describe('SectionRow drag events', () => {
 
 		for (const permission of [group.pull, group.put]) {
 			expect(permission(null, null, lesson)).toBe(true)
-			expect(permission(null, null, nested)).toBe(false)
+			expect(permission(null, null, nested)).toBe(true)
 		}
 
 		draggable.vm.$emit('end', {
