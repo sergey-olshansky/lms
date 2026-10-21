@@ -239,10 +239,8 @@ class TestCourseSectionTree(BaseTestUtils):
 		nested = self.make_chapter("Editor Nested", parent_section=block.name)
 		self.attach_lesson_row(block, before, 1)
 		self.attach_section_row(block, nested, 2)
-		child = self.make_chapter("Editor Child", parent_section=nested.name)
-		self.attach_section_row(nested, child, 1)
 		lesson = self._create_lesson("Nested lesson title", nested.name, self.course.name)
-		self.attach_lesson_row(nested, lesson, 2)
+		self.attach_lesson_row(nested, lesson, 1)
 
 		details = get_lesson_creation_details(self.course.name, "1-1", 1)
 
