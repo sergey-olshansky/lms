@@ -186,7 +186,7 @@ const baseLesson = {
 	course_title: 'Course 1',
 	chapter_title: 'Chapter 1',
 	prev: null,
-	next: '1.2',
+	next: '1-2',
 	instructors: [],
 }
 
@@ -274,7 +274,7 @@ describe('Lesson.vue Next affordance follows canGoNext', () => {
 		findResource('lms.lms.utils.get_lesson').data = {
 			...baseLesson,
 			name: 'L2',
-			prev: '1.1',
+			prev: '1-1',
 			next: null,
 		}
 		await flushPromises()

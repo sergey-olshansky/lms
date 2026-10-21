@@ -26,92 +26,15 @@
 
 		<ul class="flex-1 overflow-y-auto px-2 py-3 list-none">
 			<li v-for="chapter in outline.data || []" :key="chapter.name">
-				<Disclosure
-					v-slot="{ open }"
-					:defaultOpen="chapterDefaultOpen(chapter)"
-				>
-					<DisclosureButton
-						class="w-full flex items-center justify-between rounded-4 px-3 py-2 hover:bg-surface-gray-2 text-start"
-					>
-						<div
-							class="flex items-center gap-2 text-base-medium leading-5 text-ink-gray-9 min-w-0"
-						>
-							<ChevronDown
-								class="size-4 stroke-1.5 shrink-0 transition-transform"
-								:class="{ '-rotate-90': !open }"
-							/>
-							<span class="truncate">{{ chapter.title }}</span>
-						</div>
-						<span
-							v-if="chapter.lessons?.length"
-							class="text-sm text-ink-gray-5 shrink-0"
-						>
-							{{ chapter.lessons.length }}
-						</span>
-					</DisclosureButton>
-					<DisclosurePanel>
-						<ul class="list-none">
-							<li v-for="lesson in chapter.lessons || []" :key="lesson.name">
-								<component
-									:is="
-										lesson.locked
-											? 'div'
-											: inlineSelect
-											? 'button'
-											: 'router-link'
-									"
-									:type="!lesson.locked && inlineSelect ? 'button' : undefined"
-									:to="
-										lesson.locked || inlineSelect
-											? undefined
-											: {
-													name: 'Lesson',
-													params: {
-														courseName,
-														chapterNumber: lesson.number.split('-')[0],
-														lessonNumber: lesson.number.split('-')[1],
-													},
-													query: studentViewQuery,
-											  }
-									"
-									class="flex w-full items-center gap-3 rounded-4 ps-9 pe-3 py-2 text-start text-sm leading-5 text-ink-gray-8 hover:bg-surface-gray-2"
-									:class="[
-										lesson.locked
-											? 'cursor-not-allowed opacity-60'
-											: inlineSelect
-											? 'cursor-pointer'
-											: '',
-										isActive(lesson.number)
-											? 'bg-surface-gray-2 text-ink-gray-9'
-											: '',
-									]"
-									@click="onLessonClick(lesson)"
-								>
-									<component
-										:is="iconFor(lesson.icon)"
-										class="size-4 stroke-1.5 shrink-0 text-ink-gray-7"
-									/>
-									<span class="truncate flex-1">{{ lesson.title }}</span>
-									<template v-if="lesson.locked">
-										<LockKeyhole
-											class="size-4 stroke-1.5 shrink-0 text-ink-gray-4"
-											aria-hidden="true"
-										/>
-										<span class="sr-only">{{ __('Locked') }}</span>
-									</template>
-									<CircleCheck
-										v-else-if="lesson.is_complete"
-										class="size-4 stroke-1.5 shrink-0 text-ink-green-8 fill-none"
-									/>
-									<Circle
-										v-else
-										class="size-4 stroke-1.5 shrink-0 text-ink-gray-4"
-									/>
-								</component>
-							</li>
-						</ul>
-					</DisclosurePanel>
-				</Disclosure>
+				<SidebarSection
+					:section="chapter"
+					:level="1"
+					:courseName="courseName"
+					:selectedLessonNumber="selectedLessonNumber"
+					:inlineSelect="inlineSelect"
+					:studentViewQuery="studentViewQuery"
+					@select-lesson="(payload) => emit('select-lesson', payload)"
+				/>
 			</li>
 		</ul>
 	</div>
@@ -121,19 +44,8 @@
 import { computed, watch, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
 import { createResource } from 'frappe-ui'
-import { Disclosure, DisclosureButton, DisclosurePanel } from '@headlessui/vue'
-import {
-	ChevronDown,
-	Circle,
-	CircleCheck,
-	Cloud,
-	FileText,
-	HelpCircle,
-	LockKeyhole,
-	MonitorPlay,
-	NotebookPen,
-	SquareCode,
-} from 'lucide-vue-next'
+import { Cloud } from 'lucide-vue-next'
+import SidebarSection from '@/components/SidebarSection.vue'
 
 const props = defineProps({
 	courseName: { type: String, required: true },
@@ -181,54 +93,24 @@ watch(
 // Re-runs whenever either source updates so a completion event that
 // lands before outline.data finishes loading still gets applied (and a
 // late-arriving outline reload doesn't wipe an already-marked lesson).
+// The walk is the whole tree now: a completed lesson may sit at any depth.
 watchEffect(() => {
 	const lessonName = props.completedLesson
 	if (!lessonName || !outline.data) return
-	for (const chapter of outline.data) {
-		const found = chapter.lessons?.find((l) => l.name === lessonName)
-		if (found) {
-			found.is_complete = true
-			return
+	const mark = (sections) => {
+		for (const section of sections ?? []) {
+			for (const lesson of section.lessons ?? []) {
+				if (lesson.name === lessonName) {
+					lesson.is_complete = true
+					return true
+				}
+			}
+			if (mark(section.sections)) return true
 		}
+		return false
 	}
+	mark(outline.data)
 })
 
 const displayedProgress = computed(() => Math.ceil(props.progress || 0))
-
-function iconFor(icon) {
-	switch (icon) {
-		case 'icon-youtube':
-			return MonitorPlay
-		case 'icon-quiz':
-			return HelpCircle
-		case 'icon-assignment':
-			return NotebookPen
-		case 'icon-code':
-			return SquareCode
-		case 'icon-lock':
-			return LockKeyhole
-		default:
-			return FileText
-	}
-}
-
-function isActive(number) {
-	return props.selectedLessonNumber === number
-}
-
-function onLessonClick(lesson) {
-	if (lesson.locked) return
-	emit('select-lesson', {
-		chapterNumber: lesson.number.split('-')[0],
-		lessonNumber: lesson.number.split('-')[1],
-	})
-}
-
-function chapterDefaultOpen(chapter) {
-	if (!props.selectedLessonNumber) return chapter.idx === 1
-	return (
-		chapter.lessons?.some((l) => l.number === props.selectedLessonNumber) ||
-		false
-	)
-}
 </script>

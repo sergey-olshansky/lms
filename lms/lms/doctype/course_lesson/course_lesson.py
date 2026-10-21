@@ -32,6 +32,7 @@ from lms.lms.utils import (
 	get_editorjs_blocks,
 	guest_access_allowed,
 	is_demo_course,
+	get_ordered_lesson_rows,
 	moderators_among,
 	recalculate_course_progress,
 	sanitize_editorjs,
@@ -576,30 +577,18 @@ def get_lesson_course(lesson: str) -> str | None:
 
 
 def get_next_lesson(course: str, lesson: str):
-	lesson_reference = frappe.db.get_value(
-		"Lesson Reference", {"lesson": lesson}, ["idx", "parent"], as_dict=1
-	)
-	if not lesson_reference:
+	"""The lesson after this one in the course's document (depth-first) order.
+
+	Leaving the last lesson of a section lands on the first lesson of whatever
+	comes next in the tree — sibling section, nested section or parent's next
+	child — exactly as the flat walk crossed chapter boundaries.
+	"""
+	names = [row.name for row in get_ordered_lesson_rows(course)]
+	try:
+		position = names.index(lesson)
+	except ValueError:
 		return None
-
-	total_lessons = frappe.db.count("Lesson Reference", {"parent": lesson_reference.parent})
-	if lesson_reference.idx < total_lessons:
-		return frappe.db.get_value(
-			"Lesson Reference", {"parent": lesson_reference.parent, "idx": lesson_reference.idx + 1}, "lesson"
-		)
-
-	total_chapters = frappe.db.count("Chapter Reference", {"parent": course})
-	current_chapter_reference = frappe.db.get_value(
-		"Chapter Reference", {"parent": course, "chapter": lesson_reference.parent}, ["idx"], as_dict=1
-	)
-
-	if current_chapter_reference.idx >= total_chapters:
-		return None
-
-	next_chapter = frappe.db.get_value(
-		"Chapter Reference", {"parent": course, "idx": current_chapter_reference.idx + 1}, "chapter"
-	)
-	return frappe.db.get_value("Lesson Reference", {"parent": next_chapter, "idx": 1}, "lesson")
+	return names[position + 1] if position + 1 < len(names) else None
 
 
 def get_quiz_progress(lesson):

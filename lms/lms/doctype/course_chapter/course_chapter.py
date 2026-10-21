@@ -5,12 +5,68 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
-from lms.lms.utils import get_lesson_count
+from lms.lms.utils import MAX_SECTION_DEPTH, get_lesson_count
 
 
 class CourseChapter(Document):
+	def validate(self):
+		self.validate_parent_section()
+		self.validate_children()
+
 	def on_update(self):
 		self.update_lesson_count()
+
+	def validate_parent_section(self):
+		"""The one gate every save path shares: Desk, API and data import.
+
+		Depth counts this chapter plus its ancestors: a top-level section is level
+		1, a section nested three sections deep is level 4, and a fifth level is
+		refused no matter which write path proposed it.
+		"""
+		if not self.parent_section:
+			return
+
+		if self.name and self.parent_section == self.name:
+			frappe.throw(_("A section cannot be nested inside itself."))
+
+		if self.is_scorm_package:
+			frappe.throw(_("SCORM sections cannot be nested inside another section."))
+
+		parent = frappe.db.get_value(
+			"Course Chapter",
+			self.parent_section,
+			["course", "is_scorm_package"],
+			as_dict=True,
+		)
+		if not parent:
+			frappe.throw(_("Parent section {0} not found").format(self.parent_section))
+		if parent.course != self.course:
+			frappe.throw(_("A section can only be nested inside a section of the same course."))
+		if parent.is_scorm_package:
+			frappe.throw(_("SCORM sections cannot contain sections."))
+
+		depth = 1
+		current = self.parent_section
+		seen = {self.name} if self.name else set()
+		while current:
+			if current in seen:
+				frappe.throw(_("Section nesting cannot form a cycle."))
+			seen.add(current)
+			depth += 1
+			if depth > MAX_SECTION_DEPTH:
+				frappe.throw(
+					_("Cannot save: this would exceed 4 section levels"),
+					frappe.ValidationError,
+				)
+			current = frappe.db.get_value("Course Chapter", current, "parent_section")
+
+	def validate_children(self):
+		"""A SCORM section is a leaf: no nested sections may point out of it."""
+		if not self.is_scorm_package:
+			return
+		for row in self.lessons or []:
+			if row.section:
+				frappe.throw(_("SCORM sections cannot contain sections."))
 
 	def update_lesson_count(self):
 		"""Update lesson count in the course"""

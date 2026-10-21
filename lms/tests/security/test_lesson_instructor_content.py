@@ -47,7 +47,7 @@ class TestLessonInstructorContentLeak(BaseTestUtils):
 	def _get(self, user):
 		frappe.session.user = user
 		try:
-			return get_lesson(self.course.name, 1, 1)
+			return get_lesson(self.course.name, "1", 1)
 		finally:
 			frappe.session.user = "Administrator"
 

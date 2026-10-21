@@ -94,9 +94,11 @@ import LessonForm from '@/pages/LessonForm.vue'
 import VideoStatistics from '@/components/Modals/VideoStatistics.vue'
 import {
 	findLessonNameByNumber,
+	flattenLessons,
 	lessonExistsByNumber,
 	isSelectionStale,
 	isLessonInChapter,
+	parseLessonNumber,
 } from '@/utils/courseOutline'
 
 const props = defineProps({
@@ -158,7 +160,7 @@ function storeLesson(courseName, number) {
 }
 
 function setSelectedFromNumber(number) {
-	const [chapterNumber, lessonNumber] = number.split('-')
+	const { chapterNumber, lessonNumber } = parseLessonNumber(number)
 	if (!chapterNumber || !lessonNumber) return
 	selected.value = {
 		chapterNumber,
@@ -179,9 +181,8 @@ function onLessonSaved({ name, title, include_in_preview, isNew }) {
 		outline.reload()
 		return
 	}
-	for (const chapter of outline.data ?? []) {
-		const lesson = chapter.lessons?.find((l) => l.name === name)
-		if (lesson) {
+	for (const lesson of flattenLessons(outline.data)) {
+		if (lesson.name === name) {
 			lesson.title = title
 			lesson.include_in_preview = include_in_preview ? 1 : 0
 			break
@@ -263,7 +264,7 @@ function pickInitialLesson() {
 		setSelectedFromNumber(stored)
 		return
 	}
-	const firstLesson = chapters.find((c) => c.lessons?.length)?.lessons?.[0]
+	const firstLesson = flattenLessons(chapters)[0]
 	if (firstLesson?.number) {
 		setSelectedFromNumber(firstLesson.number)
 	}

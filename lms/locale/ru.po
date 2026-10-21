@@ -12985,3 +12985,171 @@ msgstr "{} Прошел"
 #: lms/lms/workspace/learning/learning.json
 msgid "{} Published"
 msgstr "{} Опубликовано"
+
+#: frontend/src/components/SectionRow.vue frontend/src/components/CourseOutline.vue
+msgid "Add Section"
+msgstr "Добавить раздел"
+
+#: frontend/src/components/Modals/SectionFormModal.vue
+msgid "New section"
+msgstr "Новый раздел"
+
+#: frontend/src/components/Modals/SectionFormModal.vue
+msgid "Section"
+msgstr "Раздел"
+
+#: frontend/src/components/Modals/SectionFormModal.vue
+msgid "Inside: {0}"
+msgstr "Внутри: {0}"
+
+#: frontend/src/components/Modals/SectionFormModal.vue
+msgid "Level {0} of 4"
+msgstr "Уровень {0} из 4"
+
+#: frontend/src/components/Modals/MoveSectionModal.vue
+msgid "Level {0}"
+msgstr "Уровень {0}"
+
+#: frontend/src/components/SectionRow.vue frontend/src/components/Modals/MoveSectionModal.vue
+msgid "Maximum depth reached — 4 section levels"
+msgstr "Достигнута максимальная глубина — 4 уровня разделов"
+
+#: lms/lms/doctype/course_chapter/course_chapter.py lms/lms/api.py lms/lms/course_import_export.py
+msgid "Cannot save: this would exceed 4 section levels"
+msgstr "Нельзя сохранить: получится глубина больше 4 уровней"
+
+#: frontend/src/components/SectionRow.vue frontend/src/components/Modals/MoveSectionModal.vue
+msgid "Move to…"
+msgstr "Переместить…"
+
+#: frontend/src/components/SectionRow.vue
+msgid "Move up"
+msgstr "Выше"
+
+#: frontend/src/components/SectionRow.vue
+msgid "Move down"
+msgstr "Ниже"
+
+#: frontend/src/components/Modals/MoveSectionModal.vue
+msgid "Move"
+msgstr "Переместить"
+
+#: frontend/src/components/SectionRow.vue
+msgid "Rename"
+msgstr "Переименовать"
+
+#: frontend/src/components/Modals/SectionFormModal.vue
+msgid "Section created"
+msgstr "Раздел создан"
+
+#: frontend/src/components/Modals/MoveSectionModal.vue
+msgid "Section moved"
+msgstr "Раздел перемещён"
+
+#: frontend/src/components/CourseOutline.vue
+msgid "Order updated"
+msgstr "Порядок обновлён"
+
+#: frontend/src/components/CourseOutline.vue
+msgid "Delete section?"
+msgstr "Удалить раздел?"
+
+#: frontend/src/components/CourseOutline.vue
+msgid "Will be deleted: {0}, including student progress on those lessons"
+msgstr "Будут удалены: {0}, включая прогресс учащихся по этим урокам"
+
+#: frontend/src/components/CourseOutline.vue
+msgid "This section is empty."
+msgstr "Раздел пустой."
+
+#: frontend/src/components/SectionRow.vue
+msgid "Empty section"
+msgstr "Пустой раздел"
+
+#: frontend/src/components/Modals/MoveSectionModal.vue
+msgid "Current branch depth: {0}"
+msgstr "Текущая глубина ветви: {0}"
+
+#: frontend/src/components/CourseOutline.vue
+msgid "No sections yet"
+msgstr "В курсе пока нет разделов"
+
+#: frontend/src/components/CourseOutline.vue
+msgid "Create section"
+msgstr "Создать раздел"
+
+#: lms/lms/doctype/course_chapter/course_chapter.py lms/lms/api.py
+msgid "SCORM sections cannot be nested inside another section."
+msgstr "SCORM-разделы нельзя вкладывать в другой раздел."
+
+#: lms/lms/doctype/course_chapter/course_chapter.py lms/lms/api.py
+msgid "SCORM sections cannot contain sections."
+msgstr "SCORM-разделы не могут содержать разделы."
+
+#: lms/lms/api.py
+msgid "SCORM sections cannot contain lessons."
+msgstr "SCORM-разделы не могут содержать уроки."
+
+#: lms/lms/doctype/course_chapter/course_chapter.py lms/lms/api.py
+msgid "A section can only be nested inside a section of the same course."
+msgstr "Раздел можно вкладывать только в раздел того же курса."
+
+#: lms/lms/api.py
+msgid "A section cannot be moved inside itself."
+msgstr "Раздел нельзя переместить внутрь самого себя."
+
+#: lms/lms/doctype/course_chapter/course_chapter.py
+msgid "A section cannot be nested inside itself."
+msgstr "Раздел нельзя вложить в самого себя."
+
+#: lms/lms/doctype/course_chapter/course_chapter.py lms/lms/api.py
+msgid "Section nesting cannot form a cycle."
+msgstr "Вложенность разделов не может образовывать цикл."
+
+#: lms/lms/doctype/lesson_reference/lesson_reference.py
+msgid "A course child row must reference either a lesson or a section."
+msgstr "Строка содержимого курса должна ссылаться на урок или раздел."
+
+#: lms/lms/doctype/course_chapter/course_chapter.py lms/lms/api.py
+msgid "Parent section {0} not found"
+msgstr "Родительский раздел {0} не найден"
+
+#: lms/lms/api.py
+msgid "Section {0} not found"
+msgstr "Раздел {0} не найден"
+
+#: lms/lms/api.py
+msgid "Section {0} not found in this parent."
+msgstr "Раздел {0} не найден в этом родителе."
+
+#: lms/lms/api.py
+msgid "Lesson {0} not found in this section."
+msgstr "Урок {0} не найден в этом разделе."
+
+#: lms/lms/api.py
+msgid "You do not have permission to modify this section."
+msgstr "У вас нет разрешения на изменение этого раздела."
+
+#: lms/lms/api.py
+msgid "You do not have permission to move this section."
+msgstr "У вас нет разрешения на перемещение этого раздела."
+
+#: lms/lms/api.py
+msgid "Use the move action to change a section's parent."
+msgstr "Чтобы изменить родителя раздела, используйте перенос."
+
+#: lms/lms/api.py
+msgid "section must be a string"
+msgstr "section должен быть строкой"
+
+#: lms/lms/api.py
+msgid "parent must be a string"
+msgstr "parent должен быть строкой"
+
+#: lms/lms/api.py
+msgid "target_parent must be a string"
+msgstr "target_parent должен быть строкой"
+
+#: lms/lms/api.py
+msgid "parent_section must be a string"
+msgstr "parent_section должен быть строкой"

@@ -12380,3 +12380,171 @@ msgstr ""
 #: lms/lms/workspace/learning/learning.json
 msgid "{} Published"
 msgstr ""
+
+#: frontend/src/components/SectionRow.vue frontend/src/components/CourseOutline.vue
+msgid "Add Section"
+msgstr ""
+
+#: frontend/src/components/Modals/SectionFormModal.vue
+msgid "New section"
+msgstr ""
+
+#: frontend/src/components/Modals/SectionFormModal.vue
+msgid "Section"
+msgstr ""
+
+#: frontend/src/components/Modals/SectionFormModal.vue
+msgid "Inside: {0}"
+msgstr ""
+
+#: frontend/src/components/Modals/SectionFormModal.vue
+msgid "Level {0} of 4"
+msgstr ""
+
+#: frontend/src/components/Modals/MoveSectionModal.vue
+msgid "Level {0}"
+msgstr ""
+
+#: frontend/src/components/SectionRow.vue frontend/src/components/Modals/MoveSectionModal.vue
+msgid "Maximum depth reached — 4 section levels"
+msgstr ""
+
+#: lms/lms/doctype/course_chapter/course_chapter.py lms/lms/api.py lms/lms/course_import_export.py
+msgid "Cannot save: this would exceed 4 section levels"
+msgstr ""
+
+#: frontend/src/components/SectionRow.vue frontend/src/components/Modals/MoveSectionModal.vue
+msgid "Move to…"
+msgstr ""
+
+#: frontend/src/components/SectionRow.vue
+msgid "Move up"
+msgstr ""
+
+#: frontend/src/components/SectionRow.vue
+msgid "Move down"
+msgstr ""
+
+#: frontend/src/components/Modals/MoveSectionModal.vue
+msgid "Move"
+msgstr ""
+
+#: frontend/src/components/SectionRow.vue
+msgid "Rename"
+msgstr ""
+
+#: frontend/src/components/Modals/SectionFormModal.vue
+msgid "Section created"
+msgstr ""
+
+#: frontend/src/components/Modals/MoveSectionModal.vue
+msgid "Section moved"
+msgstr ""
+
+#: frontend/src/components/CourseOutline.vue
+msgid "Order updated"
+msgstr ""
+
+#: frontend/src/components/CourseOutline.vue
+msgid "Delete section?"
+msgstr ""
+
+#: frontend/src/components/CourseOutline.vue
+msgid "Will be deleted: {0}, including student progress on those lessons"
+msgstr ""
+
+#: frontend/src/components/CourseOutline.vue
+msgid "This section is empty."
+msgstr ""
+
+#: frontend/src/components/SectionRow.vue
+msgid "Empty section"
+msgstr ""
+
+#: frontend/src/components/Modals/MoveSectionModal.vue
+msgid "Current branch depth: {0}"
+msgstr ""
+
+#: frontend/src/components/CourseOutline.vue
+msgid "No sections yet"
+msgstr ""
+
+#: frontend/src/components/CourseOutline.vue
+msgid "Create section"
+msgstr ""
+
+#: lms/lms/doctype/course_chapter/course_chapter.py lms/lms/api.py
+msgid "SCORM sections cannot be nested inside another section."
+msgstr ""
+
+#: lms/lms/doctype/course_chapter/course_chapter.py lms/lms/api.py
+msgid "SCORM sections cannot contain sections."
+msgstr ""
+
+#: lms/lms/api.py
+msgid "SCORM sections cannot contain lessons."
+msgstr ""
+
+#: lms/lms/doctype/course_chapter/course_chapter.py lms/lms/api.py
+msgid "A section can only be nested inside a section of the same course."
+msgstr ""
+
+#: lms/lms/api.py
+msgid "A section cannot be moved inside itself."
+msgstr ""
+
+#: lms/lms/doctype/course_chapter/course_chapter.py
+msgid "A section cannot be nested inside itself."
+msgstr ""
+
+#: lms/lms/doctype/course_chapter/course_chapter.py lms/lms/api.py
+msgid "Section nesting cannot form a cycle."
+msgstr ""
+
+#: lms/lms/doctype/lesson_reference/lesson_reference.py
+msgid "A course child row must reference either a lesson or a section."
+msgstr ""
+
+#: lms/lms/doctype/course_chapter/course_chapter.py lms/lms/api.py
+msgid "Parent section {0} not found"
+msgstr ""
+
+#: lms/lms/api.py
+msgid "Section {0} not found"
+msgstr ""
+
+#: lms/lms/api.py
+msgid "Section {0} not found in this parent."
+msgstr ""
+
+#: lms/lms/api.py
+msgid "Lesson {0} not found in this section."
+msgstr ""
+
+#: lms/lms/api.py
+msgid "You do not have permission to modify this section."
+msgstr ""
+
+#: lms/lms/api.py
+msgid "You do not have permission to move this section."
+msgstr ""
+
+#: lms/lms/api.py
+msgid "Use the move action to change a section's parent."
+msgstr ""
+
+#: lms/lms/api.py
+msgid "section must be a string"
+msgstr ""
+
+#: lms/lms/api.py
+msgid "parent must be a string"
+msgstr ""
+
+#: lms/lms/api.py
+msgid "target_parent must be a string"
+msgstr ""
+
+#: lms/lms/api.py
+msgid "parent_section must be a string"
+msgstr ""

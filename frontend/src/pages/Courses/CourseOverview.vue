@@ -160,6 +160,10 @@ import type {
 } from '@/types'
 import CourseCardOverlay from '@/components/CourseCardOverlay.vue'
 import CourseOutline from '@/components/CourseOutline.vue'
+import {
+	flattenLessons,
+	flattenSections,
+} from '@/utils/courseOutline'
 import SkeletonLoader from '@/components/SkeletonLoader.vue'
 import CourseReviews from '@/components/CourseReviews.vue'
 import CourseInstructors from '@/components/CourseInstructors.vue'
@@ -200,16 +204,13 @@ watch(
 )
 
 const outlineStats = computed(() => {
-	const chapters = outline.data || []
-	const lessonCount = chapters.reduce(
-		(acc, c) => acc + (c.lessons?.length || 0),
-		0
-	)
+	const sections = flattenSections(outline.data || [])
+	const lessonCount = flattenLessons(outline.data || []).length
 	const parts: string[] = []
-	if (chapters.length) {
+	if (sections.length) {
 		parts.push(
-			`${chapters.length} ${
-				chapters.length === 1 ? __('section') : __('sections')
+			`${sections.length} ${
+				sections.length === 1 ? __('section') : __('sections')
 			}`
 		)
 	}
@@ -222,11 +223,8 @@ const outlineStats = computed(() => {
 })
 
 const hasCourseContent = computed(() => {
-	const chapters = outline.data || []
-	const lessonCount = chapters.reduce(
-		(acc, c) => acc + (c.lessons?.length || 0),
-		0
-	)
-	return chapters.length > 0 && lessonCount > 0
+	const sections = flattenSections(outline.data || [])
+	const lessonCount = flattenLessons(outline.data || []).length
+	return sections.length > 0 && lessonCount > 0
 })
 </script>
