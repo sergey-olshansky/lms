@@ -7,7 +7,7 @@
 		<router-link
 			:to="{
 				name: 'HomeworkDetail',
-				params: { assignmentID: props.assignmentID },
+				params: { assignmentID: props.assignmentId },
 			}"
 			class="flex items-center gap-2 text-ink-gray-7 transition-colors hover:text-ink-gray-9"
 		>
@@ -36,19 +36,16 @@
 // a standalone quiz or a written assignment, it keeps the way back one click
 // away and shows live progress.
 //
-// B11: the progress is actually live -- refetched on mount, on every
-// assignmentID change, on window focus/tab visibility, and whenever the parent
-// calls the exposed refresh() after a confirmed event (a lesson opening, a quiz
-// submission, an assignment opening). The fetched payload is emitted as
-// `summary`, the structured role signal the parent gates student-only actions
-// on. `start` marks standalone material: the card is started here, but only for
-// the student themselves (viewer_is_student) -- a teacher's preview fires no
-// student action and shows no error.
-import { call } from 'frappe-ui'
+// The prop is deliberately `assignmentId` (not `assignmentID`): Vue's
+// kebab-case -> camelCase conversion of `assignment-id` yields exactly this
+// spelling, and the taller `assignmentID` variant silently never receives the
+// attribute -- a real browser session caught the banner mounting with an empty
+// id while every isolated harness passed.
+import { call, createResource } from 'frappe-ui'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 const props = defineProps({
-	assignmentID: { type: String, required: true },
+	assignmentId: { type: String, required: true },
 	start: { type: Boolean, default: false },
 })
 const emit = defineEmits(['summary'])
@@ -57,13 +54,16 @@ const summary = ref(null)
 let generation = 0
 const startApplied = ref(false)
 
+const detail = createResource({
+	url: 'lms.lms.homework_api.get_homework_assignment',
+	makeParams: () => ({ name: props.assignmentId }),
+})
+
 const refresh = async () => {
 	const run = ++generation
 	let data
 	try {
-		data = await call('lms.lms.homework_api.get_homework_assignment', {
-			name: props.assignmentID,
-		})
+		data = await detail.submit()
 	} catch {
 		// Not this viewer's homework (stale link, other user): no banner.
 		if (run === generation) summary.value = null
@@ -78,11 +78,9 @@ const refresh = async () => {
 	startApplied.value = true
 	try {
 		await call('lms.lms.homework_api.open_homework', {
-			assignment: props.assignmentID,
+			assignment: props.assignmentId,
 		})
-		const fresh = await call('lms.lms.homework_api.get_homework_assignment', {
-			name: props.assignmentID,
-		})
+		const fresh = await detail.submit()
 		if (run !== generation) return
 		summary.value = fresh
 		emit('summary', fresh)
@@ -93,7 +91,7 @@ const refresh = async () => {
 }
 
 watch(
-	() => props.assignmentID,
+	() => props.assignmentId,
 	() => {
 		startApplied.value = false
 		summary.value = null
