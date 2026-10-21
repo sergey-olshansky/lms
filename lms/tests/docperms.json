@@ -580,6 +580,68 @@
 			"export"
 		]
 	},
+	"LMS Homework": {
+		"Course Creator#0#if_owner": [
+			"read",
+			"write",
+			"create",
+			"delete",
+			"share",
+			"report",
+			"export"
+		],
+		"Moderator#0": [
+			"read",
+			"write",
+			"create",
+			"delete",
+			"share",
+			"report",
+			"export"
+		]
+	},
+	"LMS Homework Assignment": {
+		"Course Creator#0#if_owner": [
+			"read",
+			"write",
+			"create",
+			"share",
+			"report",
+			"export"
+		],
+		"LMS Student#0": [
+			"read"
+		],
+		"Moderator#0": [
+			"read",
+			"write",
+			"create",
+			"delete",
+			"share",
+			"report",
+			"export"
+		]
+	},
+	"LMS Homework Group": {
+		"Course Creator#0#if_owner": [
+			"read",
+			"write",
+			"create",
+			"delete",
+			"share",
+			"report",
+			"export"
+		],
+		"Moderator#0": [
+			"read",
+			"write",
+			"create",
+			"delete",
+			"share",
+			"report",
+			"export"
+		]
+	},
 	"LMS Job Application": {
 		"LMS Student#0#if_owner": [
 			"read",
