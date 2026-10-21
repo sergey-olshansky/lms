@@ -460,6 +460,65 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 		self.assertEqual(doc.status, "In Progress")
 		self.assertTrue(any(row.event == "requirement_invalidated" for row in doc.history))
 
+	def test_open_ended_grading_flow(self):
+		"""A20: an ungraded open answer is not a success; the teacher's grade
+		recomputes the requirement through the submission's own on_update."""
+		self._enroll(self.student)
+
+		question = frappe.new_doc("LMS Question")
+		question.update({"question": "Explain the atom", "type": "Open Ended"})
+		question.save()
+		quiz = frappe.new_doc("LMS Quiz")
+		quiz.update({"title": "HW Open Ended Quiz", "passing_percentage": 70, "total_marks": 5})
+		quiz.append("questions", {"question": question.name, "marks": 5, "type": "Open Ended"})
+		quiz.save()
+
+		lesson = self._lesson("Open ended lesson", QUIZ_BLOCK.format(quiz.name))
+		template = self._template("Open ended", [lesson])
+		name = self._assign(template, self.student, "key-open-ended")["name"]
+
+		frappe.set_user(self.student.email)
+		homework_service.record_lesson_opened(lesson.name)
+		submit_quiz(quiz.name, json.dumps([{"question_name": question.name, "answer": "My essay"}]))
+
+		doc = frappe.get_doc("LMS Homework Assignment", name)
+		row = next(row for row in doc.requirements if row.requirement_type == "Pass Quiz")
+		self.assertEqual(row.status, "Awaiting Grading")
+		self.assertEqual(doc.status, "In Progress")  # no false success yet
+
+		# The teacher grades; the submission's save recomputes the homework.
+		frappe.set_user(self.teacher.email)
+		submission = frappe.get_all(
+			"LMS Quiz Submission",
+			filters={"quiz": quiz.name, "member": self.student.email},
+			pluck="name",
+		)[0]
+		submission_doc = frappe.get_doc("LMS Quiz Submission", submission)
+		for result_row in submission_doc.result:
+			result_row.marks = result_row.marks_out_of
+		submission_doc.save()
+
+		doc = frappe.get_doc("LMS Homework Assignment", name)
+		row = next(row for row in doc.requirements if row.requirement_type == "Pass Quiz")
+		self.assertEqual(row.status, "Completed")
+		self.assertEqual(doc.status, "Review")
+
+	def test_deleted_source_reads_unavailable(self):
+		"""A30: deleting the lesson after issuing leaves the frozen row but the
+		detail reads it as Unavailable instead of counting it."""
+		self._enroll(self.student)
+		template = self._template("Vanishing", [self.lesson_plain])
+		name = self._assign(template, self.student, "key-vanish")["name"]
+
+		frappe.set_user(self.teacher.email)
+		frappe.delete_doc("Course Lesson", self.lesson_plain.name)
+
+		frappe.set_user(self.student.email)
+		detail = homework_api.get_homework_assignment(name)
+		lesson_rows = [row for row in detail["requirements"] if row["requirement_type"] == "Open Lesson"]
+		self.assertEqual(lesson_rows[0]["status"], "Unavailable")
+		self.assertEqual(lesson_rows[0]["state_label"], "Unavailable")
+
 	def test_board_counts_and_course_filter(self):
 		self._enroll(self.student)
 		template = self._template("Board counts", [self.lesson_plain])

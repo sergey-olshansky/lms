@@ -659,7 +659,11 @@ def get_homework_assignment(name: str) -> dict:
 
 def format_requirement(row) -> dict:
 	"""One checklist row for the client: identity, path, state with a text label
-	(color never the only carrier, spec 5.3), and the proof link when one exists."""
+	(color never the only carrier, spec 5.3), and the proof link when one exists.
+
+	A source deleted after issuing (spec 8.2) reads as Unavailable right here,
+	without rewriting the frozen snapshot: the row stays, the work does not
+	silently count, and the teacher sees what to fix or recall."""
 	state_labels = {
 		"Pending": _("Not done"),
 		"Awaiting Grading": _("Awaiting grading"),
@@ -667,6 +671,7 @@ def format_requirement(row) -> dict:
 		"Completed Earlier": _("Done earlier"),
 		"Unavailable": _("Unavailable"),
 	}
+	status = row.status if _source_alive(row) else "Unavailable"
 	return {
 		"requirement_type": row.requirement_type,
 		"course": row.course,
@@ -676,12 +681,23 @@ def format_requirement(row) -> dict:
 		"reference_assignment": row.reference_assignment,
 		"label": row.label,
 		"path": row.path,
-		"status": row.status,
-		"state_label": state_labels.get(row.status, row.status),
+		"status": status,
+		"state_label": state_labels.get(status, status),
 		"completed_at": row.completed_at,
 		"proof_type": row.proof_type,
 		"proof_name": row.proof_name,
 	}
+
+
+def _source_alive(row) -> bool:
+	"""Whether the row's underlying material still resolves by its stable id."""
+	if row.requirement_type == "Open Lesson" and row.lesson:
+		return bool(frappe.db.exists("Course Lesson", row.lesson))
+	if row.requirement_type == "Pass Quiz" and row.quiz:
+		return bool(frappe.db.exists("LMS Quiz", row.quiz))
+	if row.requirement_type == "Reference" and row.reference_assignment:
+		return bool(frappe.db.exists("LMS Assignment", row.reference_assignment))
+	return True
 
 
 def continue_target(doc) -> dict | None:
