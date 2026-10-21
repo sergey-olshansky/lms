@@ -2,6 +2,8 @@ import { reactive, type InjectionKey } from 'vue'
 import { flattenSections } from '@/utils/courseOutline'
 import type { OutlineChapter, OutlineLesson } from '@/types'
 
+const MAX_SECTION_DEPTH = 2
+
 export type OutlineDragItem =
 	| { kind: 'section'; node: OutlineChapter }
 	| { kind: 'lesson'; lesson: OutlineLesson }
@@ -31,7 +33,7 @@ export function canDropIntoSection(
 		return false
 	const height = (node: OutlineChapter): number =>
 		1 + Math.max(0, ...(node.sections ?? []).map(height))
-	return (target.level ?? 1) + height(item.node) <= 4
+	return (target.level ?? 1) + height(item.node) <= MAX_SECTION_DEPTH
 }
 
 export function createCourseOutlineDrag(options: {

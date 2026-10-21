@@ -56,14 +56,19 @@ describe('dropping outline items into section titles', () => {
 		).toBe(true)
 		expect(drag.state.hoveredTarget).toBeNull()
 	})
-	it('rejects cycles, SCORM and subtrees exceeding four levels', () => {
+	it('rejects cycles, SCORM and subtrees exceeding two levels', () => {
 		const child = section('CHILD', 2)
 		const root = section('ROOT', 1, [child])
 		const item = { kind: 'section' as const, node: root }
 		expect(canDropIntoSection(item, root)).toBe(false)
 		expect(canDropIntoSection(item, child)).toBe(false)
-		expect(canDropIntoSection(item, section('DEEP', 3))).toBe(false)
-		expect(canDropIntoSection(item, section('OTHER', 2))).toBe(true)
+		expect(canDropIntoSection(item, section('DEEP', 2))).toBe(false)
+		expect(
+			canDropIntoSection(
+				{ kind: 'section', node: child },
+				section('OTHER', 1)
+			)
+		).toBe(true)
 		expect(
 			canDropIntoSection(item, { ...section('SCORM'), is_scorm_package: 1 })
 		).toBe(false)
@@ -74,7 +79,7 @@ describe('dropping outline items into section titles', () => {
 			)
 		).toBe(false)
 		expect(
-			canDropIntoSection({ kind: 'lesson', lesson }, section('DEEP', 4))
+			canDropIntoSection({ kind: 'lesson', lesson }, section('DEEP', 2))
 		).toBe(true)
 	})
 	it.each(['root', 'nested', 'lesson'])(

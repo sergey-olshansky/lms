@@ -22,7 +22,7 @@
 					{{ __('Inside: {0}').format(contextTitles.join(' › ')) }}
 				</div>
 				<div class="text-sm text-ink-gray-5">
-					{{ __('Level {0} of 4').format(levelOfNew) }}
+					{{ __('Level {0} of 2').format(levelOfNew) }}
 				</div>
 				<FormControl
 					ref="titleInput"
@@ -52,8 +52,8 @@ import type { OutlineChapter, Resource } from '@/types'
 
 /**
  * Creates a nested section under a given parent (design §4.3): a small dialog
- * with the "Inside: …" context line, the "Level N of 4" helper and a title
- * field. The level-4 ceiling is enforced by the caller not offering the
+ * with the "Inside: …" context line, the "Level N of 2" helper and a title
+ * field. The level-2 ceiling is enforced by the caller not offering the
  * dialog, and again server-side on save.
  */
 const props = defineProps<{

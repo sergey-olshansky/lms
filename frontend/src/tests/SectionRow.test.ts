@@ -157,17 +157,20 @@ describe('SectionRow editor actions', () => {
 		expect(wrapper.emitted('create-lesson')).toHaveLength(1)
 	})
 
-	it('keeps the move action visible and exposes reorder controls to the keyboard', () => {
+	it('aligns actions and the drag handle right and removes duplicate arrow controls', () => {
 		const wrapper = mountRow()
 
-		expect(wrapper.get('button[aria-label="Move up"]').element.tagName).toBe(
-			'BUTTON'
-		)
-		expect(wrapper.get('button[aria-label="Move down"]').element.tagName).toBe(
-			'BUTTON'
-		)
+		expect(wrapper.find('button[aria-label="Move up"]').exists()).toBe(false)
+		expect(wrapper.find('button[aria-label="Move down"]').exists()).toBe(false)
 		expect(wrapper.get('button[aria-label="Move to…"]').text()).toBe('')
-		expect(wrapper.get('[role="group"]').findAll('button')).toHaveLength(7)
+		expect(wrapper.get('[role="group"]').classes()).toContain('justify-end')
+		expect(wrapper.get('[role="group"]').findAll('button')).toHaveLength(6)
+		expect(
+			wrapper.get('[role="group"] .outline-drag-handle').element.tagName
+		).toBe('BUTTON')
+		expect(
+			wrapper.get('button[aria-expanded]').find('.outline-drag-handle').exists()
+		).toBe(false)
 	})
 
 	it('wraps long section names instead of truncating them beside actions', () => {
@@ -180,6 +183,7 @@ describe('SectionRow editor actions', () => {
 		const title = wrapper.get('[title^="A very long section name"]')
 		expect(title.classes()).toContain('whitespace-normal')
 		expect(title.classes()).toContain('break-words')
+		expect(title.classes()).toContain('font-semibold')
 		expect(title.text()).toBe(
 			'A very long section name that needs to remain distinguishable in the editor'
 		)
@@ -374,43 +378,43 @@ describe('SectionRow mixed children (task 28)', () => {
 	})
 })
 
-describe('SectionRow depth limit (task 28)', () => {
-	it('disables adding a section at level 4 with a screen-reader reason', () => {
+describe('SectionRow depth limit', () => {
+	it('disables adding a section at level 2 with a screen-reader reason', () => {
 		const wrapper = mountRow({
-			name: 'CH-L4',
+			name: 'CH-L2',
 			title: 'Deepest',
 			idx: 1,
-			level: 4,
+			level: 2,
 			lessons: [],
 			sections: [],
 		})
 
 		const affordance = wrapper.get(
-			'button[aria-label="Maximum depth reached — 4 section levels"]'
+			'button[aria-label="Maximum depth reached — 2 section levels"]'
 		)
 		expect(affordance.attributes('aria-disabled')).toBe('true')
 		expect((affordance.element as HTMLButtonElement).disabled).toBe(true)
 
-		expect(wrapper.text()).toContain('Maximum depth reached — 4 section levels')
+		expect(wrapper.text()).toContain('Maximum depth reached — 2 section levels')
 	})
 
-	it('offers adding a section at level 3 and emits the parent on click', async () => {
-		const level3: OutlineChapter = {
-			name: 'CH-L3',
-			title: 'Third level',
+	it('offers adding a section at level 1 and emits the parent on click', async () => {
+		const level1: OutlineChapter = {
+			name: 'CH-L1',
+			title: 'First level',
 			idx: 1,
-			level: 3,
+			level: 1,
 			lessons: [],
 			sections: [],
 		}
-		const wrapper = mountRow(level3)
+		const wrapper = mountRow(level1)
 
 		const affordance = wrapper.find('.lucide-folder-plus')
 		expect(affordance.exists()).toBe(true)
 		expect(affordance.attributes('aria-disabled')).toBeUndefined()
 
 		await affordance.trigger('click')
-		expect(wrapper.emitted('add-section')?.[0]).toEqual([level3])
+		expect(wrapper.emitted('add-section')?.[0]).toEqual([level1])
 	})
 })
 

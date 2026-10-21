@@ -44,8 +44,8 @@ from lms.lms.doctype.course_lesson.course_lesson import (
 from lms.lms.doctype.lms_certificate.lms_certificate import evaluates_certificate, get_latest_certificate
 from lms.lms.sidebar import LEGACY_VISIBILITY_FIELDS, ROW_FIELDS, get_sidebar_rows
 from lms.lms.utils import (
-	MAX_SECTION_DEPTH,
 	LMS_ROLES,
+	MAX_SECTION_DEPTH,
 	attach_file_to_doc,
 	can_modify_batch,
 	can_modify_course,
@@ -1225,7 +1225,7 @@ def move_section(section: str, target_parent: str = None, idx: int = None):
 		frappe.throw(_("A section cannot be moved inside itself."))
 
 	if section_depth_of(target_parent) + height > MAX_SECTION_DEPTH:
-		frappe.throw(_("Cannot save: this would exceed 4 section levels"), frappe.ValidationError)
+		frappe.throw(_("Cannot save: this would exceed 2 section levels"), frappe.ValidationError)
 
 	if old_parent:
 		frappe.db.delete("Lesson Reference", {"parent": old_parent, "section": section})
@@ -1284,7 +1284,7 @@ def section_depth_of(chapter_name: str) -> int:
 			return depth
 		depth += 1
 		if depth > MAX_SECTION_DEPTH:
-			frappe.throw(_("Cannot save: this would exceed 4 section levels"), frappe.ValidationError)
+			frappe.throw(_("Cannot save: this would exceed 2 section levels"), frappe.ValidationError)
 		current = parent
 	return depth
 

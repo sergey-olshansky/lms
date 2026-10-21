@@ -1,5 +1,9 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+	courseOutlineExpansionKey,
+	rememberSectionExpansion,
+} from '@/utils/courseOutlineExpansion'
 import StudentLessonSidebar from '@/components/StudentLessonSidebar.vue'
 
 const flatOutline = vi.hoisted(() => [
@@ -33,8 +37,8 @@ const flatOutline = vi.hoisted(() => [
 	},
 ])
 
-// Task 28: nested sections render recursively, the ancestor path of the open
-// lesson expands, the badge counts the whole subtree, and lesson links carry
+// Nested sections render recursively, saved expansion choices are restored,
+// the badge counts the whole subtree, and lesson links carry
 // the section path as the chapter param.
 const nestedOutline = vi.hoisted(() => [
 	{
@@ -122,6 +126,7 @@ const mountSidebar = (selectedLessonNumber = '1-2') =>
 			selectedLessonNumber,
 		},
 		global: {
+			provide: { $user: { data: { name: 'learner@example.com' } } },
 			mocks: { __: (s: string) => s },
 			stubs: {
 				'router-link': {
@@ -131,6 +136,35 @@ const mountSidebar = (selectedLessonNumber = '1-2') =>
 			},
 		},
 	})
+
+beforeEach(() => {
+	localStorage.clear()
+	const key = courseOutlineExpansionKey('COURSE-1', 'learner@example.com')
+	rememberSectionExpansion(key, 'CH-1', true)
+	rememberSectionExpansion(key, 'SUB-1', true)
+})
+
+it('starts closed without saved state even on an active nested lesson, then remembers the learner choice', async () => {
+	localStorage.clear()
+	let wrapper = mountSidebar()
+	expect(wrapper.get('button[aria-expanded]').attributes('aria-expanded')).toBe(
+		'false'
+	)
+	await wrapper.get('button[aria-expanded]').trigger('click')
+	const title = wrapper.get('[title="Chapter 1"]')
+	expect(title.classes()).toContain('whitespace-normal')
+	expect(title.element.parentElement!.classList.contains('font-semibold')).toBe(
+		true
+	)
+	expect(
+		wrapper.get('[data-testid="student-section-branch"]').classes()
+	).toContain('border-s')
+	wrapper.unmount()
+	wrapper = mountSidebar()
+	expect(wrapper.get('button[aria-expanded]').attributes('aria-expanded')).toBe(
+		'true'
+	)
+})
 
 describe('StudentLessonSidebar locked lesson', () => {
 	it('renders a lock for a locked lesson and no link', () => {
@@ -181,7 +215,9 @@ describe('StudentLessonSidebar nested sections (task 28)', () => {
 		servedOutline = nestedOutline
 		try {
 			const wrapper = mountSidebar('1-1-2')
-			const badges = wrapper.findAll('span.text-ink-gray-5').map((b) => b.text())
+			const badges = wrapper
+				.findAll('span.text-ink-gray-5')
+				.map((b) => b.text())
 			// The level-1 badge counts all three lessons of its subtree; the
 			// nested one counts its own two. For a flat chapter the two
 			// coincide (legacy parity).

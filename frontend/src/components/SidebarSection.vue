@@ -1,33 +1,33 @@
 <template>
 	<Disclosure v-slot="{ open }" :defaultOpen="defaultOpen">
 		<DisclosureButton
-			class="w-full flex items-center justify-between rounded-4 px-3 py-2 hover:bg-surface-gray-2 text-start"
+			class="w-full flex items-start justify-between gap-2 rounded-4 px-3 py-2 hover:bg-surface-gray-2 text-start"
+			@click="rememberSectionExpansion(expansionKey, section.name, !open)"
 		>
 			<div
-				class="flex items-center gap-2 min-w-0"
-				:class="
-					level > 1
-						? 'text-sm leading-5 text-ink-gray-8'
-						: 'text-base-medium leading-5 text-ink-gray-9'
-				"
+				class="flex min-w-0 flex-1 items-start gap-2 text-base font-semibold leading-5 text-ink-gray-9"
 			>
 				<ChevronDown
-					class="size-4 stroke-1.5 shrink-0 transition-transform"
+					class="mt-0.5 size-4 stroke-1.5 shrink-0 transition-transform"
 					:class="{ '-rotate-90': !open }"
 				/>
-				<span class="truncate">{{ section.title }}</span>
+				<span
+					class="min-w-0 flex-1 whitespace-normal break-words"
+					:title="section.title"
+					>{{ section.title }}</span
+				>
 			</div>
-			<span
-				v-if="badgeCount"
-				class="text-sm text-ink-gray-5 shrink-0"
-			>
+			<span v-if="badgeCount" class="text-sm text-ink-gray-5 shrink-0">
 				{{ badgeCount }}
 			</span>
 		</DisclosureButton>
-		<DisclosurePanel>
-			<ul class="list-none">
+		<DisclosurePanel
+			class="ms-5 border-s border-outline-gray-2"
+			data-testid="student-section-branch"
+		>
+			<ul class="list-none ps-3">
 				<template v-for="child in mergedChildren" :key="child.key">
-					<li v-if="child.kind === 'section'" class="ps-2 sm:ps-3">
+					<li v-if="child.kind === 'section'">
 						<SidebarSection
 							:section="child.node"
 							:level="level + 1"
@@ -48,7 +48,9 @@
 									? 'button'
 									: 'router-link'
 							"
-							:type="!child.lesson.locked && inlineSelect ? 'button' : undefined"
+							:type="
+								!child.lesson.locked && inlineSelect ? 'button' : undefined
+							"
 							:to="
 								child.lesson.locked || inlineSelect
 									? undefined
@@ -58,7 +60,7 @@
 											query: studentViewQuery,
 									  }
 							"
-							class="flex w-full items-center gap-3 rounded-4 ps-9 pe-3 py-2 text-start text-sm leading-5 text-ink-gray-8 hover:bg-surface-gray-2"
+							class="flex w-full items-start gap-3 rounded-4 px-3 py-2 text-start text-sm leading-5 text-ink-gray-8 hover:bg-surface-gray-2"
 							:class="[
 								child.lesson.locked
 									? 'cursor-not-allowed opacity-60'
@@ -75,7 +77,9 @@
 								:is="iconFor(child.lesson.icon)"
 								class="size-4 stroke-1.5 shrink-0 text-ink-gray-7"
 							/>
-							<span class="truncate flex-1">{{ child.lesson.title }}</span>
+							<span class="min-w-0 flex-1 whitespace-normal break-words">{{
+								child.lesson.title
+							}}</span>
 							<template v-if="child.lesson.locked">
 								<LockKeyhole
 									class="size-4 stroke-1.5 shrink-0 text-ink-gray-4"
@@ -100,7 +104,12 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, inject } from 'vue'
+import {
+	courseOutlineExpansionKey,
+	isSectionExpanded,
+	rememberSectionExpansion,
+} from '@/utils/courseOutlineExpansion'
 import { Disclosure, DisclosureButton, DisclosurePanel } from '@headlessui/vue'
 import {
 	ChevronDown,
@@ -118,7 +127,7 @@ import SidebarSection from '@/components/SidebarSection.vue'
 /**
  * One recursive section row of the learner sidebar (design §5.1): children
  * render in the section's single manual order — lessons and nested sections
- * interleaved — with ps-3 indentation per level (ps-2 under 768px).
+ * interleaved, with a branch guide and a consistent indent at every level.
  */
 const props = defineProps({
 	section: { type: Object, required: true },
@@ -135,8 +144,8 @@ const emit = defineEmits(['select-lesson'])
 // Learner-facing count: every lesson in the subtree. For a legacy chapter
 // (no nested sections) this equals the direct count, so the badge is
 // unchanged.
-const badgeCount = computed(() =>
-	props.section.total_lesson_count ?? props.section.lessons?.length ?? 0
+const badgeCount = computed(
+	() => props.section.total_lesson_count ?? props.section.lessons?.length ?? 0
 )
 
 const sectionPath = computed(() =>
@@ -145,16 +154,11 @@ const sectionPath = computed(() =>
 		: `${props.section.idx}`
 )
 
-// Sections on the path to the open lesson expand; with nothing open, only the
-// first level-1 section does (legacy chapterDefaultOpen generalized).
-const defaultOpen = computed(() => {
-	const active = props.selectedLessonNumber
-	if (!active) return props.section.idx === 1 && props.level === 1
-	const segments = String(active).split('-')
-	const pathSegments = sectionPath.value.split('-')
-	if (pathSegments.length > segments.length) return false
-	return pathSegments.every((segment, i) => segment === segments[i])
-})
+const user = inject('$user', null)
+const expansionKey = computed(() =>
+	courseOutlineExpansionKey(props.courseName, user?.data?.name ?? 'Guest')
+)
+const defaultOpen = isSectionExpanded(expansionKey.value, props.section.name)
 
 const mergedChildren = computed(() => {
 	const children = []

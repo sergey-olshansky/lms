@@ -46,17 +46,24 @@ describe('useExerciseDraft', () => {
 	})
 
 	it('survives a storage that throws', () => {
-		const setItem = vi
-			.spyOn(Storage.prototype, 'setItem')
-			.mockImplementation(() => {
+		const originalStorage = localStorage
+		vi.stubGlobal('localStorage', {
+			getItem: vi.fn(() => null),
+			setItem: vi.fn(() => {
 				throw new Error('QuotaExceededError')
-			})
-		const draft = useExerciseDraft(ref('two-sum'), ref('a@b.com'))
-
-		expect(() => draft.save('print(1)')).not.toThrow()
-		expect(draft.saved.value).toBe(false)
-
-		setItem.mockRestore()
+			}),
+			removeItem: vi.fn(),
+			clear: vi.fn(),
+			key: vi.fn(() => null),
+			length: 0,
+		})
+		try {
+			const draft = useExerciseDraft(ref('two-sum'), ref('a@b.com'))
+			expect(() => draft.save('print(1)')).not.toThrow()
+			expect(draft.saved.value).toBe(false)
+		} finally {
+			vi.stubGlobal('localStorage', originalStorage)
+		}
 	})
 
 	// `user` is '' until the user resource lands. A write then would sit under

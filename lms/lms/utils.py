@@ -48,7 +48,10 @@ LMS_ROLES = ["Moderator", "Course Creator", "Batch Evaluator", "LMS Student"]
 PRIVILEGED_ROLES = {"Moderator", "Course Creator", "Batch Evaluator", "System Manager"}
 # Maximum structural section levels below the course root. Lessons are leaves and
 # never count toward this; the course root itself is not a section level.
-MAX_SECTION_DEPTH = 4
+MAX_SECTION_DEPTH = 2
+# The authoring cap is lower now. Keep reading legacy outlines at their former
+# maximum so pre-existing courses remain visible and editable without migration.
+MAX_STORED_SECTION_DEPTH = 4
 
 
 def get_lms_path():
@@ -470,7 +473,7 @@ def get_section_path(chapter_name: str) -> str | None:
 	segments = []
 	current = chapter_name
 	seen = set()
-	for _depth in range(MAX_SECTION_DEPTH + 1):
+	for _depth in range(MAX_STORED_SECTION_DEPTH + 1):
 		if not current or current in seen:
 			return None
 		seen.add(current)
@@ -860,7 +863,7 @@ def get_lesson_count(course: str) -> int:
 	"""Lessons attached anywhere in the course's section tree.
 
 	Nested sections are discovered level by level from the root references (max
-	MAX_SECTION_DEPTH levels), and only child rows that reference a lesson are
+	MAX_STORED_SECTION_DEPTH levels), and only child rows that reference a lesson are
 	counted: the shared child table also holds the nested-section rows.
 	"""
 	chapter_references = frappe.get_all("Chapter Reference", {"parent": course}, pluck="chapter")
@@ -1823,8 +1826,7 @@ def get_outline_sections(root_chapter_names: list) -> list:
 	Each row is a Lesson Reference child row that references a Course Chapter
 	instead of a Course Lesson; ordering inside a parent is the child-table idx,
 	i.e. that section's single manual order of mixed children. The level-by-level
-	walk is capped at MAX_SECTION_DEPTH (validation refuses anything deeper, so
-	the cap only bounds corrupt data), and a seen-set stops a stored cycle from
+	walk is capped at the legacy maximum supported in stored data, and a seen-set stops a stored cycle from
 	bouncing between the same names forever.
 	"""
 	LessonReference = frappe.qb.DocType("Lesson Reference")
@@ -1833,7 +1835,7 @@ def get_outline_sections(root_chapter_names: list) -> list:
 	rows = []
 	pending = list(root_chapter_names)
 	seen = set(root_chapter_names)
-	for _level in range(MAX_SECTION_DEPTH - 1):
+	for _level in range(MAX_STORED_SECTION_DEPTH - 1):
 		if not pending:
 			break
 		level_rows = (

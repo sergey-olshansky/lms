@@ -105,7 +105,7 @@ import type { OutlineChapter, Resource } from '@/types'
 import { flattenSections } from '@/utils/courseOutline'
 
 // Authoring maximum, mirrored from the server contract in SectionRow.
-const MAX_SECTION_DEPTH = 4
+const MAX_SECTION_DEPTH = 2
 
 interface MoveCandidate {
 	name: string
@@ -115,9 +115,9 @@ interface MoveCandidate {
 }
 
 /**
- * Reparents a section via an explicit target picker (design §4.5): a compact
- * tree of the course with a search field. Candidates that would push the
- * moved subtree past 4 levels — and SCORM sections, which are leaves — are
+	 * Reparents a section via an explicit target picker (design §4.5): a compact
+	 * tree of the course with a search field. Candidates that would push the
+	 * moved subtree past 2 levels — and SCORM sections, which are leaves — are
  * disabled with the reason.
  */
 const props = defineProps<{
@@ -159,7 +159,7 @@ const candidates = computed<MoveCandidate[]>(() => {
 		const level = section.level ?? 1
 		let blockedReason: string | null = null
 		if (level + subtreeHeight.value > MAX_SECTION_DEPTH) {
-			blockedReason = __('Maximum depth reached — 4 section levels')
+			blockedReason = __('Maximum depth reached — 2 section levels')
 		}
 		list.push({
 			name: section.name,
