@@ -362,7 +362,28 @@ def get_homework_courses() -> list[dict]:
 
 @frappe.whitelist()
 def get_homework_course_tree(course: str) -> dict:
-	return homework_sources.get_course_source_tree(course)
+	tree = homework_sources.get_course_source_tree(course)
+	# B11: every leaf carries its working link right in the tree, so the picker
+	# hands the form a preview target for freshly chosen materials -- before any
+	# save/reload round-trip. Numbers follow the outline's own multi-segment
+	# rules (task #28), the same resolver the board and the detail page use.
+	numbers = _lesson_numbers_by_course({course}).get(course, {})
+	_stamp_tree_routes(tree.get("nodes") or [], course, numbers)
+	return tree
+
+
+def _stamp_tree_routes(nodes: list, course: str, numbers: dict) -> None:
+	for node in nodes:
+		node_type = node.get("type")
+		if node_type == "lesson":
+			number = numbers.get(node.get("name"))
+			if number:
+				node["route"] = {"type": "lesson", "course": course, "number": number}
+		elif node_type == "quiz":
+			node["route"] = {"type": "quiz", "quiz": node.get("name"), "course": course}
+		elif node_type == "assignment":
+			node["route"] = {"type": "assignment", "assignment": node.get("name"), "course": course}
+		_stamp_tree_routes(node.get("children") or [], course, numbers)
 
 
 @frappe.whitelist()
@@ -467,6 +488,12 @@ def get_homework_board(
 	board the session user may read (students: their own; teachers: their own
 	assignments to that student via the permission conditions; staff: everything).
 
+	Per-column paging is DEPTH-based (B08): ``offsets[status]`` is how many cards
+	from the top of that column the client wants -- always from position 0. A
+	load-more raises the depth by one page; a refresh re-reads the whole loaded
+	depth in one request, so a tab refocus can never swap a full board for one
+	stale-offset page of itself.
+
 	``include_cancelled`` flips the board into the history of recalled assignments
 	(spec 8.1): a technical flag with its own view, never a fifth column."""
 	target = student or frappe.session.user
@@ -504,7 +531,7 @@ def get_homework_board(
 			columns.append({"status": column_status, "count": 0, "cards": [], "has_more": False})
 			continue
 		count = frappe.db.count("LMS Homework Assignment", column_filters)
-		offset = int(column_offsets.get(column_status, 0))
+		depth = int(column_offsets.get(column_status, 0) or 0)
 		rows = frappe.get_all(
 			"LMS Homework Assignment",
 			filters=column_filters,
@@ -525,8 +552,8 @@ def get_homework_board(
 				"quizzes_completed",
 			],
 			order_by="due_at asc, assigned_at asc" if column_status != STATUS_DONE else "reviewed_at desc",
-			limit_page_length=BOARD_PAGE_SIZE,
-			limit_start=offset,
+			limit_page_length=depth if depth > BOARD_PAGE_SIZE else BOARD_PAGE_SIZE,
+			limit_start=0,
 		)
 		for row in rows:
 			_decorate_card(row, now)
@@ -535,7 +562,7 @@ def get_homework_board(
 				"status": column_status,
 				"count": count,
 				"cards": rows,
-				"has_more": offset + len(rows) < count,
+				"has_more": len(rows) < count,
 			}
 		)
 	_attach_continue_targets([row for column in columns for row in column["cards"]])
@@ -552,7 +579,7 @@ def _attach_continue_targets(rows: list) -> None:
 	reqs = frappe.get_all(
 		"LMS Homework Requirement",
 		filters={"parent": ("in", names), "parenttype": "LMS Homework Assignment"},
-		fields=["parent", "requirement_type", "lesson", "quiz", "status", "course"],
+		fields=["parent", "requirement_type", "lesson", "quiz", "reference_assignment", "status", "course"],
 		order_by="parent asc, idx asc",
 	)
 	courses = {row.course for row in reqs if row.course}

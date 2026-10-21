@@ -61,8 +61,11 @@ class LMSHomework(Document):
 			frappe.throw(_("You can only file homework into your own groups."))
 
 	def validate_items(self):
-		"""Drop exact duplicate sources server-side: selecting a lesson on its own and
-		through its chapter must still yield a single requirement (A07)."""
+		"""The canonical source invariant on EVERY save path (B01): raw REST or
+		Desk writes pass the same resolution as the named API, so a forged row
+		never lands in the database. Exact duplicate sources are dropped
+		server-side: selecting a lesson on its own and through its chapter must
+		still yield a single requirement (A07). An empty draft stays legal."""
 		seen = set()
 		kept = []
 		for row in self.items:
@@ -73,8 +76,36 @@ class LMSHomework(Document):
 			if key in seen:
 				continue
 			seen.add(key)
+			self._check_canonical_item(row)
 			kept.append(row)
 		self.items = kept
+
+	def _check_canonical_item(self, row):
+		"""One row re-resolved from the database: existence, SCORM refusal, the
+		real course and the session teacher's right to source from it (B01).
+
+		The stored ``course`` must match the material's actual course -- a Link
+		proves existence, never belonging -- and the resolved course must be one
+		the session user may pick from, exactly like ``canonicalize_selection``.
+		Runs for the named API and for direct document writes alike."""
+		from lms.lms.homework_sources import _canonical_item, can_source_from
+
+		canonical = _canonical_item(row.source_type, row.get(SOURCE_FIELDS[row.source_type]))
+		resolved_course = canonical["course"]
+		if row.course and row.course != resolved_course:
+			frappe.throw(
+				_("{0} does not belong to the course stored on its row.").format(
+					frappe.bold(canonical["label"])
+				),
+				frappe.ValidationError,
+			)
+		if not can_source_from(resolved_course):
+			frappe.throw(
+				_("You cannot pick materials from the course {0}.").format(
+					frappe.bold(resolved_course)
+				),
+				frappe.PermissionError,
+			)
 
 	def on_trash(self):
 		"""A compilation that has ever been issued can only be archived, not deleted:

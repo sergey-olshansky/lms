@@ -223,14 +223,11 @@
 									</router-link>
 									<router-link
 										v-if="row.quiz"
-										:to="{
-											name: 'QuizPage',
-											params: { quizID: row.quiz },
-											query: { hw: props.assignmentID },
-										}"
+										:to="attemptRoute(row)"
 										class="shrink-0 text-xs text-ink-gray-5 underline"
+										:data-testid="`attempt-${row.quiz}`"
 									>
-										{{ __('Attempt') }}
+										{{ attemptLinkLabel(row) }}
 									</router-link>
 								</div>
 
@@ -296,14 +293,11 @@
 											</span>
 											<router-link
 												v-if="quiz.quiz"
-												:to="{
-													name: 'QuizPage',
-													params: { quizID: quiz.quiz },
-													query: { hw: props.assignmentID },
-												}"
+												:to="attemptRoute(quiz)"
 												class="shrink-0 text-[10px] text-ink-gray-5 underline"
+												:data-testid="`attempt-${quiz.quiz}`"
 											>
-												{{ __('Attempt') }}
+												{{ attemptLinkLabel(quiz) }}
 											</router-link>
 										</div>
 									</div>
@@ -483,23 +477,23 @@ const detail = createResource({
 })
 
 onMounted(async () => {
-	// Start execution on the student's first open, then read the state the
-	// opening produced (a fully pre-credited card arrives already in Review).
-	// frappe-ui's `call` returns a real promise -- wiring resolve/reject through
-	// resource.update() never settles, which used to hang the page before the
-	// detail request could even start (R01). The server decides the role: a
-	// student's open starts the card, a teacher's is refused as a preview.
+	// B11: read the card FIRST -- the payload's viewer_is_student is the
+	// structured role signal. Only the student's own open starts execution, so a
+	// teacher's preview fires no student-only action at all and no suppressed
+	// error toast is needed (the old locale-string sniffing is gone). The state
+	// the opening produced is read back with a second reload -- a fully
+	// pre-credited card arrives already in Review. frappe-ui's `call` returns a
+	// real promise; wiring resolve/reject through resource.update() never
+	// settles (R01).
 	try {
+		const payload = await detail.reload()
+		if (!payload?.viewer_is_student) return
 		await call('lms.lms.homework_api.open_homework', {
 			assignment: props.assignmentID,
 		})
 	} catch (error) {
-		const message = String(
-			error?.message || error?.messages?.[0] || error || ''
-		)
-		if (!message.includes("student's own opening")) {
-			toast.error(resourceErrorMessage(error, __('Error')))
-		}
+		toast.error(resourceErrorMessage(error, __('Error')))
+		return
 	}
 	detail.reload()
 })
@@ -573,9 +567,10 @@ const stateTextClass = (row) => {
 	return 'bg-surface-red-1 text-ink-red-5'
 }
 const rowKey = (row) =>
-	`${row.requirement_type}:${
-		row.lesson || row.quiz || row.reference_assignment
-	}`
+	row.id ||
+	[row.requirement_type, row.lesson, row.quiz, row.reference_assignment]
+		.filter(Boolean)
+		.join(':')
 
 // R18: a detail left open goes stale while the other side works; a controlled
 // refetch on visibility/focus keeps it current, with listeners cleaned up.
@@ -633,6 +628,22 @@ const rowRoute = (route) => {
 	}
 	return null
 }
+
+// B11: the quiz link is ADDRESSABLE. A confirmed row carries its proof -- the
+// very submission that earned the pass, which may not be the newest attempt --
+// so the link opens that attempt's own report on the quiz page. An unfinished
+// row still links to a fresh attempt of the quiz itself.
+const attemptRoute = (row) => ({
+	name: 'QuizPage',
+	params: { quizID: row.quiz },
+	query: {
+		hw: props.assignmentID,
+		...(isDone(row) && row.proof_name ? { submission: row.proof_name } : {}),
+	},
+})
+
+const attemptLinkLabel = (row) =>
+	isDone(row) && row.proof_name ? __('Report') : __('Attempt')
 
 const continueWorking = () => {
 	const target = detail.data?.continue_target

@@ -243,7 +243,11 @@ const offsets = ref({})
 // student's board (the resource contract alone cannot guarantee ordering).
 let boardGeneration = 0
 
-const fetchBoard = ({ merge = false } = {}) => {
+// The page boundary of a column moves ONLY with a response that was actually
+// applied (B08): `offsets` holds the number of cards each column has loaded.
+// A failed or superseded fetch restores the boundary from the cards on screen,
+// so a retry asks for the very same page instead of skipping ten cards.
+const fetchBoard = ({ merge = false, offsets: requestedOffsets } = {}) => {
 	const generation = ++boardGeneration
 	const request = call('lms.lms.homework_api.get_homework_board', {
 		student: student.value || null,
@@ -251,7 +255,7 @@ const fetchBoard = ({ merge = false } = {}) => {
 		status: statusFilter.value || null,
 		overdue: overdueOnly.value,
 		course: courseFilter.value || null,
-		offsets: JSON.stringify(offsets.value),
+		offsets: JSON.stringify(requestedOffsets || offsets.value),
 		include_cancelled: cancelledOnly.value,
 	})
 	request
@@ -261,15 +265,28 @@ const fetchBoard = ({ merge = false } = {}) => {
 		})
 		.catch((error) => {
 			if (generation !== boardGeneration) return
+			restoreOffsetsFromColumns()
 			toast.error(resourceErrorMessage(error, __('Error')))
 			console.error(error)
 		})
 	return request
 }
 
-// R12: a load-more for one column appends that column's new page (deduped by
-// name) and leaves every other column's loaded cards alone; a fresh board
-// replaces the columns. A failed fetch keeps what is on screen.
+// B08: after anything but a clean apply, the boundary is re-derived from what
+// is really on screen -- never left pointing past a page that never arrived.
+const restoreOffsetsFromColumns = () => {
+	const restored = {}
+	for (const column of columns.value) {
+		restored[column.status] = column.cards.length
+	}
+	offsets.value = restored
+}
+
+// R12/B08: the server answers with the column's whole loaded DEPTH from the
+// top, so merging means: refreshed content for every known card, newly visible
+// cards appended, and cards that fell out of the requested window kept (a
+// transiently short response can never drop cards off the screen). A fresh
+// board replaces the columns; a failed fetch keeps what is on screen.
 const applyBoard = (data, { merge }) => {
 	if (!merge) {
 		columns.value = data.columns
@@ -281,12 +298,16 @@ const applyBoard = (data, { merge }) => {
 		)
 		if (!fresh) return current
 		if (!current.cards.length) return fresh
-		const seen = new Set(current.cards.map((card) => card.name))
-		const appended = fresh.cards.filter((card) => !seen.has(card.name))
+		const byName = new Map(current.cards.map((card) => [card.name, card]))
+		const refreshed = fresh.cards.map((card) => {
+			const known = byName.get(card.name)
+			return known ? { ...known, ...card } : card
+		})
+		const freshNames = new Set(fresh.cards.map((card) => card.name))
+		const kept = current.cards.filter((card) => !freshNames.has(card.name))
 		return {
 			...fresh,
-			cards: [...current.cards, ...appended],
-			has_more: fresh.has_more,
+			cards: [...refreshed, ...kept],
 		}
 	})
 }
@@ -404,18 +425,27 @@ const continueCard = async (card) => {
 }
 
 const loadMore = (status) => {
-	offsets.value = {
-		...offsets.value,
-		[status]: (offsets.value[status] || 0) + 10,
+	// B08: depth paging -- offsets hold how many cards each column has loaded,
+	// and the boundary moves ONLY with a response that was actually applied.
+	const previous = offsets.value[status] || 0
+	offsets.value = { ...offsets.value, [status]: previous + 10 }
+	const pending = fetchBoard({ merge: true })
+	// A dispatch that hands nothing back never reached the server: restore the
+	// boundary synchronously so the retry asks for the same page again. The
+	// promise path restores from the applied columns in fetchBoard itself, on
+	// both rejection and stale-generation discard.
+	if (!pending || typeof pending.then !== 'function') {
+		offsets.value = { ...offsets.value, [status]: previous }
 	}
-	fetchBoard({ merge: true })
 }
 
-// R18: a board left open goes stale while the student works elsewhere; a
-// controlled refetch on tab visibility and window focus keeps it current, with
-// the listener cleaned up on unmount.
+// R18/B08: a board left open goes stale while the student works elsewhere; a
+// controlled refetch on tab visibility and window focus keeps it current. The
+// refresh re-requests each column's whole loaded DEPTH (merge keeps every
+// loaded card and updates its content in place), so switching tabs can never
+// trade the board for one stale-offset page of itself.
 const refetchIfIdle = () => {
-	if (document.visibilityState === 'visible') fetchBoard({ merge: false })
+	if (document.visibilityState === 'visible') fetchBoard({ merge: true })
 }
 onMounted(() => {
 	window.addEventListener('focus', refetchIfIdle)

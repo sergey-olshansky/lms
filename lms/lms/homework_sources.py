@@ -268,11 +268,12 @@ def canonicalize_selection(selection: list[dict]) -> list[dict]:
 
 	Nothing the client sent about a source is trusted (R04): existence, the real
 	course, the real title and the readable path all come from the database, and
-	every course must be one the session teacher may source from. Unknown source
-	types and dangling or unreachable ids are refused with a reason, never
-	dropped -- a silently vanishing mandatory material must not look like a valid
-	composition. Selecting a parent and its child both resolves to the same leaf,
-	and the dedup by (type, name) keeps one instance (A07).
+	every course must be one the session teacher may source from -- enforced
+	right here, not only later at issuance (B01). Unknown source types and
+	dangling or unreachable ids are refused with a reason, never dropped -- a
+	silently vanishing mandatory material must not look like a valid
+	composition. Selecting a parent and its child both resolves to the same
+	leaf, and the dedup by (type, name) keeps one instance (A07).
 	"""
 	if selection is None:
 		selection = []
@@ -293,7 +294,18 @@ def canonicalize_selection(selection: list[dict]) -> list[dict]:
 		key = (source_type, name)
 		if key in items:
 			continue
-		items[key] = _canonical_item(source_type, name)
+		item = _canonical_item(source_type, name)
+		# B01: canonicalizing a material the session teacher cannot source from
+		# would hand them a foreign course's title and path -- the access check
+		# belongs to the resolution itself, not only to the later issue step.
+		if not can_source_from(item["course"]):
+			frappe.throw(
+				_("You cannot pick materials from the course {0}.").format(
+					frappe.bold(item["course"])
+				),
+				frappe.PermissionError,
+			)
+		items[key] = item
 	return list(items.values())
 
 
@@ -501,13 +513,32 @@ def validate_sources_for_student(items: list, student: str) -> list[str]:
 	lesson gate: a missing enrollment or a locked lesson blocks with a reason the
 	teacher can act on (A10). Only the SELECTED materials gate the issue -- a
 	locked lesson the composition does not name is not this homework's business
-	(R05). Each course must still be one the issuing teacher may source from
-	(R04); the items themselves are canonical database rows by the time they
-	arrive here.
+	(R05). Each course is re-resolved from the materials themselves (B01): the
+	stored ``course`` column is display data and is never trusted here, so even a
+	template row that somehow carries a forged course cannot widen access. Quizzes
+	AND standalone assignments are checked through the app's real assessment
+	access resolver.
 	"""
 	reasons: list[str] = []
-	courses = {item.course for item in items if item.course}
+	courses: set[str] = set()
 	selected_lessons = {item.lesson for item in items if item.source_type == "Lesson" and item.lesson}
+
+	for item in items:
+		# B01: the real course of each item, read from the material row itself.
+		if item.source_type == "Lesson" and item.lesson:
+			course = frappe.db.get_value("Course Lesson", item.lesson, "course")
+		elif item.source_type == "Quiz" and item.quiz:
+			course = frappe.db.get_value("LMS Quiz", item.quiz, "course") or _course_of_placed(
+				"LMS Quiz", item.quiz
+			)
+		elif item.source_type == "Assignment" and item.assignment:
+			course = frappe.db.get_value("LMS Assignment", item.assignment, "course") or _course_of_placed(
+				"LMS Assignment", item.assignment
+			)
+		else:
+			course = None
+		if course:
+			courses.add(course)
 
 	for course in courses:
 		if not can_source_from(course):
@@ -543,6 +574,14 @@ def validate_sources_for_student(items: list, student: str) -> list[str]:
 		elif item.source_type == "Assignment":
 			if item.assignment and not frappe.db.exists("LMS Assignment", item.assignment):
 				reasons.append(_("Assignment {0} no longer exists.").format(frappe.bold(item.label)))
+			elif item.assignment and not can_access_assessment(
+				"LMS Assignment", item.assignment, user=student
+			):
+				reasons.append(
+					_("Assignment {0} is not available to this student.").format(
+						frappe.bold(item.label)
+					)
+				)
 	return reasons
 
 

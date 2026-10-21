@@ -34,17 +34,87 @@
 <script setup>
 // The homework context strip (spec 5.3.6, R10/R18): carried by ?hw= on a lesson,
 // a standalone quiz or a written assignment, it keeps the way back one click
-// away and shows live progress. With `start`, the material is standalone -- the
-// student's first touch of it must begin the card, exactly like opening a lesson.
+// away and shows live progress.
+//
+// B11: the progress is actually live -- refetched on mount, on every
+// assignmentID change, on window focus/tab visibility, and whenever the parent
+// calls the exposed refresh() after a confirmed event (a lesson opening, a quiz
+// submission, an assignment opening). The fetched payload is emitted as
+// `summary`, the structured role signal the parent gates student-only actions
+// on. `start` marks standalone material: the card is started here, but only for
+// the student themselves (viewer_is_student) -- a teacher's preview fires no
+// student action and shows no error.
 import { call } from 'frappe-ui'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 const props = defineProps({
 	assignmentID: { type: String, required: true },
 	start: { type: Boolean, default: false },
 })
+const emit = defineEmits(['summary'])
 
 const summary = ref(null)
+let generation = 0
+const startApplied = ref(false)
+
+const refresh = async () => {
+	const run = ++generation
+	let data
+	try {
+		data = await call('lms.lms.homework_api.get_homework_assignment', {
+			name: props.assignmentID,
+		})
+	} catch {
+		// Not this viewer's homework (stale link, other user): no banner.
+		if (run === generation) summary.value = null
+		return
+	}
+	if (run !== generation) return
+	summary.value = data
+	emit('summary', data)
+
+	if (!props.start || !data?.viewer_is_student || startApplied.value) return
+	// Standalone material: this page IS the student's first touch of the card.
+	startApplied.value = true
+	try {
+		await call('lms.lms.homework_api.open_homework', {
+			assignment: props.assignmentID,
+		})
+		const fresh = await call('lms.lms.homework_api.get_homework_assignment', {
+			name: props.assignmentID,
+		})
+		if (run !== generation) return
+		summary.value = fresh
+		emit('summary', fresh)
+	} catch {
+		// Already started elsewhere, or the card moved on: the summary shown
+		// stays whatever the server last said.
+	}
+}
+
+watch(
+	() => props.assignmentID,
+	() => {
+		startApplied.value = false
+		summary.value = null
+		refresh()
+	},
+	{ immediate: true }
+)
+
+const refetchIfVisible = () => {
+	if (document.visibilityState === 'visible') refresh()
+}
+onMounted(() => {
+	window.addEventListener('focus', refetchIfVisible)
+	document.addEventListener('visibilitychange', refetchIfVisible)
+})
+onUnmounted(() => {
+	window.removeEventListener('focus', refetchIfVisible)
+	document.removeEventListener('visibilitychange', refetchIfVisible)
+})
+
+defineExpose({ refresh })
 
 const progressPercent = computed(() =>
 	summary.value && summary.value.total_requirements
@@ -55,24 +125,4 @@ const progressPercent = computed(() =>
 		  )
 		: 0
 )
-
-onMounted(async () => {
-	try {
-		summary.value = await call('lms.lms.homework_api.get_homework_assignment', {
-			name: props.assignmentID,
-		})
-	} catch {
-		// Not this viewer's homework (stale link, other user): no banner.
-		return
-	}
-	if (props.start) {
-		try {
-			await call('lms.lms.homework_api.open_homework', {
-				assignment: props.assignmentID,
-			})
-		} catch {
-			// A teacher's preview open is refused by design.
-		}
-	}
-})
 </script>

@@ -105,21 +105,54 @@ class LMSHomeworkAssignment(Document):
 				_("The requirement rows change only through homework actions."),
 				frappe.PermissionError,
 			)
-
-	def _requirements_differ(self, before) -> bool:
-		def fingerprint(rows):
-			return sorted(
-				(
-					row.requirement_type,
-					row.lesson or "",
-					row.quiz or "",
-					row.reference_assignment or "",
-					row.status,
-				)
-				for row in rows
+		if self._history_differ(before):
+			frappe.throw(
+				_("The history of this homework changes only through homework actions."),
+				frappe.PermissionError,
 			)
 
-		return fingerprint(self.requirements) != fingerprint(before.requirements or [])
+	def _requirements_differ(self, before) -> bool:
+		"""The full frozen snapshot of every requirement row (B07): identity AND
+		progress AND evidence AND display columns. The field list is static on
+		purpose -- the snapshot is frozen by design, so extending it is a
+		deliberate act, not a migration side effect."""
+		fields = (
+			"idx",
+			"requirement_type",
+			"course",
+			"chapter_title",
+			"lesson",
+			"quiz",
+			"reference_assignment",
+			"label",
+			"path",
+			"status",
+			"completed_at",
+			"proof_type",
+			"proof_name",
+		)
+		return self._fingerprint_rows_differ(fields, self.requirements, before.requirements or [])
+
+	def _history_differ(self, before) -> bool:
+		"""The audit trail is as managed as the progress it records (B07): an
+		injected or rewritten history row is a forged verdict, whatever the
+		statuses still say."""
+		fields = ("actor", "actor_name", "event", "from_status", "to_status", "comment")
+		return self._fingerprint_rows_differ(fields, self.history, before.history or [])
+
+	def _fingerprint_rows_differ(self, fields, current_rows, before_rows) -> bool:
+		"""Whole-snapshot comparison of one child table: replacing a proof,
+		backdating a completion, rewriting the stored course/path/label, reordering
+		or adding rows -- every difference counts, not just type/id/status. Row
+		bookkeeping columns (name, parent links, timestamps) never count."""
+
+		def fingerprint(rows):
+			return sorted(
+				tuple((field, "" if row.get(field) is None else str(row.get(field))) for field in fields)
+				for row in (rows or [])
+			)
+
+		return fingerprint(current_rows) != fingerprint(before_rows)
 
 	def on_doctype_update(self):
 		frappe.db.add_index(self.doctype, ["student", "status", "cancelled"], "homework_student_status_idx")

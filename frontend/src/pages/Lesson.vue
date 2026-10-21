@@ -23,6 +23,7 @@
 		and prev/next navigation. -->
 		<HomeworkContextBanner
 			v-if="homeworkContext"
+			ref="homeworkBanner"
 			:assignment-id="homeworkContext"
 			data-testid="homework-back-banner"
 		/>
@@ -1231,11 +1232,15 @@ const lessonQuery = () => {
 // A confirmed opening of this lesson for the session student (spec 6.1): fired
 // only after the page actually loaded and rendered, never on hover, prefetch or
 // a teacher's preview; the server ignores it without a matching requirement.
+// B11: the banner's live progress follows the credited opening immediately.
+const homeworkBanner = ref(null)
 const recordHomeworkOpen = (lessonName?: string) => {
 	if (!lessonName || !lesson.data?.membership) return
 	call('lms.lms.homework_api.record_material_opened', {
 		lesson: lessonName,
-	}).catch(() => {})
+	})
+		.then(() => homeworkBanner.value?.refresh())
+		.catch(() => {})
 }
 
 // Reads the real user, not the student-view shadow, so the way back to the

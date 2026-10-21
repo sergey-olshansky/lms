@@ -1,11 +1,17 @@
 <template>
 	<PageHeader v-if="!fromLesson" :breadcrumbs="breadcrumbs" />
-	<!-- Task #35 (R10): a written assignment opened through the homework carries
-	its context; the confirmed opening is the agreed condition for it. -->
+	<!-- Task #35 (R10/B10): a written assignment opened through the homework
+	     carries its context; the confirmed opening is the agreed condition for
+	     it. The opening is recorded only after the material actually loaded and
+	     rendered (the child's `displayed` event) and only when the banner's
+	     payload says the viewer IS the student -- a teacher's preview fires no
+	     student action at all. -->
 	<HomeworkContextBanner
 		v-if="homeworkContext"
+		ref="homeworkBanner"
 		:assignment-id="homeworkContext"
 		data-testid="homework-back-banner"
+		@summary="onHomeworkSummary"
 	/>
 	<div class="overflow-hidden h-[calc(100vh-3.2rem)]">
 		<Assignment
@@ -13,6 +19,7 @@
 			:assignmentID="assignmentID"
 			:submissionName="submissionName"
 			:showTitle="!fromLesson"
+			@displayed="onAssignmentDisplayed"
 		/>
 	</div>
 </template>
@@ -20,7 +27,7 @@
 import { call, createResource, usePageMeta } from 'frappe-ui'
 import PageHeader from '@/components/Layouts/pages/PageHeader.vue'
 import HomeworkContextBanner from '@/components/HomeworkContextBanner.vue'
-import { computed, inject, onMounted, ref } from 'vue'
+import { computed, inject, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { sessionStore } from '../stores/session'
 import Assignment from '@/components/Assignment.vue'
@@ -51,6 +58,55 @@ const homeworkContext = computed(() =>
 	typeof route.query.hw === 'string' ? route.query.hw : ''
 )
 
+const homeworkBanner = ref<InstanceType<typeof HomeworkContextBanner> | null>(
+	null
+)
+
+// B10: the opening needs BOTH facts -- the material was really shown, and the
+// viewer really is the student of this card (the banner's structured payload).
+// Whichever arrives first waits for the other; a teacher preview or a stale
+// ?hw= link records nothing.
+const homeworkSummary = ref<{
+	viewer_is_student?: boolean
+} | null>(null)
+const assignmentDisplayed = ref(false)
+const openingRecorded = ref(false)
+
+watch(
+	() => props.assignmentID,
+	() => {
+		homeworkSummary.value = null
+		assignmentDisplayed.value = false
+		openingRecorded.value = false
+	}
+)
+
+const onHomeworkSummary = (data: { viewer_is_student?: boolean }) => {
+	homeworkSummary.value = data
+	maybeRecordAssignmentOpen()
+}
+
+const onAssignmentDisplayed = () => {
+	assignmentDisplayed.value = true
+	maybeRecordAssignmentOpen()
+}
+
+const maybeRecordAssignmentOpen = () => {
+	if (!homeworkContext.value || openingRecorded.value) return
+	if (!assignmentDisplayed.value || !homeworkSummary.value) return
+	if (!homeworkSummary.value.viewer_is_student) return
+	openingRecorded.value = true
+	call('lms.lms.homework_api.record_assignment_material_opened', {
+		assignment: props.assignmentID,
+	})
+		.then(() => homeworkBanner.value?.refresh())
+		.catch(() => {
+			// The server remains the authority; a refused event simply means no
+			// requirement needed it.
+			openingRecorded.value = false
+		})
+}
+
 const title = createResource<{ title: string }>({
 	url: 'frappe.client.get_value',
 	params: {
@@ -71,13 +127,6 @@ onMounted(() => {
 	if (new URLSearchParams(window.location.search).get('fromLesson')) {
 		fromLesson.value = true
 	}
-
-	// R10: the student has the assignment's own page open -- a confirmed
-	// opening of the material, credited wherever it is required. The server
-	// re-checks the viewer's right to see it.
-	call('lms.lms.homework_api.record_assignment_material_opened', {
-		assignment: props.assignmentID,
-	}).catch(() => {})
 })
 
 const breadcrumbs = computed(() => {

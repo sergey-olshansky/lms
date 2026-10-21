@@ -264,9 +264,12 @@ watch(
 		days.value = props.presetDays || 7
 		confirmExtra.value = false
 		precheck.data = null
-		// R19: one key per logical issue, minted when the dialog opens. A retry
-		// after a network timeout reuses it (the server returns the same card);
-		// only a confirmed deliberate extra issue mints a new one.
+		// B05: ONE key per logical operation, minted when the dialog opens and
+		// pinned until the dialog closes -- for the base issue AND for the
+		// confirmed extra issue alike. The base call in the already-active
+		// flow creates nothing, so it never consumes the key; every retry of
+		// an uncertain (timed-out) request therefore reuses it and the server
+		// returns the same card instead of issuing a second one.
 		operationKey.value = mintKey()
 		students.reload()
 		if (props.homework) homeworkDoc.reload()
@@ -283,11 +286,13 @@ watch([student, days], () => {
 })
 
 const assign = async (force) => {
+	if (assigning.value) return
 	assigning.value = true
-	// The SAME logical operation keeps its key across retries (R19): a re-click
-	// after a failed request returns the existing card rather than issuing a
-	// second one; the confirmed extra issue below mints a fresh key (A11).
-	const key = force ? mintKey() : operationKey.value
+	// B05: the pinned operation key. `force` is not a new operation -- it is the
+	// confirmation step of this same dialog's issue, so it reuses the key; a
+	// retry after a timeout reuses it too. The server verifies the key's
+	// parameters and refuses loudly if the request no longer matches.
+	const key = operationKey.value || (operationKey.value = mintKey())
 	try {
 		const result = await assignCall(force, key)
 		if (result && result.already_active && !force) {

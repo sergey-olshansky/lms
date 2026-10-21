@@ -19,6 +19,17 @@ export interface TreeNode {
 	quizzes?: { name: string; title: string }[]
 	chapter?: string
 	assignable?: boolean
+	// B11: the server-stamped working link (lesson numbers follow the outline's
+	// multi-segment rules), so a freshly chosen material previews before save.
+	route?: MaterialRoute | null
+}
+
+export interface MaterialRoute {
+	type: 'lesson' | 'quiz' | 'assignment'
+	course: string
+	number?: string
+	quiz?: string
+	assignment?: string
 }
 
 export interface SelectionEntry {

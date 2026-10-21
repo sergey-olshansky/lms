@@ -346,7 +346,10 @@ const onToggleExpand = (key) => {
 const confirmSelection = () => {
 	// The whole edited set: every selected key resolved through its loaded
 	// index, plus any still-selected item whose tree never loaded (kept as it
-	// was stored -- never silently dropped).
+	// was stored -- never silently dropped). Each resolved entry carries the
+	// tree's own working link (B11), so the form can offer a preview before
+	// anything is saved -- and a re-confirmed item never loses the route an
+	// earlier load had attached.
 	const entries = []
 	const seen = new Set()
 	for (const [courseName, index] of indexesByCourse.value) {
@@ -367,6 +370,7 @@ const confirmSelection = () => {
 				title: found.node.title,
 				chapter: found.chapter,
 				path: found.path,
+				route: found.node.route || null,
 			})
 		}
 	}

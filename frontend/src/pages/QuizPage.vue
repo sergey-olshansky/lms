@@ -1,9 +1,12 @@
 <template>
 	<PageHeader v-if="!fromLesson" :breadcrumbs="breadcrumbs" />
 	<!-- Task #35 (R10): a standalone quiz reached through ?hw= carries the
-	homework context: the way back, live progress, and the card's start. -->
+	homework context: the way back, live progress, and the card's start. A
+	?submission= link (B11) opens one specific attempt's report -- the proof a
+	homework requirement was earned -- right on this page. -->
 	<HomeworkContextBanner
 		v-if="homeworkContext"
+		ref="homeworkBanner"
 		:assignment-id="homeworkContext"
 		start
 		data-testid="homework-back-banner"
@@ -12,7 +15,11 @@
 		class="md:w-7/12 md:mx-auto mx-4 py-10"
 		:class="{ 'pt-4 md:w-full': fromLesson }"
 	>
-		<Quiz :quizName="quizID" />
+		<Quiz
+			:quizName="quizID"
+			:report-submission="reportSubmission"
+			@submitted="onQuizSubmitted"
+		/>
 	</div>
 </template>
 <script setup>
@@ -33,6 +40,20 @@ const fromLesson = ref(false)
 const homeworkContext = computed(() =>
 	typeof route.query.hw === 'string' ? route.query.hw : ''
 )
+
+// B11: the addressed attempt whose report should open on arrival (the
+// homework checklist's proof link). Empty for a plain visit.
+const reportSubmission = computed(() =>
+	typeof route.query.submission === 'string' ? route.query.submission : ''
+)
+
+const homeworkBanner = ref(null)
+
+// B11: the banner's progress updates the moment the attempt is in, not on the
+// next tab switch.
+const onQuizSubmitted = () => {
+	homeworkBanner.value?.refresh()
+}
 
 onMounted(() => {
 	if (!user.data) {

@@ -102,9 +102,25 @@ def create_assignment(
 		frappe.throw(_("Please choose a valid student."))
 
 	if idempotency_key:
-		existing = frappe.db.get_value("LMS Homework Assignment", {"assignment_key": idempotency_key})
+		existing = frappe.db.get_value(
+			"LMS Homework Assignment",
+			{"assignment_key": idempotency_key},
+			["name", "homework", "student", "days"],
+			as_dict=True,
+		)
 		if existing:
-			return {"created": False, "name": existing, "idempotent": True}
+			# B05: a key names ONE logical operation. The same key returning with
+			# different parameters (student or term changed after an uncertain
+			# result) is a stale replay, not a retry: it must fail loudly instead
+			# of silently handing back the card issued under the old parameters.
+			if not _idempotency_params_match(existing, homework_name, student, days, homework.days):
+				frappe.throw(
+					_(
+						"This request conflicts with an assignment already created from the same dialog. Check the board before issuing again."
+					),
+					frappe.ValidationError,
+				)
+			return {"created": False, "name": existing.name, "idempotent": True}
 
 	if not force:
 		active = frappe.db.get_value(
@@ -151,16 +167,23 @@ def create_assignment(
 	assignment.flags.homework_service = True
 	try:
 		assignment.insert(ignore_permissions=True)
-	except frappe.DuplicateEntryError:
-		# Two tabs confirming the same logical issue race on the unique key (R19):
-		# the loser returns the winner's assignment instead of erroring -- one
-		# logical operation, one card.
+	except (frappe.DuplicateEntryError, frappe.UniqueValidationError):
+		# Two tabs confirming the same logical issue race on the unique key (R19,
+		# B05): MariaDB surfaces a secondary unique index as
+		# UniqueValidationError, SQLite as DuplicateEntryError -- both land here.
+		# The loser returns the winner's card, after re-checking that the key's
+		# parameters really are this operation; one logical operation, one card.
 		if not idempotency_key:
 			raise
-		existing = frappe.db.get_value("LMS Homework Assignment", {"assignment_key": idempotency_key})
-		if existing:
+		existing = frappe.db.get_value(
+			"LMS Homework Assignment",
+			{"assignment_key": idempotency_key},
+			["name", "homework", "student", "days"],
+			as_dict=True,
+		)
+		if existing and _idempotency_params_match(existing, homework_name, student, days, homework.days):
 			frappe.clear_last_message()
-			return {"created": False, "name": existing, "idempotent": True}
+			return {"created": False, "name": existing.name, "idempotent": True}
 		raise
 
 	_refresh_counts(assignment)
@@ -169,6 +192,16 @@ def create_assignment(
 	assignment.save(ignore_permissions=True)
 
 	return {"created": True, "name": assignment.name}
+
+
+def _idempotency_params_match(existing, homework_name: str, student: str, days, template_days) -> bool:
+	"""Whether an assignment stored under an idempotency key really is THIS
+	operation: same compilation, same student, same term (B05)."""
+	return (
+		existing.homework == homework_name
+		and existing.student == student
+		and cint(existing.days) == cint(days if days is not None else template_days)
+	)
 
 
 def _apply_prior_credit(requirements: list[dict], student: str) -> list[dict]:
@@ -221,42 +254,38 @@ def passed_quiz_evidence(member: str, quiz: str) -> str | None:
 	against its own snapshotted passing threshold -- raising the live threshold
 	later never retroactively un-passes a valid attempt -- and only attempts whose
 	manual grading is finished. One final pass is enough; later failed attempts
-	never subtract it (A23).
+	never subtract it (A23, B03): the whole history is read in one query, so an
+	older valid pass is never evicted by any number of newer failures, however
+	long the attempt list has grown.
 	"""
 	if not quiz or not frappe.db.exists("LMS Quiz", quiz):
 		return None
-	candidates = frappe.get_all(
+	attempts = frappe.get_all(
 		"LMS Quiz Submission",
 		filters={"quiz": quiz, "member": member},
+		fields=["name", "percentage", "passing_percentage"],
 		order_by="creation desc",
-		pluck="name",
-		limit_page_length=50,
 	)
-	for name in candidates:
-		submission = frappe.db.get_value(
-			"LMS Quiz Submission", name, ["percentage", "passing_percentage", "owner"], as_dict=True
-		)
-		if not submission:
-			continue
-		threshold = submission.passing_percentage
+	live_threshold = None
+	for row in attempts:
+		threshold = row.passing_percentage
 		if threshold is None:
-			threshold = frappe.db.get_value("LMS Quiz", quiz, "passing_percentage") or 0
-		if (submission.percentage or 0) < threshold:
+			# A submission old enough to predate the snapshot column falls back
+			# to the quiz's live threshold, exactly one time per call.
+			if live_threshold is None:
+				live_threshold = frappe.db.get_value("LMS Quiz", quiz, "passing_percentage") or 0
+			threshold = live_threshold
+		if (row.percentage or 0) < threshold:
 			continue
-		if _submission_awaiting_grading(name):
+		if _submission_awaiting_grading(row.name):
 			continue
-		return name
+		return row.name
 	return None
 
 
 def quiz_awaiting_grading(member: str, quiz: str) -> bool:
 	"""Whether the newest submission still awaits its manual grading (spec 6.2):
-	the attempt is not a failure, it is unjudged -- "Ожидает проверки".
-
-	The signal is real, not a marks heuristic (R07): an answered open-ended
-	submission is unjudged while nobody but its author has saved it. The member
-	cannot edit a submission after the fact, so any later save is the grader's.
-	A finally graded partial score (3 of 5) is a verdict, not a pending state."""
+	the attempt is not a failure, it is unjudged -- "Ожидает проверки"."""
 	latest = frappe.get_all(
 		"LMS Quiz Submission",
 		filters={"quiz": quiz, "member": member},
@@ -270,19 +299,31 @@ def quiz_awaiting_grading(member: str, quiz: str) -> bool:
 
 
 def _submission_awaiting_grading(submission_name: str) -> bool:
-	"""One submission: answered open-ended rows exist and no grader has saved it."""
+	"""One submission: does any answered open-ended question still have no
+	recorded verdict?
+
+	The signal is the grader's own field, not a save timestamp (B02): the quiz
+	client submits only ``{question_name, answer}`` (SavedAnswer) and
+	``process_results`` writes ``marks`` for every objective row but none for
+	Open Ended, so an unanswered-by-grader row stores NULL. The grading page
+	binds that NULL into an empty input and writes a verdict -- any verdict: a
+	final zero and a final partial mark are recorded values, indistinguishable
+	from full marks by design. Therefore ``marks IS NULL`` on an answered
+	open-ended row means precisely "no verdict exists yet": the 1-second
+	autosave that graded one answer of two leaves the submission awaiting,
+	and ``modified_by`` -- which the old heuristic read -- is not consulted
+	at all, because it says nothing about WHICH answers were judged."""
 	rows = frappe.get_all(
 		"LMS Quiz Result",
 		filters={"parent": submission_name, "parenttype": "LMS Quiz Submission"},
-		fields=["question_type", "answer"],
+		fields=["question_type", "answer", "marks"],
 	)
-	has_open_answer = any(row.question_type == "Open Ended" and (row.answer or "").strip() for row in rows)
-	if not has_open_answer:
-		return False
-	submission = frappe.db.get_value(
-		"LMS Quiz Submission", submission_name, ["owner", "modified_by"], as_dict=True
+	return any(
+		row.question_type == "Open Ended"
+		and (row.answer or "").strip()
+		and row.marks is None
+		for row in rows
 	)
-	return bool(submission and submission.modified_by == submission.owner)
 
 
 # --- Student events (spec 6.1, 6.3, 7) ------------------------------------------
@@ -361,21 +402,54 @@ def _record_opening_of(user: str, lesson: str | None = None, assignment: str | N
 	)
 	updated = 0
 	for name in assignment_names:
-		assignment_doc = frappe.get_doc("LMS Homework Assignment", name)
-		if not _apply_material_opening(assignment_doc, lesson=lesson, assignment=assignment):
-			continue
-		try:
-			assignment_doc.flags.homework_service = True
-			assignment_doc.save(ignore_permissions=True)
-		except frappe.TimestampMismatchError:
-			assignment_doc = frappe.get_doc("LMS Homework Assignment", name)
-			if not _apply_material_opening(assignment_doc, lesson=lesson, assignment=assignment):
-				continue
-			assignment_doc.flags.homework_service = True
-			assignment_doc.save(ignore_permissions=True)
-		updated += 1
-		_maybe_auto_review(assignment_doc)
+		if _persist_opening(name, user, lesson=lesson, assignment=assignment):
+			updated += 1
 	return {"updated": updated}
+
+
+def _persist_opening(name: str, user: str, lesson: str | None = None, assignment: str | None = None) -> bool:
+	"""Apply and persist one opening on one card, racing other writers safely.
+
+	Repeated write conflicts never lose the credit (B06): after one fresh retry
+	the opening is re-applied by a queued job, so a card cannot stay un-credited
+	or un-started because somebody else saved first."""
+	doc = frappe.get_doc("LMS Homework Assignment", name)
+	if not _apply_material_opening(doc, lesson=lesson, assignment=assignment):
+		return True
+	doc.flags.homework_service = True
+	try:
+		doc.save(ignore_permissions=True)
+		_maybe_auto_review(doc)
+		return True
+	except frappe.TimestampMismatchError:
+		frappe.clear_last_message()
+
+	fresh = frappe.get_doc("LMS Homework Assignment", name)
+	if _apply_material_opening(fresh, lesson=lesson, assignment=assignment):
+		fresh.flags.homework_service = True
+		try:
+			fresh.save(ignore_permissions=True)
+			_maybe_auto_review(fresh)
+			return True
+		except frappe.TimestampMismatchError:
+			frappe.clear_last_message()
+			if not frappe.flags.in_test:
+				frappe.enqueue(
+					apply_opening_job,
+					queue="short",
+					enqueue_after_commit=True,
+					user=user,
+					name=name,
+					lesson=lesson,
+					assignment=assignment,
+				)
+	return False
+
+
+def apply_opening_job(user: str, name: str, lesson: str | None = None, assignment: str | None = None) -> None:
+	"""Queued re-application of one confirmed opening after repeated write races
+	(B06): the opening is a recorded fact, not a request to be retried by hand."""
+	_persist_opening(name, user, lesson=lesson, assignment=assignment)
 
 
 def _apply_material_opening(assignment_doc, lesson: str | None = None, assignment: str | None = None) -> bool:
@@ -445,6 +519,9 @@ def _refuse_cancelled(assignment) -> None:
 
 
 def _any_requirement_unavailable(assignment) -> bool:
+	"""Whether any checkable row's material is gone RIGHT NOW (B04): the stored
+	status alone is not consulted -- a Completed row over a deleted source is
+	unavailable, whatever the snapshot still says."""
 	return any(
 		row.status == "Unavailable" or not source_alive(row)
 		for row in assignment.requirements
@@ -615,27 +692,32 @@ def recompute_quiz_requirements(member: str, quiz: str) -> None:
 
 def _recompute_one_assignment(name: str, *, member: str | None = None, quiz: str | None = None) -> None:
 	assignment = frappe.get_doc("LMS Homework Assignment", name)
+	if assignment.cancelled:
+		return
 	touched = _refresh_availability(assignment)
 	for row in assignment.requirements:
 		if quiz and row.requirement_type == REQUIREMENT_PASS_QUIZ and row.quiz == quiz:
 			if row.status == "Unavailable":
 				continue
 			touched |= _refresh_quiz_requirement(assignment, row, member, quiz)
-	if not touched:
-		return
-	_refresh_counts(assignment)
-	assignment.flags.homework_service = True
-	try:
-		assignment.save(ignore_permissions=True)
-	except frappe.TimestampMismatchError:
-		# This runs inside the quiz submission's own save; a concurrent homework
-		# write must never fail the submission. Recover deterministically (R19):
-		# one immediate retry from the fresh row, and if the conflict persists,
-		# an after-commit job that cannot be lost -- never a shrug that leaves
-		# the last quiz result off the card.
-		frappe.clear_last_message()
-		_recompute_with_retry_or_enqueue(name, member=member, quiz=quiz)
-		return
+	if touched:
+		_refresh_counts(assignment)
+		assignment.flags.homework_service = True
+		try:
+			assignment.save(ignore_permissions=True)
+		except frappe.TimestampMismatchError:
+			# This runs inside the quiz submission's own save; a concurrent homework
+			# write must never fail the submission. Recover deterministically (R19):
+			# one immediate retry from the fresh row, and if the conflict persists,
+			# an after-commit job that cannot be lost -- never a shrug that leaves
+			# the last quiz result off the card.
+			frappe.clear_last_message()
+			_recompute_with_retry_or_enqueue(name, member=member, quiz=quiz)
+			return
+	# B06: the transition itself is retried even when no requirement row changed.
+	# A card whose proofs are all stored but whose Review save was lost to two
+	# consecutive write races must heal on the next recompute, not sit In Progress
+	# forever -- `touched` says the rows moved, nothing about the aggregation.
 	_maybe_auto_review(assignment)
 
 
@@ -749,56 +831,121 @@ def _all_requirements_confirmed(assignment) -> bool:
 	return all(row.status in COMPLETED_STATUSES for row in rows)
 
 
-def _any_requirement_unavailable(assignment) -> bool:
-	return any(row.status == "Unavailable" for row in assignment.requirements)
-
-
 def _maybe_auto_review(assignment) -> None:
 	"""In Progress + everything confirmed + nothing unavailable + no pending
 	rework -> Review, recorded once. Reads and refreshes never re-fire it.
 
 	Availability is re-derived from the database first (R06): a deleted source
 	must turn its row Unavailable before this decision, not after it on some
-	later page view, so a card can never ride a stale Completed into Review."""
+	later page view, so a card can never ride a stale Completed into Review.
+	Counters move in the SAME write (B04): a row that just turned Unavailable
+	must not leave a stale "1 of 1 done" on the card. A write race is recovered
+	once from fresh state with every guard re-checked, then handed to the real
+	queue (B06) -- never shrugged off with the card stranded in In Progress."""
 	availability_changed = _refresh_availability(assignment)
-	if not _eligible_for_auto_review(assignment):
-		if availability_changed:
-			assignment.flags.homework_service = True
-			try:
-				assignment.save(ignore_permissions=True)
-			except frappe.TimestampMismatchError:
-				frappe.clear_last_message()
-		return
+	if availability_changed:
+		_refresh_counts(assignment)
 
-	assignment.status = STATUS_REVIEW
-	assignment.submitted_for_review_at = now_datetime()
-	_add_history(assignment, "submitted_for_review", STATUS_IN_PROGRESS, STATUS_REVIEW)
+	eligible = _eligible_for_auto_review(assignment)
+	if not (eligible or availability_changed):
+		return
+	if eligible:
+		assignment.status = STATUS_REVIEW
+		assignment.submitted_for_review_at = now_datetime()
+		_add_history(assignment, "submitted_for_review", STATUS_IN_PROGRESS, STATUS_REVIEW)
 	assignment.flags.homework_service = True
 	try:
 		assignment.save(ignore_permissions=True)
 	except frappe.TimestampMismatchError:
-		# Raced with another writer: re-read and apply once from current state, so a
-		# finished card can never be stranded in In Progress (A19).
-		fresh = frappe.get_doc("LMS Homework Assignment", assignment.name)
-		if not _eligible_for_auto_review(fresh):
-			return
-		fresh.status = STATUS_REVIEW
-		fresh.submitted_for_review_at = now_datetime()
-		_add_history(fresh, "submitted_for_review", STATUS_IN_PROGRESS, STATUS_REVIEW)
-		fresh.flags.homework_service = True
-		try:
-			fresh.save(ignore_permissions=True)
-		except frappe.TimestampMismatchError:
+		frappe.clear_last_message()
+		_recover_auto_review_after_race(assignment)
+
+
+def _apply_auto_review(doc) -> bool:
+	"""The transition itself, guarded: only In Progress without pending rework,
+	never a recalled card (its status column keeps the last live state, so
+	``cancelled`` is checked explicitly). Returns False when inapplicable."""
+	if not _eligible_for_auto_review(doc):
+		return False
+	doc.status = STATUS_REVIEW
+	doc.submitted_for_review_at = now_datetime()
+	_add_history(doc, "submitted_for_review", STATUS_IN_PROGRESS, STATUS_REVIEW)
+	return True
+
+
+def _recover_auto_review_after_race(assignment) -> None:
+	"""The write-race half of B06: re-read the card, re-check every guard on
+	CURRENT state (cancelled, status, pending rework) and re-apply once. A
+	second conflict goes to the bounded queue instead of a log-and-give-up."""
+	fresh = frappe.get_doc("LMS Homework Assignment", assignment.name)
+	if fresh.cancelled:
+		return
+	changed = _refresh_availability(fresh)
+	if changed:
+		_refresh_counts(fresh)
+	if _apply_auto_review(fresh):
+		changed = True
+	if not changed:
+		return
+	fresh.flags.homework_service = True
+	try:
+		fresh.save(ignore_permissions=True)
+	except frappe.TimestampMismatchError:
+		frappe.clear_last_message()
+		_enqueue_assignment_recompute(fresh.name)
+
+
+def _enqueue_assignment_recompute(name: str, attempt: int = 1) -> None:
+	"""The finite, observable recovery path (B06): the real short queue re-runs
+	the full catch-up for one card. Under tests no worker exists, so the deferral
+	is logged instead -- visible in the Error Log, never silent."""
+	if frappe.flags.in_test:
+		frappe.log_error(
+			title="Homework recompute deferred after repeated write races",
+			message=f"assignment={name} attempt={attempt}",
+		)
+		return
+	frappe.enqueue(
+		recompute_assignment,
+		queue="short",
+		enqueue_after_commit=True,
+		name=name,
+		attempt=attempt,
+	)
+
+
+def recompute_assignment(name: str, attempt: int = 1) -> None:
+	"""Queued catch-up for one card (B06): refresh availability and counters,
+	then retry the auto-review transition. The proofs are already stored, so no
+	student action is needed to un-stick a finished card. Re-enqueues itself a
+	bounded number of times should writers keep racing it; past that bound the
+	deferral is logged, and any later event re-triggers this same path."""
+	assignment = frappe.get_doc("LMS Homework Assignment", name)
+	if assignment.cancelled:
+		return
+	changed = _refresh_availability(assignment)
+	if _apply_auto_review(assignment):
+		changed = True
+	if not changed:
+		return
+	assignment.flags.homework_service = True
+	try:
+		assignment.save(ignore_permissions=True)
+	except frappe.TimestampMismatchError:
+		frappe.clear_last_message()
+		if attempt < 3:
+			_enqueue_assignment_recompute(name, attempt + 1)
+		else:
 			frappe.log_error(
-				title="Homework auto-review skipped after write race",
-				message=f"assignment={assignment.name}",
+				title="Homework recompute kept losing write races",
+				message=f"assignment={name} attempts={attempt}",
 			)
-			frappe.clear_last_message()
 
 
 def _eligible_for_auto_review(assignment) -> bool:
 	return (
 		assignment.status == STATUS_IN_PROGRESS
+		and not assignment.cancelled
 		and not assignment.needs_revision
 		and bool(assignment.first_opened_at)
 		and not _any_requirement_unavailable(assignment)

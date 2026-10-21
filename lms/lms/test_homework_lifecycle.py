@@ -12,7 +12,7 @@ from datetime import datetime
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms.lms import homework_api, homework_service
+from lms.lms import homework_api, homework_service, homework_sources
 from lms.lms.doctype.lms_quiz.lms_quiz import submit_quiz
 from lms.lms.test_helpers import BaseTestUtils
 
@@ -841,3 +841,373 @@ class TestHomeworkDeepTree(BaseTestUtils, IntegrationTestCase):
 		# Section path 1-1-1 (Block->Chapter->Part), first lesson of Part.
 		self.assertEqual(lesson_row["route"]["number"], "1-1-1-1")
 		self.assertEqual(detail["continue_target"]["number"], "1-1-1-1")
+
+
+class TestHomeworkRound2(BaseTestUtils, IntegrationTestCase):
+	"""Round-2 review scenarios (B01-B11), as real Frappe tests: the grading
+	signal, unbounded attempt history, dead sources at resubmit, idempotency
+	parameter checks, stuck-card recovery, whole-snapshot guarding, source
+	rights on every write path, and the standalone-assignment board link."""
+
+	def setUp(self):
+		super().setUp()
+		self.teacher = self._create_user(
+			"hw2-teacher@example.com", "Ivy", "Round2", ["Course Creator", "LMS Student"]
+		)
+		self.student = self._create_user("hw2-student@example.com", "Kim", "Round2", ["LMS Student"])
+		self.student2 = self._create_user("hw2-student2@example.com", "Lia", "Round2", ["LMS Student"])
+		frappe.set_user(self.teacher.email)
+		self.course = self._create_course(title="HW Round2 Course", instructor=self.teacher.email)
+		self.questions = self._create_quiz_questions()
+		self.quiz = self._create_quiz(self.questions, title="HW Round2 Quiz")
+		self.lesson_quiz = self._lesson("Round2 quiz lesson", QUIZ_BLOCK.format(self.quiz.name))
+
+	def _lesson(self, title, content=None):
+		chapter = self._create_chapter(f"Chapter {title}", self.course.name)
+		self._create_chapter_reference(self.course.name, chapter.name)
+		lesson = self._create_lesson(title, chapter.name, self.course.name, content)
+		self._create_lesson_reference(chapter.name, lesson.name)
+		return lesson
+
+	def _template(self, title, lessons=(), assignments=()):
+		items = [
+			{
+				"source_type": "Lesson",
+				"name": lesson.name,
+				"course": self.course.name,
+				"title": lesson.title,
+				"chapter": "",
+				"path": f"Course / {lesson.title}",
+			}
+			for lesson in lessons
+		]
+		items += [
+			{
+				"source_type": "Assignment",
+				"name": assignment,
+				"course": self.course.name,
+				"title": assignment,
+				"chapter": "",
+				"path": f"Course / {assignment}",
+			}
+			for assignment in assignments
+		]
+		return homework_api.save_homework(title=title, days=3, items=items)["name"]
+
+	def _enroll(self, student):
+		self._create_enrollment(student.email, self.course.name)
+
+	def _assign(self, template, student, key, days=None, force=False):
+		frappe.set_user(self.teacher.email)
+		return homework_api.assign_homework(
+			homework=template, student=student.email, days=days, idempotency_key=key, force=force
+		)
+
+	def _submit(self, student, correct=True):
+		frappe.set_user(student.email)
+		results = []
+		for question in self.questions:
+			answer = [question.option_1] if correct else [question.option_2]
+			results.append({"question_name": question.name, "answer": answer})
+		submit_quiz(self.quiz.name, json.dumps(results))
+		frappe.set_user(self.teacher.email)
+
+	def _submission_of(self, quiz, member):
+		return frappe.get_all(
+			"LMS Quiz Submission",
+			filters={"quiz": quiz, "member": member},
+			order_by="creation desc",
+			pluck="name",
+			limit=1,
+		)[0]
+
+	# --- B02: the grading signal is per-answer, not modified_by ---------------
+
+	def test_partial_autosave_of_two_open_answers_still_awaits(self):
+		"""The grading page autosaves one typed mark at a time: one graded answer
+		of two leaves the attempt unjudged; a FINAL ZERO on the second is the
+		completing verdict, and only then may the card reach Review."""
+		self._enroll(self.student)
+		questions = []
+		for prompt in ("Explain gravity", "Explain entropy"):
+			question = frappe.new_doc("LMS Question")
+			question.update({"question": prompt, "type": "Open Ended"})
+			question.save()
+			questions.append(question)
+		quiz = frappe.new_doc("LMS Quiz")
+		quiz.update({"title": "HW2 Two Open Quiz", "passing_percentage": 50, "total_marks": 10})
+		for question in questions:
+			quiz.append("questions", {"question": question.name, "marks": 5, "type": "Open Ended"})
+		quiz.save()
+
+		# A fresh lesson carrying the two-answer quiz block: the composition's
+		# Pass Quiz requirement is the two-answer quiz, not self.quiz.
+		lesson = self._lesson("Two open lesson", QUIZ_BLOCK.format(quiz.name))
+		template = self._template("Two open answers", lessons=[lesson])
+		name = self._assign(template, self.student, "key-b02")["name"]
+
+		frappe.set_user(self.student.email)
+		homework_service.record_lesson_opened(lesson.name)
+		submit_quiz(
+			quiz.name,
+			json.dumps(
+				[
+					{"question_name": questions[0].name, "answer": "First essay"},
+					{"question_name": questions[1].name, "answer": "Second essay"},
+				]
+			),
+		)
+
+		doc = frappe.get_doc("LMS Homework Assignment", name)
+		self.assertEqual(doc.status, "In Progress")
+		row = next(row for row in doc.requirements if row.requirement_type == "Pass Quiz")
+		self.assertEqual(row.status, "Awaiting Grading")
+
+		# Autosave after grading ONLY the first answer: the second row's marks
+		# stay NULL, so the attempt is still unjudged -- modified_by already
+		# names the teacher and says nothing.
+		frappe.set_user(self.teacher.email)
+		submission = frappe.get_doc("LMS Quiz Submission", self._submission_of(quiz.name, self.student.email))
+		open_rows = [r for r in submission.result if r.question_type == "Open Ended"]
+		open_rows[0].marks = 5
+		submission.save()
+
+		doc = frappe.get_doc("LMS Homework Assignment", name)
+		row = next(row for row in doc.requirements if row.requirement_type == "Pass Quiz")
+		self.assertEqual(row.status, "Awaiting Grading")
+		self.assertEqual(doc.status, "In Progress")
+		self.assertIsNone(homework_service.passed_quiz_evidence(self.student.email, quiz.name))
+
+		# The final zero on the second answer completes the grading.
+		submission = frappe.get_doc("LMS Quiz Submission", self._submission_of(quiz.name, self.student.email))
+		open_rows = [r for r in submission.result if r.question_type == "Open Ended"]
+		self.assertIsNone(open_rows[1].marks)
+		open_rows[1].marks = 0
+		submission.save()
+
+		doc = frappe.get_doc("LMS Homework Assignment", name)
+		row = next(row for row in doc.requirements if row.requirement_type == "Pass Quiz")
+		self.assertEqual(row.status, "Completed")
+		self.assertEqual(row.proof_name, submission.name)
+		self.assertEqual(doc.status, "Review")
+
+	# --- B03: the whole attempt history is consulted --------------------------
+
+	def test_older_valid_pass_survives_fifty_new_failures(self):
+		"""An old pass is never evicted by later failures, however many; deleting
+		the only passing attempt removes the credit."""
+		self._enroll(self.student)
+		frappe.set_user(self.student.email)
+
+		def insert_attempt(percentage, prefix):
+			doc = frappe.new_doc("LMS Quiz Submission")
+			doc.update(
+				{
+					"quiz": self.quiz.name,
+					"member": self.student.email,
+					"score": round(percentage / 10),
+					"score_out_of": 10,
+					"percentage": percentage,
+					"passing_percentage": 70,
+					"result": [],
+				}
+			)
+			doc.insert(ignore_permissions=True)
+			return doc.name
+
+		old_pass = insert_attempt(80, "old")
+		for index in range(50):
+			insert_attempt(0, f"fail-{index}")
+
+		evidence = homework_service.passed_quiz_evidence(self.student.email, self.quiz.name)
+		self.assertEqual(evidence, old_pass)
+
+		frappe.delete_doc("LMS Quiz Submission", old_pass)
+		self.assertIsNone(homework_service.passed_quiz_evidence(self.student.email, self.quiz.name))
+
+	# --- B04: dead sources block resubmit; counters follow availability -------
+
+	def test_dead_source_refuses_resubmit_and_refreshes_counters(self):
+		self._enroll(self.student)
+		template = self._template("Round2 flow", lessons=[self.lesson_quiz])
+		name = self._assign(template, self.student, "key-b04")["name"]
+
+		frappe.set_user(self.student.email)
+		homework_service.record_lesson_opened(self.lesson_quiz.name)
+		self._submit(self.student, correct=True)
+		frappe.set_user(self.teacher.email)
+		self.assertEqual(frappe.get_value("LMS Homework Assignment", name, "status"), "Review")
+		homework_service.return_for_revision(name, "Tighten the essay")
+
+		frappe.delete_doc("Course Lesson", self.lesson_quiz.name)
+
+		frappe.set_user(self.student.email)
+		with self.assertRaises(frappe.ValidationError):
+			homework_service.resubmit(name)
+
+		# Any later course event re-derives availability AND the counters with
+		# it: the dead lesson reads Unavailable with 1 of 2 done, never 2 of 2.
+		self._submit(self.student, correct=True)
+		doc = frappe.get_doc("LMS Homework Assignment", name)
+		lesson_row = next(row for row in doc.requirements if row.requirement_type == "Open Lesson")
+		self.assertEqual(lesson_row.status, "Unavailable")
+		self.assertEqual(doc.total_requirements, 2)
+		self.assertEqual(doc.completed_requirements, 1)
+		self.assertEqual(doc.status, "In Progress")
+
+	# --- B05: one key, one logical operation ----------------------------------
+
+	def test_idempotency_key_with_other_params_refused(self):
+		self._enroll(self.student)
+		self._enroll(self.student2)
+		template = self._template("Idempotency params", lessons=[self.lesson_quiz])
+		created = self._assign(template, self.student, "key-b05", days=3)
+		self.assertTrue(created["created"])
+
+		# Same key, different student: a stale replay, not a retry.
+		with self.assertRaises(frappe.ValidationError):
+			self._assign(template, self.student2, "key-b05", days=3)
+		# Same key, different term: same verdict.
+		with self.assertRaises(frappe.ValidationError):
+			self._assign(template, self.student, "key-b05", days=5)
+		# The true retry of the same operation returns the same card.
+		again = self._assign(template, self.student, "key-b05", days=3)
+		self.assertFalse(again["created"])
+		self.assertEqual(again["name"], created["name"])
+
+	# --- B06: a stuck card heals without a new student action -----------------
+
+	def test_recompute_repairs_eligible_card_even_if_proof_did_not_change(self):
+		self._enroll(self.student)
+		template = self._template("Stuck card", lessons=[self.lesson_quiz])
+		name = self._assign(template, self.student, "key-b06")["name"]
+		frappe.set_user(self.student.email)
+		homework_service.record_lesson_opened(self.lesson_quiz.name)
+		self._submit(self.student, correct=True)
+		frappe.set_user(self.teacher.email)
+		self.assertEqual(frappe.get_value("LMS Homework Assignment", name, "status"), "Review")
+
+		# Simulate the lost write: the rework flag is cleared server-side but
+		# the card stays In Progress with every proof already stored.
+		homework_service.return_for_revision(name, "One more look")
+		frappe.db.set_value("LMS Homework Assignment", name, "needs_revision", 0, update_modified=False)
+
+		homework_service.recompute_quiz_requirements(self.student.email, self.quiz.name)
+		doc = frappe.get_doc("LMS Homework Assignment", name)
+		self.assertEqual(doc.status, "Review")
+		# The recovery writes history once, not per recompute (A32).
+		homework_service.recompute_quiz_requirements(self.student.email, self.quiz.name)
+		doc = frappe.get_doc("LMS Homework Assignment", name)
+		self.assertEqual(
+			len([row for row in doc.history if row.event == "submitted_for_review"]), 1
+		)
+
+	# --- B07: the whole snapshot is guarded, evidence and history included ----
+
+	def test_rest_guard_refuses_proof_dates_course_and_history(self):
+		self._enroll(self.student)
+		template = self._template("Snapshot guard", lessons=[self.lesson_quiz])
+		name = self._assign(template, self.student, "key-b07")["name"]
+
+		frappe.set_user(self.teacher.email)
+		# Control: an identical save passes (the guard is not a blanket refusal).
+		frappe.get_doc("LMS Homework Assignment", name).save(ignore_permissions=True)
+
+		doc = frappe.get_doc("LMS Homework Assignment", name)
+		row = next(row for row in doc.requirements if row.requirement_type == "Pass Quiz")
+		row.proof_name = "another-students-pass"
+		with self.assertRaises(frappe.PermissionError):
+			doc.save(ignore_permissions=True)
+
+		doc = frappe.get_doc("LMS Homework Assignment", name)
+		row = next(row for row in doc.requirements if row.requirement_type == "Open Lesson")
+		row.completed_at = datetime(2020, 1, 1, 0, 0, 0)
+		with self.assertRaises(frappe.PermissionError):
+			doc.save(ignore_permissions=True)
+
+		doc = frappe.get_doc("LMS Homework Assignment", name)
+		row = next(row for row in doc.requirements if row.requirement_type == "Open Lesson")
+		row.course = "someone-elses-course"
+		with self.assertRaises(frappe.PermissionError):
+			doc.save(ignore_permissions=True)
+
+		doc = frappe.get_doc("LMS Homework Assignment", name)
+		doc.append(
+			"history",
+			{"actor": "forged-teacher@example.com", "event": "accepted", "comment": "forged audit"},
+		)
+		with self.assertRaises(frappe.PermissionError):
+			doc.save(ignore_permissions=True)
+
+		stored = frappe.get_doc("LMS Homework Assignment", name)
+		self.assertTrue(all(row.actor != "forged-teacher@example.com" for row in stored.history))
+
+	# --- B01: source rights on every write path -------------------------------
+
+	def test_foreign_course_sources_refused_on_every_path(self):
+		other = self._create_user(
+			"hw2-other-teacher@example.com", "Oda", "Other", ["Course Creator", "LMS Student"]
+		)
+		frappe.set_user(other.email)
+		other_course = self._create_course(title="HW2 Other Course", instructor=other.email)
+		chapter = self._create_chapter("Other chapter", other_course.name)
+		self._create_chapter_reference(other_course.name, chapter.name)
+		foreign_lesson = self._create_lesson("Foreign lesson", chapter.name, other_course.name, None)
+		self._create_lesson_reference(chapter.name, foreign_lesson.name)
+
+		# Named API: canonicalization checks the resolved course's rights (B01).
+		frappe.set_user(self.teacher.email)
+		with self.assertRaises(frappe.PermissionError):
+			homework_api.save_homework(
+				title="Smuggled",
+				days=3,
+				items=[{"source_type": "Lesson", "name": foreign_lesson.name}],
+			)
+
+		# Direct document write: the same invariant in the doctype controller.
+		doc = frappe.new_doc("LMS Homework")
+		doc.update(
+			{
+				"title": "Forged row",
+				"days": 2,
+				"items": [
+					{
+						"source_type": "Lesson",
+						"lesson": foreign_lesson.name,
+						"quiz": None,
+						"assignment": None,
+						"course": self.course.name,
+						"label": "Looks mine",
+						"path": "Looks mine",
+					}
+				],
+			}
+		)
+		with self.assertRaises(frappe.PermissionError):
+			doc.insert()
+
+		# And issuance re-resolves anyway: a forged stored course cannot borrow
+		# this teacher's rights (defense in depth).
+		reasons = homework_sources.validate_sources_for_student(
+			[frappe._dict(source_type="Lesson", lesson=foreign_lesson.name, course=self.course.name, label="Forged")],
+			self.student.email,
+		)
+		self.assertTrue(reasons)
+
+	# --- B10: a standalone assignment carries its board link ------------------
+
+	def test_standalone_assignment_card_has_continue_target(self):
+		self._enroll(self.student)
+		written = self._create_assignment(title="HW2 Written Task")
+		frappe.db.set_value("LMS Assignment", written.name, "course", self.course.name)
+		template = self._template("Written round2", assignments=[written.name])
+		created = self._assign(template, self.student, "key-b10")
+
+		frappe.set_user(self.teacher.email)
+		board = homework_api.get_homework_board(student=self.student.email)
+		column = next(column for column in board["columns"] if column["status"] == "To Do")
+		card = next(card for card in column["cards"] if card["name"] == created["name"])
+		self.assertEqual(
+			card["continue_target"],
+			{"type": "assignment", "assignment": written.name, "course": self.course.name},
+		)
