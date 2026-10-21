@@ -1,178 +1,164 @@
 <template>
 	<Disclosure v-slot="{ open }" :key="section.name" :defaultOpen="defaultOpen">
-		<DisclosureButton
-			class="flex items-center w-full p-2 group"
-			:aria-describedby="`section-level-${section.name}`"
-		>
-			<span
-				:class="{
-					'rotate-90': open,
-					'rtl:rotate-180': !open,
-					hidden: section.is_scorm_package,
-					'self-start mt-0.5': inlineSelect,
-				}"
-				class="lucide-chevron-right size-4 text-ink-gray-9 transform duration-200"
-			/>
+		<div class="w-full rounded-4 py-1">
 			<div
-				class="ms-2 min-w-0 flex-1 text-start"
+				class="outline-row outline-section-header flex w-full min-w-0 items-start gap-2 rounded-4 px-2 py-2 transition-colors hover:bg-surface-gray-1"
 				:class="[
-					inlineSelect ? '' : 'flex items-baseline justify-between gap-3',
-					isScormSectionLocked ? 'cursor-not-allowed opacity-60' : '',
+					allowEdit && !section.is_scorm_package
+						? 'cursor-grab active:cursor-grabbing outline-drag-handle'
+						: '',
+					currentLevel === 1 && allowEdit && !section.is_scorm_package
+						? 'outline-drag-handle-level-1'
+						: '',
 				]"
-				@click="redirectToSection"
+				:data-sortable-level="currentLevel"
+				:data-section-drop="allowEdit ? section.name : undefined"
+				@dragover="outlineDrag?.over($event, section)"
+				@dragleave="outlineDrag && (outlineDrag.state.hoveredTarget = null)"
+				@drop="outlineDrag?.drop($event, section)"
 			>
+				<OutlineActionButton
+					v-if="allowEdit && !section.is_scorm_package"
+					:label="__('Drag to reorder')"
+					class="outline-grip mt-0.5 cursor-grab active:cursor-grabbing"
+				>
+					<span class="lucide-grip-vertical size-4" aria-hidden="true" />
+				</OutlineActionButton>
+				<DisclosureButton
+					v-if="!isRenaming"
+					class="outline-disclosure-button flex min-w-0 flex-1 items-start gap-2 text-start"
+					@click="toggleSection(open, $event)"
+				>
+					<span
+						:class="{
+							'rotate-90': open,
+							'rtl:rotate-180': !open,
+							hidden: section.is_scorm_package,
+							'self-start mt-0.5': inlineSelect,
+						}"
+						class="outline-disclosure-toggle lucide-chevron-right mt-0.5 size-4 shrink-0 text-ink-gray-9 transform duration-200"
+					/>
+					<div
+						class="min-w-0 flex-1 text-start"
+						:class="[
+							isScormSectionLocked ? 'cursor-not-allowed opacity-60' : '',
+							outlineDrag?.state.hoveredTarget === section.name
+								? 'rounded-4 bg-surface-blue-1 ring-2 ring-outline-blue-2'
+								: '',
+						]"
+					>
+						<div
+							class="whitespace-normal break-words leading-5 text-ink-gray-9"
+							:class="currentLevel > 1 ? 'text-sm font-bold' : 'text-base font-semibold'"
+							:title="section.title"
+							@dblclick.stop="
+								allowEdit && !section.is_scorm_package && startRename()
+							"
+						>
+							{{ section.title }}
+							<span
+								v-if="!section.is_scorm_package && countsLabel"
+								class="ms-2 inline whitespace-nowrap align-baseline text-sm font-normal leading-5 text-ink-gray-5"
+								data-testid="section-count"
+							>
+								{{ countsLabel }}
+							</span>
+						</div>
+					</div>
+					<template v-if="isScormSectionLocked">
+						<span
+							class="lucide-lock-keyhole mt-0.5 size-4 shrink-0 text-ink-gray-4"
+							:title="__('Complete the previous lessons to unlock this one')"
+							aria-hidden="true"
+						/>
+						<span class="sr-only">{{ __('Locked') }}</span>
+					</template>
+					<span
+						v-else-if="section.is_scorm_package && isScormSectionComplete"
+						class="lucide-check mt-0.5 size-4 shrink-0 text-ink-green-8"
+					/>
+				</DisclosureButton>
 				<TextInput
-					v-if="isRenaming"
+					v-else
 					ref="renameInput"
 					v-model="renameValue"
-					class="w-full"
+					class="min-w-0 flex-1"
 					@click.stop.prevent
 					@keydown.enter.stop.prevent="commitRename"
 					@keydown.esc.stop.prevent="cancelRename"
 					@blur="commitRename"
 				/>
 				<div
-					v-else
-					class="truncate text-base-medium leading-5 text-ink-gray-9"
-					:class="{ 'text-sm': level > 1 }"
-					:title="section.title"
-					@dblclick="allowEdit && !section.is_scorm_package && startRename()"
+				v-if="allowEdit"
+				class="outline-actions ms-auto flex shrink-0 items-center justify-end gap-1"
+				role="group"
+				:aria-label="section.title"
+			>
+				<OutlineActionButton
+					v-if="!section.is_scorm_package"
+					:label="__('Add Lesson')"
+					:disabled="creatingLesson"
+					:busy="creatingLesson"
+					@click="addLesson"
 				>
-					{{ section.title }}
-				</div>
+					<span class="lucide-plus size-4" aria-hidden="true" />
+				</OutlineActionButton>
+				<OutlineActionButton
+					v-if="!section.is_scorm_package && canAddSection"
+					:label="__('Add Section')"
+					@click="emit('add-section', section)"
+				>
+					<span class="lucide-folder-plus size-4" aria-hidden="true" />
+				</OutlineActionButton>
+				<OutlineActionButton
+					v-if="section.is_scorm_package"
+					:label="__('Edit Chapter')"
+					@click="emit('edit-chapter', section)"
+				>
+					<span class="lucide-file-pen-line size-4" aria-hidden="true" />
+				</OutlineActionButton>
+				<OutlineActionButton
+					:label="__('Delete Chapter')"
+					@click="emit('delete-chapter', section.name)"
+				>
+					<span class="lucide-trash-2 size-4" aria-hidden="true" />
+				</OutlineActionButton>
 			</div>
-			<div class="flex ms-3 items-center gap-x-4 shrink-0">
-				<span
-					v-if="!section.is_scorm_package && onlyLessons && section.lessons?.length"
-					class="text-sm text-ink-gray-5"
-					:class="{
-						'group-hover:hidden [@media(hover:none)]:hidden': allowEdit,
-					}"
-				>
-					{{ section.lessons.length }}
-				</span>
-				<span
-					v-else-if="!section.is_scorm_package && (section.section_count || section.sections?.length)"
-					class="text-sm text-ink-gray-5"
-					:class="{
-						'group-hover:hidden [@media(hover:none)]:hidden': allowEdit,
-					}"
-				>
-					{{ countsLabel }}
-				</span>
-				<template v-if="allowEdit">
-					<Tooltip
-						:text="__('Add Lesson')"
-						side="bottom"
-					>
-						<span
-							v-if="!section.is_scorm_package"
-							@click.prevent="addLesson"
-							class="lucide-plus size-4 text-ink-gray-9 invisible group-hover:visible [@media(hover:none)]:visible"
-						/>
-					</Tooltip>
-					<Tooltip
-						:text="
-							canAddSection
-								? __('Add Section')
-								: __('Maximum depth reached — 4 section levels')
-						"
-						side="bottom"
-					>
-						<span
-							v-if="!section.is_scorm_package"
-							@click.prevent="canAddSection && emit('add-section', section)"
-							class="lucide-folder-plus size-4 text-ink-gray-9 invisible group-hover:visible [@media(hover:none)]:visible"
-							:class="{ 'opacity-40': !canAddSection }"
-							:aria-disabled="canAddSection ? undefined : 'true'"
-							role="button"
-						/>
-					</Tooltip>
-					<span
-						v-if="canAddSection === false"
-						:id="`section-level-${section.name}`"
-						class="sr-only"
-					>
-						{{ __('Maximum depth reached — 4 section levels') }}
-					</span>
-					<Tooltip :text="__('Move up')" side="bottom">
-						<span
-							v-if="!section.is_scorm_package"
-							@click.prevent="reorderSection('up')"
-							class="lucide-arrow-up size-4 text-ink-gray-9 invisible group-hover:visible [@media(hover:none)]:visible"
-							:class="{ 'opacity-40': isFirstSibling }"
-							:aria-disabled="isFirstSibling ? 'true' : undefined"
-							role="button"
-						/>
-					</Tooltip>
-					<Tooltip :text="__('Move down')" side="bottom">
-						<span
-							v-if="!section.is_scorm_package"
-							@click.prevent="reorderSection('down')"
-							class="lucide-arrow-down size-4 text-ink-gray-9 invisible group-hover:visible [@media(hover:none)]:visible"
-							:class="{ 'opacity-40': isLastSibling }"
-							:aria-disabled="isLastSibling ? 'true' : undefined"
-							role="button"
-						/>
-					</Tooltip>
-					<Tooltip :text="__('Move to…')" side="bottom">
-						<span
-							v-if="!section.is_scorm_package"
-							@click.prevent="emit('move-section', section)"
-							class="lucide-folder-input size-4 text-ink-gray-9 invisible group-hover:visible [@media(hover:none)]:visible"
-						/>
-					</Tooltip>
-					<Tooltip :text="__('Rename')" side="bottom">
-						<span
-							v-if="!section.is_scorm_package"
-							@click.prevent="startRename"
-							class="lucide-pen-line size-4 text-ink-gray-9 invisible group-hover:visible [@media(hover:none)]:visible"
-						/>
-					</Tooltip>
-					<Tooltip :text="__('Edit Chapter')" side="bottom">
-						<span
-							v-if="section.is_scorm_package"
-							@click.prevent="emit('edit-chapter', section)"
-							class="lucide-file-pen-line size-4 text-ink-gray-9 invisible group-hover:visible [@media(hover:none)]:visible"
-						/>
-					</Tooltip>
-					<Tooltip :text="__('Delete Chapter')" side="bottom">
-						<span
-							@click.prevent="emit('delete-chapter', section.name)"
-							class="lucide-trash-2 size-4 text-ink-red-5 hidden group-hover:inline-block [@media(hover:none)]:inline-block"
-						/>
-					</Tooltip>
-				</template>
 			</div>
-			<template v-if="isScormSectionLocked">
-				<span
-					class="lucide-lock-keyhole size-4 text-ink-gray-4"
-					:title="__('Complete the previous lessons to unlock this one')"
-					aria-hidden="true"
-				/>
-				<span class="sr-only">{{ __('Locked') }}</span>
-			</template>
-			<span
-				v-else-if="section.is_scorm_package && isScormSectionComplete"
-				class="lucide-check size-4 text-ink-green-8"
-			/>
-		</DisclosureButton>
-		<DisclosurePanel v-if="!section.is_scorm_package">
+		</div>
+		<DisclosurePanel
+			v-if="!section.is_scorm_package"
+			class="ms-4 border-s border-outline-gray-2"
+			data-testid="section-branch"
+		>
 			<Draggable
 				:list="mergedChildren"
-				:disabled="!allowEdit"
+				:disabled="!allowEdit || dragDisabled"
 				item-key="key"
-				group="items"
-				:filter="'.outline-section-row'"
+				:group="{
+					name: 'outline-items',
+					pull: canTransferChild,
+					put: canTransferChild,
+				}"
+				:draggable="'.outline-section-row, .outline-lesson-row'"
+				:handle="`.outline-drag-handle[data-sortable-level='${
+					currentLevel + 1
+				}']`"
+					:filter="'.scorm-section-row, .outline-actions, .outline-disclosure-toggle, input, textarea'"
 				:preventOnFilter="false"
+				:move="outlineDrag?.move"
 				:data-chapter="section.name"
-				@end="(e: DraggableEvent) => emit('move-lesson', e)"
+				@start="outlineDrag?.start($event, section.name)"
+				@end="moveChild"
 			>
 				<template #item="{ element }">
 					<div
 						v-if="element.kind === 'section'"
 						class="outline-section-row"
-						:class="childIndentClass"
+						:class="[
+							childIndentClass,
+							element.node!.is_scorm_package ? 'scorm-section-row' : '',
+						]"
 					>
 						<SectionRow
 							:section="element.node!"
@@ -186,6 +172,7 @@
 							:editorLinks="editorLinks"
 							:selectedLessonNumber="selectedLessonNumber"
 							:creatingLesson="creatingLessonChapter === element.node!.name"
+							:dragDisabled="dragDisabled"
 							@select-lesson="(payload) => emit('select-lesson', payload)"
 							@edit-chapter="(chapter) => emit('edit-chapter', chapter)"
 							@rename-chapter="(payload) => emit('rename-chapter', payload)"
@@ -195,21 +182,26 @@
 							@move-lesson="(e) => emit('move-lesson', e)"
 							@create-lesson="(payload) => emit('create-lesson', payload)"
 							@add-section="(node) => emit('add-section', node)"
-							@move-section="(node) => emit('move-section', node)"
 							@reorder-section="(payload) => emit('reorder-section', payload)"
 						/>
 					</div>
 					<div
 						v-else
-						class="py-2 pe-4 text-ink-gray-9"
+					class="outline-row outline-lesson-row flex w-full min-w-0 items-start gap-2 rounded-4 px-2 py-2 text-ink-gray-9 transition-colors hover:bg-surface-gray-1"
+					:class="[
+						childIndentClass,
+						allowEdit ? 'cursor-grab active:cursor-grabbing outline-drag-handle' : '',
+					]"
+					:data-sortable-level="currentLevel + 1"
 						data-testid="outline-lesson"
-						:class="[
-							childIndentClass,
-							isActiveLesson(element.lesson!.number)
-								? 'bg-surface-gray-3 rounded-5'
-								: '',
-						]"
 					>
+						<OutlineActionButton
+							v-if="allowEdit"
+							:label="__('Drag to reorder')"
+							class="outline-grip mt-0.5 cursor-grab active:cursor-grabbing"
+						>
+							<span class="lucide-grip-vertical size-4" aria-hidden="true" />
+						</OutlineActionButton>
 						<component
 							:is="inlineSelect || element.lesson!.locked ? 'div' : 'router-link'"
 							:to="
@@ -217,16 +209,20 @@
 									? undefined
 									: lessonRoute(element.lesson!)
 							"
-							:class="
+							:class="[
+								'min-w-0 flex-1',
 								element.lesson!.locked
 									? 'cursor-not-allowed opacity-60'
 									: inlineSelect
 									? 'cursor-pointer'
-									: ''
-							"
+									: '',
+								isActiveLesson(element.lesson!.number)
+									? 'bg-surface-gray-3 rounded-5'
+									: '',
+							]"
 							@click="onLessonClick(element.lesson!)"
 						>
-							<div class="flex items-center text-sm leading-5 group">
+							<div class="flex min-w-0 items-start py-1.5 text-sm leading-5">
 								<span
 									v-if="element.lesson!.icon === 'icon-youtube'"
 									class="lucide-monitor-play h-4 w-4 me-2"
@@ -247,18 +243,9 @@
 									v-else-if="element.lesson!.icon === 'icon-list'"
 									class="lucide-file-text h-4 w-4 text-ink-gray-9 me-2"
 								/>
-								{{ element.lesson!.title }}
-								<div v-if="allowEdit" class="ms-auto flex items-center gap-2">
-									<span
-										@click.prevent="
-											emit('delete-lesson', {
-												lesson: element.lesson!.name,
-												chapter: section.name,
-											})
-										"
-										class="lucide-trash-2 h-4 w-4 text-ink-red-5 invisible group-hover:visible [@media(hover:none)]:visible"
-									/>
-								</div>
+								<span class="min-w-0 flex-1 whitespace-normal break-words">{{
+									element.lesson!.title
+								}}</span>
 								<template v-if="element.lesson!.locked">
 									<span
 										class="lucide-lock-keyhole h-4 w-4 text-ink-gray-4 ms-2"
@@ -275,6 +262,22 @@
 								/>
 							</div>
 						</component>
+						<div
+							v-if="allowEdit"
+							class="outline-actions ms-auto flex shrink-0 items-center justify-end gap-1"
+						>
+							<OutlineActionButton
+								:label="__('Delete Lesson')"
+								@click.prevent.stop="
+									emit('delete-lesson', {
+										lesson: element.lesson!.name,
+										chapter: section.name,
+									})
+								"
+							>
+								<span class="lucide-trash-2 size-4" aria-hidden="true" />
+							</OutlineActionButton>
+						</div>
 					</div>
 				</template>
 			</Draggable>
@@ -286,26 +289,12 @@
 			>
 				<span class="text-sm text-ink-gray-5">{{ __('Empty section') }}</span>
 			</div>
-			<div v-if="allowEdit" class="flex mt-2 mb-4 gap-2" :class="childIndentClass">
-				<Button :loading="creatingLesson" @click="addLesson">
-					<template #prefix>
-						<span class="lucide-plus size-4" />
-					</template>
-					{{ __('Add Lesson') }}
-				</Button>
-				<Button v-if="canAddSection" @click="emit('add-section', section)">
-					<template #prefix>
-						<span class="lucide-folder-plus size-4" />
-					</template>
-					{{ __('Add Section') }}
-				</Button>
-			</div>
 		</DisclosurePanel>
 	</Disclosure>
 </template>
 
 <script setup lang="ts">
-import { Button, TextInput, Tooltip, toast } from 'frappe-ui'
+import { TextInput, toast } from 'frappe-ui'
 import { computed, inject, nextTick, ref, watch } from 'vue'
 import Draggable from 'vuedraggable'
 import { Disclosure, DisclosureButton, DisclosurePanel } from '@headlessui/vue'
@@ -313,14 +302,27 @@ import { useRoute, useRouter } from 'vue-router'
 import type { RouteLocationRaw } from 'vue-router'
 import type { InputExposed } from 'frappe-ui'
 import SectionRow from '@/components/SectionRow.vue'
+import OutlineActionButton from '@/components/OutlineActionButton.vue'
 import type { OutlineChapter, OutlineLesson, SessionUser } from '@/types'
 import { parseLessonNumber } from '@/utils/courseOutline'
+import { courseOutlineDragKey } from '@/composables/courseOutlineDrag'
+import {
+	courseOutlineExpansionKey,
+	isSectionExpanded,
+	rememberSectionExpansion,
+} from '@/utils/courseOutlineExpansion'
 
 interface DraggableEvent {
-	item: { __draggable_context: { element: OutlineChapter | OutlineLesson } }
+	item: {
+		__draggable_context: {
+			element: OutlineChapter | OutlineLesson | MergedChild
+		}
+	}
 	from: { dataset: { chapter: string } }
 	to: { dataset: { chapter: string } }
 	newIndex: number
+	oldIndex?: number
+	originalEvent?: Event
 }
 
 interface MergedChild {
@@ -331,9 +333,13 @@ interface MergedChild {
 	node?: OutlineChapter
 }
 
+type SectionReorderPayload =
+	| { section: OutlineChapter; direction: 'up' | 'down' }
+	| { section: OutlineChapter; parent: string; idx: number }
+
 // Authoring maximum: 4 structural section levels below the course root; the
 // course root itself is not counted and lessons never count.
-const MAX_SECTION_DEPTH = 4
+const MAX_SECTION_DEPTH = 2
 
 const props = withDefaults(
 	defineProps<{
@@ -349,6 +355,7 @@ const props = withDefaults(
 		selectedLessonNumber?: string
 		creatingLesson?: boolean
 		creatingLessonChapter?: string
+		dragDisabled?: boolean
 	}>(),
 	{
 		level: 1,
@@ -361,6 +368,7 @@ const props = withDefaults(
 		selectedLessonNumber: '',
 		creatingLesson: false,
 		creatingLessonChapter: '',
+		dragDisabled: false,
 	}
 )
 
@@ -374,13 +382,13 @@ const emit = defineEmits<{
 	'move-lesson': [DraggableEvent]
 	'create-lesson': [{ chapter: OutlineChapter; lessonIdx: number }]
 	'add-section': [OutlineChapter]
-	'move-section': [OutlineChapter]
-	'reorder-section': [{ section: OutlineChapter; direction: 'up' | 'down' }]
+	'reorder-section': [SectionReorderPayload]
 }>()
 
 const route = useRoute()
 const router = useRouter()
 const user = inject<SessionUser>('$user')!
+const outlineDrag = inject(courseOutlineDragKey, null)
 
 const isRenaming = ref<boolean>(false)
 const renameValue = ref<string>('')
@@ -423,28 +431,22 @@ const sectionPath = computed<string>(() =>
 // fallback for outline data that predates the field.
 const currentLevel = computed<number>(() => props.section.level ?? props.level)
 
-// Sections on the path to the open lesson expand on (re)mount; the student
-// view carries the active lesson in route params, the in-page editor in
-// ?editLesson, with selectedLessonNumber as a fallback. With nothing active,
-// only the first level-1 section opens.
-const defaultOpen = computed<boolean>(() => {
-	const editLesson =
-		typeof route.query.editLesson === 'string' ? route.query.editLesson : ''
-	const active = String(
-		route.params.chapterNumber || editLesson || props.selectedLessonNumber || ''
-	)
-	if (!active) return props.section.idx === 1 && currentLevel.value === 1
-	const segments = active.split('-')
-	const pathSegments = sectionPath.value.split('-')
-	if (pathSegments.length > segments.length) return false
-	return pathSegments.every((segment, i) => segment === segments[i])
-})
+const expansionKey = computed(() =>
+	courseOutlineExpansionKey(props.courseName, user.data?.name ?? 'Guest')
+)
+// New sections start closed. Reopening a parent restores each child's own
+// choice instead of expanding the whole active lesson path on every remount.
+const defaultOpen = isSectionExpanded(expansionKey.value, props.section.name)
 
-const canAddSection = computed<boolean>(() => currentLevel.value < MAX_SECTION_DEPTH)
+function toggleSection(wasOpen: boolean, event: MouseEvent): void {
+	if (!props.section.is_scorm_package) {
+		rememberSectionExpansion(expansionKey.value, props.section.name, !wasOpen)
+	}
+	redirectToSection(event)
+}
 
-const isFirstSibling = computed<boolean>(() => (props.position ?? 0) <= 0)
-const isLastSibling = computed<boolean>(
-	() => (props.position ?? 0) >= (props.siblingCount ?? 1) - 1
+const canAddSection = computed<boolean>(
+	() => currentLevel.value < MAX_SECTION_DEPTH
 )
 
 // Direct children in the section's single manual order: lessons and nested
@@ -470,13 +472,11 @@ const mergedChildren = computed<MergedChild[]>(() => {
 	return children.sort((a, b) => a.rowIndex - b.rowIndex)
 })
 
-const onlyLessons = computed<boolean>(
-	() => !props.section.sections?.length
-)
-
 const countsLabel = computed<string>(() => {
-	const sections = props.section.section_count ?? props.section.sections?.length ?? 0
-	const lessons = props.section.lesson_count ?? props.section.lessons?.length ?? 0
+	const sections =
+		props.section.section_count ?? props.section.sections?.length ?? 0
+	const lessons =
+		props.section.lesson_count ?? props.section.lessons?.length ?? 0
 	const parts: string[] = []
 	if (sections) {
 		parts.push(`${sections} ${sections === 1 ? __('section') : __('sections')}`)
@@ -490,7 +490,7 @@ const countsLabel = computed<string>(() => {
 // Legacy chapters keep their lesson-only number badge (above); a section that
 // holds both kinds shows the combined direct counts instead.
 const childIndentClass = computed<string>(() =>
-	currentLevel.value === 1 ? 'ps-8' : 'ps-4'
+	currentLevel.value === 1 ? 'ps-6' : 'ps-4'
 )
 
 const isScormSectionComplete = computed<boolean>(() =>
@@ -514,7 +514,8 @@ const isScormSectionLocked = computed<boolean>(() =>
 
 function isActiveLesson(lessonNumber: string): boolean {
 	if (props.inlineSelect) return props.selectedLessonNumber === lessonNumber
-	const { chapterNumber, lessonNumber: lesson } = parseLessonNumber(lessonNumber)
+	const { chapterNumber, lessonNumber: lesson } =
+		parseLessonNumber(lessonNumber)
 	return (
 		route.params.chapterNumber == chapterNumber &&
 		route.params.lessonNumber == lesson
@@ -547,21 +548,56 @@ function onLessonClick(lesson: OutlineLesson) {
 }
 
 function addLesson() {
+	if (props.creatingLesson) return
 	emit('create-lesson', {
 		chapter: props.section,
 		lessonIdx: (props.section.lessons?.length ?? 0) + 1,
 	})
 }
 
-function reorderSection(direction: 'up' | 'down') {
-	if (direction === 'up' && isFirstSibling.value) return
-	if (direction === 'down' && isLastSibling.value) return
-	emit('reorder-section', { section: props.section, direction })
+// Lesson and section rows share a Sortable group across section levels. Section
+// reparenting itself is committed by the guarded section/root drop target.
+function canTransferChild(
+	_to: unknown,
+	_from: unknown,
+	element: HTMLElement
+): boolean {
+	return (
+		element.classList.contains('outline-lesson-row') ||
+		element.classList.contains('outline-section-row')
+	)
 }
 
-function redirectToSection() {
+function moveChild(event: DraggableEvent) {
+	if (outlineDrag?.finish(event)) return
+	if (!Number.isInteger(event.newIndex)) return
+	if (event.from === event.to && event.oldIndex === event.newIndex) return
+	const child = event.item.__draggable_context.element
+	if ('kind' in child && child.kind === 'section' && child.node) {
+		emit('reorder-section', {
+			section: child.node,
+			parent: props.section.name,
+			idx: event.newIndex,
+		})
+		return
+	}
+	if ('kind' in child && child.kind === 'lesson' && child.lesson) {
+		emit('move-lesson', {
+			...event,
+			item: {
+				...event.item,
+				__draggable_context: {
+					...event.item.__draggable_context,
+					element: child.lesson,
+				},
+			},
+		})
+	}
+}
+
+function redirectToSection(event?: MouseEvent) {
 	if (!props.section.is_scorm_package) return
-	;(event as Event | undefined)?.preventDefault()
+	event?.preventDefault()
 	if (isScormSectionLocked.value) return
 	if (!user.data) {
 		toast.success(__('Please enroll for this course to view this lesson'))
@@ -576,3 +612,41 @@ function redirectToSection() {
 	})
 }
 </script>
+
+<style scoped>
+.outline-actions,
+.outline-grip {
+	opacity: 0;
+	pointer-events: none;
+	transition:
+		opacity 140ms ease,
+		background-color 140ms ease;
+}
+
+.outline-row:hover .outline-actions,
+.outline-row:hover .outline-grip,
+.outline-row:focus-within .outline-actions,
+.outline-row:focus-within .outline-grip {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.outline-row:focus-within {
+	background-color: var(--surface-gray-1);
+}
+
+@media (hover: none) {
+	.outline-actions,
+	.outline-grip {
+		opacity: 1;
+		pointer-events: auto;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.outline-actions,
+	.outline-grip {
+		transition: none;
+	}
+}
+</style>

@@ -1,9 +1,9 @@
 # Copyright (c) 2026, and contributors
 # For license information, please see license.txt
 
-"""Task 28 — course section tree, up to 4 structural levels.
+"""Course section tree: two levels for authoring, legacy outlines read to four.
 
-Covers the owner-confirmed rules: depth 4 counted from the first section under
+Depth is counted from the first section under
 the course (the course root and lessons never count), mixed lesson/section
 children in one order, lessons legal at every level, no migration of existing
 courses, and the depth gate enforced on every write path — Desk-style saves,
@@ -20,13 +20,14 @@ from pathlib import Path
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from lms.lms.api import delete_chapter, move_section, upsert_chapter, update_section_index
+from lms.lms.api import create_lesson, delete_chapter, move_section, update_section_index, upsert_chapter
 from lms.lms.course_import_export import import_course_zip
 from lms.lms.test_helpers import BaseTestUtils
 from lms.lms.utils import (
 	get_course_outline,
 	get_lesson,
 	get_lesson_count,
+	get_lesson_creation_details,
 	get_lesson_index,
 	get_neighbour_lesson,
 	get_ordered_lesson_rows,
@@ -39,6 +40,7 @@ STUDENT = "tree-student@example.com"
 class TestCourseSectionTree(BaseTestUtils):
 	def setUp(self):
 		super().setUp()
+		self._create_user("frappe@example.com", "Frappe", "Teacher", ["Course Creator"])
 		self.course = self._create_course("Section Tree Course")
 		self.instructor = self.course.instructors[0].instructor
 
@@ -101,43 +103,55 @@ class TestCourseSectionTree(BaseTestUtils):
 
 	# -- depth validation (criterion 1) -----------------------------------
 
-	def test_four_levels_save_and_fifth_is_rejected(self):
+	def test_two_levels_save_and_third_is_rejected(self):
 		block = self.make_chapter("Block")
 		chapter = self.make_chapter("Chapter", parent_section=block.name)
-		part = self.make_chapter("Part", parent_section=chapter.name)
-		deep = self.make_chapter("Deep", parent_section=part.name)
 		self.attach_to_course(block, 1)
+		self.attach_section_row(block, chapter, 1)
 
-		fifth = frappe.new_doc("Course Chapter")
-		fifth.update(
+		third = frappe.new_doc("Course Chapter")
+		third.update(
 			{
 				"course": self.course.name,
 				"title": "Too Deep",
-				"parent_section": deep.name,
+				"parent_section": chapter.name,
 			}
 		)
-		self.assertRaises(frappe.ValidationError, fifth.insert)
+		self.assertRaises(frappe.ValidationError, third.insert)
 
-	def test_lesson_is_allowed_at_level_four(self):
-		"""Lessons are leaves: legal under a level-4 section (criterion 4)."""
-		block = self.make_chapter("L4 Block")
-		chapter = self.make_chapter("L4 Chapter", parent_section=block.name)
-		part = self.make_chapter("L4 Part", parent_section=chapter.name)
-		deep = self.make_chapter("L4 Deep", parent_section=part.name)
+	def test_lesson_is_allowed_at_level_two(self):
+		"""Lessons are leaves: legal under a level-2 section."""
+		block = self.make_chapter("L2 Block")
+		chapter = self.make_chapter("L2 Chapter", parent_section=block.name)
 		self.attach_to_course(block, 1)
 		# parent_section carries the structural link; the section rows in the
 		# parents' child tables are what the outline walks, so a fixture that
 		# skips them builds an invisible chain.
 		self.attach_section_row(block, chapter, 1)
-		self.attach_section_row(chapter, part, 1)
-		self.attach_section_row(part, deep, 1)
-		lesson = self._create_lesson("Deep Lesson", deep.name, self.course.name)
-		self.attach_lesson_row(deep, lesson, 1)
+		lesson = self._create_lesson("Deep Lesson", chapter.name, self.course.name)
+		self.attach_lesson_row(chapter, lesson, 1)
 
 		outline = get_course_outline(self.course.name)
-		deep_node = outline[0]["sections"][0]["sections"][0]["sections"][0]
-		self.assertEqual(deep_node["level"], 4)
+		deep_node = outline[0]["sections"][0]
+		self.assertEqual(deep_node["level"], 2)
 		self.assertEqual(deep_node["lessons"][0]["name"], lesson.name)
+
+	def test_legacy_deeper_sections_remain_readable_and_editable_in_place(self):
+		root = self.make_chapter("Legacy Root")
+		child = self.make_chapter("Legacy Child", parent_section=root.name)
+		legacy = self.make_chapter("Legacy Third", parent_section=root.name)
+		self.attach_to_course(root, 1)
+		self.attach_section_row(root, child, 1)
+		legacy.parent_section = child.name
+		legacy.db_update()
+		self.attach_section_row(child, legacy, 1)
+
+		outline = get_course_outline(self.course.name)
+		legacy_node = outline[0]["sections"][0]["sections"][0]
+		self.assertEqual(legacy_node["level"], 3)
+		legacy.title = "Edited Legacy Third"
+		legacy.save()
+		self.assertEqual(frappe.db.get_value("Course Chapter", legacy.name, "title"), "Edited Legacy Third")
 
 	def test_scorm_sections_stay_leaves(self):
 		scorm = self.make_chapter("Scorm Leaf")
@@ -216,9 +230,60 @@ class TestCourseSectionTree(BaseTestUtils):
 		self.attach_lesson_row(nested, nested_lesson, 1)
 
 		rows = get_ordered_lesson_rows(self.course.name)
-		self.assertEqual(
-			[r.name for r in rows], [first.name, nested_lesson.name, second.name]
-		)
+		self.assertEqual([r.name for r in rows], [first.name, nested_lesson.name, second.name])
+
+	def test_editor_resolves_a_lesson_inside_a_nested_section(self):
+		block = self.make_chapter("Editor Block")
+		self.attach_to_course(block, 1)
+		before = self._create_lesson("Before nested section", block.name, self.course.name)
+		nested = self.make_chapter("Editor Nested", parent_section=block.name)
+		self.attach_lesson_row(block, before, 1)
+		self.attach_section_row(block, nested, 2)
+		lesson = self._create_lesson("Nested lesson title", nested.name, self.course.name)
+		self.attach_lesson_row(nested, lesson, 1)
+
+		details = get_lesson_creation_details(self.course.name, "1-1", 1)
+
+		self.assertEqual(details["chapter"]["name"], nested.name)
+		self.assertEqual(details["chapter"]["title"], "Editor Nested")
+		self.assertEqual(details["lesson"]["name"], lesson.name)
+		self.assertEqual(details["lesson"]["title"], "Nested lesson title")
+
+	def test_new_lesson_titles_save_and_reload_at_every_section_level(self):
+		parent = self.make_chapter("Title Level 1")
+		self.attach_to_course(parent, 1)
+		path = "1"
+		for level in range(1, 3):
+			with self.subTest(level=level):
+				lesson_name = create_lesson(parent.name)
+				details = get_lesson_creation_details(self.course.name, path, 1)
+				self.assertEqual(details["lesson"]["name"], lesson_name)
+				title = f"Named lesson at level {level}"
+				frappe.call(
+					"frappe.client.set_value",
+					doctype="Course Lesson",
+					name=lesson_name,
+					fieldname={"title": title},
+				)
+				self.assertEqual(
+					get_lesson_creation_details(self.course.name, path, 1)["lesson"]["title"], title
+				)
+				self.assertEqual(get_lesson(self.course.name, path, "1")["title"], title)
+				if level < 2:
+					child = self.make_chapter(f"Title Level {level + 1}", parent_section=parent.name)
+					self.attach_section_row(parent, child, 2)
+					parent = child
+					path += "-1"
+
+	def test_editor_details_require_authoring_access_to_the_course(self):
+		self.flat_course()
+		other = self._create_user("tree-other-creator@example.com", "Other", "Creator", ["Course Creator"])
+		frappe.set_user(other.name)
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				get_lesson_creation_details(self.course.name, "1", 1)
+		finally:
+			frappe.set_user("Administrator")
 
 	def test_numbering_is_the_section_path(self):
 		block1 = self.make_chapter("Number Block One")
@@ -356,9 +421,7 @@ class TestCourseSectionTree(BaseTestUtils):
 		flat_lesson = self._create_lesson("Dispatch Flat Lesson", flat_two.name, self.course.name)
 		self.attach_lesson_row(flat_two, flat_lesson, 1)
 
-		legacy = frappe.call(
-			"lms.lms.utils.get_lesson", course=self.course.name, chapter="2", lesson="1"
-		)
+		legacy = frappe.call("lms.lms.utils.get_lesson", course=self.course.name, chapter="2", lesson="1")
 		self.assertEqual(legacy["name"], flat_lesson.name)
 		self.assertEqual(get_lesson_index(legacy["name"]), "2-1")
 
@@ -404,32 +467,27 @@ class TestCourseSectionTree(BaseTestUtils):
 	def test_move_section_enforces_the_depth_rule(self):
 		block = self.make_chapter("Move Block")
 		chapter = self.make_chapter("Move Chapter", parent_section=block.name)
-		part = self.make_chapter("Move Part", parent_section=chapter.name)
 		self.attach_to_course(block, 1)
 		self.attach_section_row(block, chapter, 1)
-		self.attach_section_row(chapter, part, 1)
 
-		# other_root(1) → other_mid(2) → other_deep(3): targets at two depths.
+		# other_root(1) → other_mid(2)
 		other_root = self.make_chapter("Move Other Root")
 		other_mid = self.make_chapter("Move Other Mid", parent_section=other_root.name)
-		other_deep = self.make_chapter("Move Other Deep", parent_section=other_mid.name)
 		self.attach_to_course(other_root, 2)
 		self.attach_section_row(other_root, other_mid, 1)
-		self.attach_section_row(other_mid, other_deep, 1)
 
-		# block carries a 3-level subtree (block → chapter → part): under a
-		# level-2 section it would reach level 5, under a level-3 one level 6.
+		# Moving a two-level subtree under level 2 exceeds the cap; moving the
+		# child under level 2 would create a third level.
 		self.assertRaises(frappe.ValidationError, move_section, block.name, other_mid.name)
-		self.assertRaises(frappe.ValidationError, move_section, block.name, other_deep.name)
 		# And a section cannot land inside its own subtree.
-		self.assertRaises(frappe.ValidationError, move_section, block.name, part.name)
+		self.assertRaises(frappe.ValidationError, move_section, block.name, chapter.name)
+		self.assertRaises(frappe.ValidationError, move_section, chapter.name, other_mid.name)
 
-		# A leaf section (height 1) under the level-3 section sits exactly at
-		# level 4: the deepest legal move.
-		move_section(part.name, other_deep.name)
+		# A section may move from depth 2 to root, becoming a level-1 section.
+		move_section(chapter.name, None)
 		self.assertEqual(
-			frappe.db.get_value("Course Chapter", part.name, "parent_section"),
-			other_deep.name,
+			frappe.db.get_value("Course Chapter", chapter.name, "parent_section"),
+			None,
 		)
 
 	def test_move_section_to_root_and_back(self):
@@ -519,9 +577,7 @@ class TestCourseSectionTree(BaseTestUtils):
 		self.assertFalse(frappe.db.exists("Course Chapter", nested.name))
 		self.assertFalse(frappe.db.exists("Course Lesson", top.name))
 		self.assertFalse(frappe.db.exists("Course Lesson", deep.name))
-		self.assertFalse(
-			frappe.db.exists("Lesson Reference", {"parent": ["in", [block.name, nested.name]]})
-		)
+		self.assertFalse(frappe.db.exists("Lesson Reference", {"parent": ["in", [block.name, nested.name]]}))
 		self.assertFalse(
 			frappe.db.exists("Chapter Reference", {"chapter": block.name, "parent": self.course.name})
 		)
@@ -550,9 +606,7 @@ class TestCourseSectionTree(BaseTestUtils):
 		# Attach each child to its parent through the parent's child rows, the
 		# way a real export serialises the tree.
 		for level in range(1, depth):
-			chapters[level - 1]["lessons"] = [
-				{"section": f"{level + 1:04d} Level {level + 1}"}
-			]
+			chapters[level - 1]["lessons"] = [{"section": f"{level + 1:04d} Level {level + 1}"}]
 
 		fd, path = tempfile.mkstemp(suffix=".zip")
 		os.close(fd)
@@ -584,23 +638,23 @@ class TestCourseSectionTree(BaseTestUtils):
 		shutil.move(path, os.path.join(files_dir, archive_name))
 		return f"private/files/{archive_name}", Path(files_dir) / archive_name
 
-	def test_import_accepts_four_levels(self):
-		rel_path, archive_file = self._zip_with_depth(4)
+	def test_import_accepts_two_levels(self):
+		rel_path, archive_file = self._zip_with_depth(2)
 		try:
 			course_name = import_course_zip(rel_path)
 			chapters = frappe.get_all(
 				"Course Chapter", {"course": course_name}, ["name", "parent_section", "title"]
 			)
-			self.assertEqual(len(chapters), 4)
+			self.assertEqual(len(chapters), 2)
 			roots = [c for c in chapters if not c.parent_section]
 			self.assertEqual(len(roots), 1)
-			deepest = [c for c in chapters if c.title == "Import Level 4"][0]
+			deepest = [c for c in chapters if c.title == "Import Level 2"][0]
 			self.assertTrue(deepest.parent_section)
 		finally:
 			archive_file.unlink(missing_ok=True)
 
-	def test_import_refuses_five_levels(self):
-		rel_path, archive_file = self._zip_with_depth(5)
+	def test_import_refuses_three_levels(self):
+		rel_path, archive_file = self._zip_with_depth(3)
 		try:
 			frappe.db.savepoint("t28_refused_import")
 			with self.assertRaises(frappe.ValidationError):
@@ -608,10 +662,8 @@ class TestCourseSectionTree(BaseTestUtils):
 			# A refused import must leave nothing behind once the failed request
 			# rolls back. The HTTP layer achieves that by rolling the whole
 			# request back; inside the test runner's per-test transaction the
-		# equivalent is a rollback to the savepoint taken before the attempt.
+			# equivalent is a rollback to the savepoint taken before the attempt.
 			frappe.db.rollback(save_point="t28_refused_import")
-			self.assertFalse(
-				frappe.db.exists("LMS Course", {"title": "Import Depth Course"})
-			)
+			self.assertFalse(frappe.db.exists("LMS Course", {"title": "Import Depth Course"}))
 		finally:
 			archive_file.unlink(missing_ok=True)

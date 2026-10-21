@@ -24,7 +24,9 @@
 			</div>
 		</div>
 
-		<ul class="flex-1 overflow-y-auto px-2 py-3 list-none">
+		<ul
+			class="flex-1 overflow-y-auto px-2 py-3 list-none [scrollbar-gutter:stable]"
+		>
 			<li v-for="chapter in outline.data || []" :key="chapter.name">
 				<SidebarSection
 					:section="chapter"

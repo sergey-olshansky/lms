@@ -27,7 +27,10 @@
 			</div>
 		</div>
 
-		<aside v-if="!isMobile" class="border-s overflow-y-auto">
+		<aside
+			v-if="!isMobile"
+			class="border-s overflow-y-auto [scrollbar-gutter:stable]"
+		>
 			<SkeletonLoader
 				v-if="outline.loading && !outline.data"
 				variant="editor-sidebar"
@@ -278,6 +281,18 @@ watch(() => outline.data, pickInitialLesson, { immediate: true })
 watch(
 	() => outline.data,
 	(chapters) => {
+		// Positions change on reorder/reparent, while the lesson name stays stable.
+		// Keep the open editor, stored selection and reload URL on that lesson.
+		const current = selected.value
+		const relocated = current?.name
+			? flattenLessons(chapters).find((lesson) => lesson.name === current.name)
+			: null
+		if (relocated && relocated.number !== current.number) {
+			setSelectedFromNumber(relocated.number)
+			if (props.course?.data?.name)
+				storeLesson(props.course.data.name, relocated.number)
+			return
+		}
 		if (isSelectionStale(selected.value, chapters)) {
 			selected.value = null
 			if (route.query.editLesson) {
@@ -332,7 +347,7 @@ watch(
 		}
 		const number = route.query.editLesson || selectedNumber
 		if (!courseName || !number) return
-		const [chapterNumber, lessonNumber] = String(number).split('-')
+		const { chapterNumber, lessonNumber } = parseLessonNumber(String(number))
 		if (!chapterNumber || !lessonNumber) return
 		legacyLessonModeHandled = true
 		router.replace({
@@ -356,7 +371,7 @@ const isDirty = computed(() => Boolean(lessonFormRef.value?.isDirty))
 // loaded, rather than from the LessonForm child. Otherwise the buttons
 // flicker out on every hop while the child remounts and refetches.
 const flatLessonNumbers = computed(() =>
-	(outline.data ?? []).flatMap((c) => c.lessons?.map((l) => l.number) ?? [])
+	flattenLessons(outline.data).map((lesson) => lesson.number)
 )
 const selectedIndex = computed(() =>
 	selected.value?.number
@@ -375,7 +390,7 @@ const lessonIndex = computed(() =>
 )
 
 function selectByNumber(number) {
-	const [chapterNumber, lessonNumber] = number.split('-')
+	const { chapterNumber, lessonNumber } = parseLessonNumber(number)
 	onSelectLesson({ chapterNumber, lessonNumber })
 }
 function goPrev() {

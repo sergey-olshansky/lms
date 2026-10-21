@@ -13,6 +13,7 @@ const editorState = vi.hoisted(() => ({
 	// initial load never completes (initialLoadComplete stays false), modelling a
 	// title autosave that fires before the saved notes have rendered.
 	holdInstructorReady: false,
+	releaseInstructorReady: null as null | (() => void),
 	// When true, the body editor's save() rejects, modelling an EditorJS instance
 	// being destroyed mid-save during teardown.
 	rejectBodySave: false,
@@ -70,7 +71,9 @@ vi.mock('@/components/BlockEditor.vue', async () => {
 				expose({
 					isReady: () =>
 						field === 'instructor_content' && editorState.holdInstructorReady
-							? new Promise(() => {})
+							? new Promise<void>((resolve) => {
+									editorState.releaseInstructorReady = resolve
+							  })
 							: Promise.resolve(),
 					render: async () => {},
 					focus: () => {},
@@ -323,6 +326,20 @@ describe('LessonForm teardown autosave', () => {
 		expect(editLesson.lastParams.fieldname.instructor_content).toBe(
 			STORED_NOTES
 		)
+	})
+
+	it('keeps a title edit dirty when initial editor loading completes afterward', async () => {
+		editorState.holdInstructorReady = true
+		wrapper = await mountLoaded()
+		await editTitle(wrapper, 'Typed while loading')
+		editorState.releaseInstructorReady!()
+		await flushPromises()
+		expect((wrapper.vm as any).isDirty).toBe(true)
+		wrapper.unmount()
+		await flushPromises()
+		const editLesson = findResource('frappe.client.set_value')
+		expect(editLesson.submit).toHaveBeenCalledTimes(1)
+		expect(editLesson.lastParams.fieldname.title).toBe('Typed while loading')
 	})
 
 	it('does not save the lesson on teardown once it has been marked deleted', async () => {

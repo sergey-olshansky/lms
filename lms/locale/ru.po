@@ -13003,20 +13003,20 @@ msgid "Inside: {0}"
 msgstr "Внутри: {0}"
 
 #: frontend/src/components/Modals/SectionFormModal.vue
-msgid "Level {0} of 4"
-msgstr "Уровень {0} из 4"
+msgid "Level {0} of 2"
+msgstr "Уровень {0} из 2"
 
 #: frontend/src/components/Modals/MoveSectionModal.vue
 msgid "Level {0}"
 msgstr "Уровень {0}"
 
 #: frontend/src/components/SectionRow.vue frontend/src/components/Modals/MoveSectionModal.vue
-msgid "Maximum depth reached — 4 section levels"
-msgstr "Достигнута максимальная глубина — 4 уровня разделов"
+msgid "Maximum depth reached — 2 section levels"
+msgstr "Достигнута максимальная глубина — 2 уровня разделов"
 
 #: lms/lms/doctype/course_chapter/course_chapter.py lms/lms/api.py lms/lms/course_import_export.py
-msgid "Cannot save: this would exceed 4 section levels"
-msgstr "Нельзя сохранить: получится глубина больше 4 уровней"
+msgid "Cannot save: this would exceed 2 section levels"
+msgstr "Нельзя сохранить: получится глубина больше 2 уровней"
 
 #: frontend/src/components/SectionRow.vue frontend/src/components/Modals/MoveSectionModal.vue
 msgid "Move to…"

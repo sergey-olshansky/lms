@@ -343,8 +343,8 @@ const lessonDetails = createResource({
 			Promise.all([addLessonContent(data), addInstructorNotes(data)]).then(
 				() => {
 					nextTick(() => {
-						// Loaded content isn't user input; arm autosave after render.
-						isDirty.value = false
+						// Editor render events are ignored by markDirty until this point.
+						// Keep any title the user typed while the editors were loading dirty.
 						initialLoadComplete = true
 						// A freshly created lesson opens empty as "Untitled lesson".
 						// Focus the title so it can be named (and so the block editor

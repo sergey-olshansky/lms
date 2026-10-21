@@ -3,6 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import SectionRow from '@/components/SectionRow.vue'
 import type { OutlineChapter } from '@/types'
+import {
+	courseOutlineExpansionKey,
+	rememberSectionExpansion,
+} from '@/utils/courseOutlineExpansion'
+
+const expansionKey = courseOutlineExpansionKey('course-1', 'admin@example.com')
 
 const pushMock = vi.hoisted(() => vi.fn())
 const focusMock = vi.hoisted(() => vi.fn())
@@ -40,7 +46,9 @@ vi.mock('frappe-ui', () => ({
 
 vi.mock('vuedraggable', () => ({
 	default: {
-		props: ['list'],
+		name: 'Draggable',
+		props: ['list', 'group', 'handle', 'disabled'],
+		emits: ['end'],
 		template: `
 			<div>
 				<div v-for="item in list" :key="item.key">
@@ -59,7 +67,9 @@ const section: OutlineChapter = {
 	idx: 2,
 	level: 1,
 	is_scorm_package: 0 as const,
-	lessons: [{ name: 'LESSON-1', title: 'Lesson 1', number: '2-1', position: 1 }],
+	lessons: [
+		{ name: 'LESSON-1', title: 'Lesson 1', number: '2-1', position: 1 },
+	],
 }
 
 const mountRow = (
@@ -84,6 +94,7 @@ const mountRow = (
 	})
 
 beforeEach(() => {
+	localStorage.clear()
 	pushMock.mockReset()
 	focusMock.mockReset()
 })
@@ -117,24 +128,69 @@ describe('SectionRow inline rename', () => {
 
 describe('SectionRow lesson count', () => {
 	const count = (allowEdit: boolean) =>
-		mountRow(section, allowEdit).get('span.text-ink-gray-5').classes()
+		mountRow(section, allowEdit).get('[data-testid="section-count"]')
 
-	it('gives way to the delete action on hover and on touch', () => {
-		expect(count(true)).toEqual(
-			expect.arrayContaining([
-				'group-hover:hidden',
-				'[@media(hover:none)]:hidden',
-			])
-		)
+	it('keeps the count visible inline with the section title', () => {
+		expect(count(true).text()).toBe('1 lesson')
+		expect(count(true).classes()).not.toContain('group-hover:hidden')
+		expect(count(true).classes()).not.toContain('[@media(hover:none)]:hidden')
 	})
 
 	it('stays visible when the section is not editable', () => {
-		expect(count(false)).not.toContain('group-hover:hidden')
-		expect(count(false)).not.toContain('[@media(hover:none)]:hidden')
+		expect(count(false).text()).toBe('1 lesson')
+		expect(count(false).classes()).not.toContain('group-hover:hidden')
+		expect(count(false).classes()).not.toContain('[@media(hover:none)]:hidden')
+	})
+})
+
+describe('SectionRow editor actions', () => {
+	it('prevents duplicate lesson creation while the first request is pending', async () => {
+		const wrapper = mountRow({ ...section, idx: 1 }, true, {
+			creatingLesson: true,
+		})
+		const add = wrapper.get('button[aria-label="Add Lesson"]')
+		expect((add.element as HTMLButtonElement).disabled).toBe(true)
+		await add.trigger('click')
+		expect(wrapper.emitted('create-lesson')).toBeUndefined()
+		await wrapper.setProps({ creatingLesson: false })
+		await add.trigger('click')
+		expect(wrapper.emitted('create-lesson')).toHaveLength(1)
+	})
+
+	it('keeps the drag affordance left and actions right on the section row', () => {
+		const wrapper = mountRow()
+
+		expect(wrapper.find('button[aria-label="Move up"]').exists()).toBe(false)
+		expect(wrapper.find('button[aria-label="Move down"]').exists()).toBe(false)
+		expect(wrapper.find('button[aria-label="Move to…"]').exists()).toBe(false)
+		expect(wrapper.find('button[aria-label="Rename"]').exists()).toBe(false)
+		expect(wrapper.get('[role="group"]').classes()).toContain('outline-actions')
+		expect(wrapper.get('[role="group"]').findAll('button')).toHaveLength(3)
+		expect(wrapper.get('.outline-section-header').classes()).toContain(
+			'outline-drag-handle-level-1'
+		)
+		expect(wrapper.get('.outline-section-header').attributes('data-sortable-level')).toBe('1')
+	})
+
+	it('wraps long section names instead of truncating them beside actions', () => {
+		const wrapper = mountRow({
+			...section,
+			title:
+				'A very long section name that needs to remain distinguishable in the editor',
+		})
+
+		const title = wrapper.get('[title^="A very long section name"]')
+		expect(title.classes()).toContain('whitespace-normal')
+		expect(title.classes()).toContain('break-words')
+		expect(title.classes()).toContain('font-semibold')
+		expect(title.text()).toContain(
+			'A very long section name that needs to remain distinguishable in the editor'
+		)
 	})
 })
 
 describe('SectionRow locked lesson', () => {
+	beforeEach(() => rememberSectionExpansion(expansionKey, section.name, true))
 	it('renders a lock and no router-link for a locked lesson', () => {
 		const wrapper = mountRow({
 			...section,
@@ -224,31 +280,28 @@ describe('SectionRow locked lesson', () => {
 	})
 
 	it('does not emit select-lesson when a locked inline row is clicked', async () => {
-		const wrapper = mount(
-			SectionRow,
-			{
-				props: {
-					section: {
-						...section,
-						idx: 1,
-						lessons: [
-							{
-								name: 'LESSON-1',
-								title: 'Lesson 1',
-								number: '2-1',
-								locked: 1,
-							},
-						],
-					},
-					courseName: 'course-1',
-					inlineSelect: true,
+		const wrapper = mount(SectionRow, {
+			props: {
+				section: {
+					...section,
+					idx: 1,
+					lessons: [
+						{
+							name: 'LESSON-1',
+							title: 'Lesson 1',
+							number: '2-1',
+							locked: 1,
+						},
+					],
 				},
-				global: {
-					mocks: { __: (s: string) => s },
-					provide: { $user: { data: { name: 'admin@example.com' } } },
-				},
-			}
-		)
+				courseName: 'course-1',
+				inlineSelect: true,
+			},
+			global: {
+				mocks: { __: (s: string) => s },
+				provide: { $user: { data: { name: 'admin@example.com' } } },
+			},
+		})
 
 		await wrapper.get('.cursor-not-allowed').trigger('click')
 
@@ -257,6 +310,10 @@ describe('SectionRow locked lesson', () => {
 })
 
 describe('SectionRow mixed children (task 28)', () => {
+	beforeEach(() => {
+		rememberSectionExpansion(expansionKey, 'CH-1', true)
+		rememberSectionExpansion(expansionKey, 'CH-EMPTY', true)
+	})
 	const mixed: OutlineChapter = {
 		name: 'CH-1',
 		title: 'Mixed',
@@ -276,7 +333,12 @@ describe('SectionRow mixed children (task 28)', () => {
 				level: 2,
 				position: 2,
 				lessons: [
-					{ name: 'LESSON-C', title: 'Nested lesson', number: '1-1-1', position: 1 },
+					{
+						name: 'LESSON-C',
+						title: 'Nested lesson',
+						number: '1-1-1',
+						position: 1,
+					},
 				],
 			},
 		],
@@ -285,7 +347,9 @@ describe('SectionRow mixed children (task 28)', () => {
 	it('interleaves lessons and nested sections in the single child order', () => {
 		const wrapper = mountRow(mixed)
 
-		const items = wrapper.findAll('[data-testid="outline-lesson"], .outline-section-row')
+		const items = wrapper.findAll(
+			'[data-testid="outline-lesson"], .outline-section-row'
+		)
 		expect(items).toHaveLength(3)
 		expect(items[0].text()).toContain('First')
 		expect(items[1].text()).toContain('Nested')
@@ -313,41 +377,130 @@ describe('SectionRow mixed children (task 28)', () => {
 	})
 })
 
-describe('SectionRow depth limit (task 28)', () => {
-	it('disables adding a section at level 4 with a screen-reader reason', () => {
+describe('SectionRow depth limit', () => {
+	it('hides the add-section action at level 2', () => {
 		const wrapper = mountRow({
-			name: 'CH-L4',
+			name: 'CH-L2',
 			title: 'Deepest',
 			idx: 1,
-			level: 4,
+			level: 2,
 			lessons: [],
 			sections: [],
 		})
 
-		const affordance = wrapper
-			.findAll('[aria-disabled="true"]')
-			.find((el) => el.classes().includes('lucide-folder-plus'))
-		expect(affordance).toBeDefined()
-
-		expect(wrapper.text()).toContain('Maximum depth reached — 4 section levels')
+		expect(wrapper.find('button[aria-label="Add Section"]').exists()).toBe(false)
+		expect(wrapper.get('[role="group"]').findAll('button')).toHaveLength(2)
 	})
 
-	it('offers adding a section at level 3 and emits the parent on click', async () => {
-		const level3: OutlineChapter = {
-			name: 'CH-L3',
-			title: 'Third level',
+	it('offers adding a section at level 1 and emits the parent on click', async () => {
+		const level1: OutlineChapter = {
+			name: 'CH-L1',
+			title: 'First level',
 			idx: 1,
-			level: 3,
+			level: 1,
 			lessons: [],
 			sections: [],
 		}
-		const wrapper = mountRow(level3)
+		const wrapper = mountRow(level1)
 
 		const affordance = wrapper.find('.lucide-folder-plus')
 		expect(affordance.exists()).toBe(true)
 		expect(affordance.attributes('aria-disabled')).toBeUndefined()
 
 		await affordance.trigger('click')
-		expect(wrapper.emitted('add-section')?.[0]).toEqual([level3])
+		expect(wrapper.emitted('add-section')?.[0]).toEqual([level1])
+	})
+
+	it('renders nested headings bold at lesson size and keeps counts inline', () => {
+		const wrapper = mountRow({
+			name: 'CH-L2',
+			title: 'Nested section',
+			idx: 1,
+			level: 2,
+			lessons: [{ name: 'LESSON-2', title: 'Lesson 2', number: '1-1-1' }],
+		})
+		const title = wrapper.get('[title="Nested section"]')
+		const count = wrapper.get('[data-testid="section-count"]')
+
+		expect(title.classes()).toContain('text-sm')
+		expect(title.classes()).toContain('font-bold')
+		expect(count.text()).toBe('1 lesson')
+		expect(count.element.parentElement).toBe(title.element)
+		expect(wrapper.get('.outline-section-header').attributes('data-sortable-level')).toBe('2')
+	})
+})
+
+describe('SectionRow drag events', () => {
+	beforeEach(() => rememberSectionExpansion(expansionKey, section.name, true))
+	const parent: OutlineChapter = {
+		...section,
+		idx: 1,
+		sections: [
+			{ name: 'SUB-1', title: 'Nested', idx: 1, level: 2, position: 2 },
+		],
+	}
+
+	it('reorders the dragged nested section instead of its ancestor', () => {
+		const wrapper = mountRow(parent)
+		const draggable = wrapper.findComponent({ name: 'Draggable' })
+		const child = draggable.props('list')[1]
+		const container = { dataset: { chapter: parent.name } }
+
+		draggable.vm.$emit('end', {
+			item: { __draggable_context: { element: child } },
+			from: container,
+			to: container,
+			oldIndex: 1,
+			newIndex: 0,
+		})
+
+		expect(wrapper.emitted('reorder-section')).toEqual([
+			[{ section: parent.sections![0], parent: parent.name, idx: 0 }],
+		])
+		expect(wrapper.emitted('move-lesson')).toBeUndefined()
+	})
+
+	it('allows section and lesson rows to enter other section lists', () => {
+		const wrapper = mountRow(parent)
+		const draggable = wrapper.findComponent({ name: 'Draggable' })
+		const group = draggable.props('group')
+		const lesson = document.createElement('div')
+		lesson.className = 'outline-lesson-row'
+		const nested = document.createElement('div')
+		nested.className = 'outline-section-row'
+
+		for (const permission of [group.pull, group.put]) {
+			expect(permission(null, null, lesson)).toBe(true)
+			expect(permission(null, null, nested)).toBe(true)
+		}
+
+		draggable.vm.$emit('end', {
+			item: { __draggable_context: { element: draggable.props('list')[0] } },
+			from: { dataset: { chapter: parent.name } },
+			to: { dataset: { chapter: 'OTHER' } },
+			oldIndex: 0,
+			newIndex: 1,
+		})
+		expect(wrapper.emitted('move-lesson')?.[0][0]).toMatchObject({
+			item: { __draggable_context: { element: parent.lessons![0] } },
+			from: { dataset: { chapter: parent.name } },
+			to: { dataset: { chapter: 'OTHER' } },
+			newIndex: 1,
+		})
+	})
+
+	it('does not submit an unchanged order after a cancelled drag', () => {
+		const wrapper = mountRow(parent)
+		const draggable = wrapper.findComponent({ name: 'Draggable' })
+		const container = { dataset: { chapter: parent.name } }
+		draggable.vm.$emit('end', {
+			item: { __draggable_context: { element: draggable.props('list')[1] } },
+			from: container,
+			to: container,
+			oldIndex: 1,
+			newIndex: 1,
+		})
+		expect(wrapper.emitted('reorder-section')).toBeUndefined()
+		expect(wrapper.emitted('move-lesson')).toBeUndefined()
 	})
 })

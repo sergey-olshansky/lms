@@ -20,8 +20,9 @@ class CourseChapter(Document):
 		"""The one gate every save path shares: Desk, API and data import.
 
 		Depth counts this chapter plus its ancestors: a top-level section is level
-		1, a section nested three sections deep is level 4, and a fifth level is
-		refused no matter which write path proposed it.
+		1, and authoring is capped at two levels. Existing deeper sections remain
+		readable and can be edited without changing their parent; no migration is
+		run when this cap changes.
 		"""
 		if not self.parent_section:
 			return
@@ -46,6 +47,10 @@ class CourseChapter(Document):
 			frappe.throw(_("SCORM sections cannot contain sections."))
 
 		depth = 1
+		exceeds_limit = False
+		existing_parent = (
+			frappe.db.get_value("Course Chapter", self.name, "parent_section") if self.name else None
+		)
 		current = self.parent_section
 		seen = {self.name} if self.name else set()
 		while current:
@@ -54,11 +59,16 @@ class CourseChapter(Document):
 			seen.add(current)
 			depth += 1
 			if depth > MAX_SECTION_DEPTH:
-				frappe.throw(
-					_("Cannot save: this would exceed 4 section levels"),
-					frappe.ValidationError,
-				)
+				exceeds_limit = True
 			current = frappe.db.get_value("Course Chapter", current, "parent_section")
+
+		# Keep legacy deep trees editable in place, but don't allow new trees or
+		# reparenting to deepen past the current cap.
+		if exceeds_limit and self.parent_section != existing_parent:
+			frappe.throw(
+				_("Cannot save: this would exceed 2 section levels"),
+				frappe.ValidationError,
+			)
 
 	def validate_children(self):
 		"""A SCORM section is a leaf: no nested sections may point out of it."""

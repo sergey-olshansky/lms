@@ -8,14 +8,17 @@
 				label: __('Move'),
 				variant: 'solid',
 				loading: saving,
-				disabled: !selectedTarget,
+				disabled: selectedTarget === null,
 				onClick: () => submit(),
 			},
 		]"
 	>
 		<template #default>
 			<div class="space-y-3" data-testid="move-section-dialog">
-				<div class="text-sm text-ink-gray-6 truncate" :title="sectionTitle">
+				<div
+					class="text-sm text-ink-gray-6 whitespace-normal break-words"
+					:title="sectionTitle"
+				>
 					{{ sectionTitle }}
 				</div>
 				<div class="text-sm text-ink-gray-5">
@@ -31,14 +34,21 @@
 					<button
 						v-if="matches(courseLabel)"
 						type="button"
-						class="flex w-full items-center justify-between gap-2 px-3 py-2 text-start text-sm hover:bg-surface-gray-2"
+						class="flex w-full items-start justify-between gap-2 px-3 py-2 text-start text-sm hover:bg-surface-gray-2"
 						:class="selectedTarget === '' ? 'bg-surface-gray-2' : ''"
 						:data-testid="`move-target-root`"
 						@click="selectTarget('')"
 					>
-						<span class="truncate text-base-medium">{{ courseLabel }}</span>
+						<span
+							class="min-w-0 flex-1 whitespace-normal break-words text-base-medium"
+							:title="courseLabel"
+							>{{ courseLabel }}</span
+						>
 					</button>
-					<template v-for="candidate in filteredCandidates" :key="candidate.name">
+					<template
+						v-for="candidate in filteredCandidates"
+						:key="candidate.name"
+					>
 						<Tooltip
 							:text="candidate.blockedReason ?? __('Move to…')"
 							side="bottom"
@@ -46,8 +56,13 @@
 						>
 							<button
 								type="button"
-								class="flex w-full items-center justify-between gap-2 px-3 py-2 text-start text-sm"
-								:style="{ paddingInlineStart: `${candidate.level * 12 + 12}px` }"
+								class="flex w-full items-start justify-between gap-2 px-3 py-2 text-start text-sm"
+								:style="{
+									paddingInlineStart: `${Math.min(
+										candidate.level * 8 + 12,
+										36
+									)}px`,
+								}"
 								:class="[
 									candidate.blockedReason
 										? 'cursor-not-allowed opacity-50'
@@ -59,13 +74,17 @@
 								:data-testid="`move-target-${candidate.name}`"
 								@click="selectTarget(candidate.name)"
 							>
-								<span class="truncate">{{ candidate.title }}</span>
-								<span class="flex shrink-0 items-center gap-2">
+								<span
+									class="min-w-0 flex-1 whitespace-normal break-words leading-5"
+									:title="candidate.title"
+									>{{ candidate.title }}</span
+								>
+								<span class="flex shrink-0 items-center gap-2 pt-0.5">
 									<span class="text-ink-gray-5">
 										{{ __('Level {0}').format(candidate.level) }}
 									</span>
 								</span>
-						</button>
+							</button>
 						</Tooltip>
 						<span v-if="candidate.blockedReason" class="sr-only">
 							{{ candidate.blockedReason }}
@@ -86,7 +105,7 @@ import type { OutlineChapter, Resource } from '@/types'
 import { flattenSections } from '@/utils/courseOutline'
 
 // Authoring maximum, mirrored from the server contract in SectionRow.
-const MAX_SECTION_DEPTH = 4
+const MAX_SECTION_DEPTH = 2
 
 interface MoveCandidate {
 	name: string
@@ -96,9 +115,9 @@ interface MoveCandidate {
 }
 
 /**
- * Reparents a section via an explicit target picker (design §4.5): a compact
- * tree of the course with a search field. Candidates that would push the
- * moved subtree past 4 levels — and SCORM sections, which are leaves — are
+	 * Reparents a section via an explicit target picker (design §4.5): a compact
+	 * tree of the course with a search field. Candidates that would push the
+	 * moved subtree past 2 levels — and SCORM sections, which are leaves — are
  * disabled with the reason.
  */
 const props = defineProps<{
@@ -115,7 +134,9 @@ const movedSection = ref<OutlineChapter | null>(null)
 
 const sectionTitle = computed<string>(() => movedSection.value?.title ?? '')
 
-const courseLabel = computed<string>(() => props.courseTitle || props.courseName)
+const courseLabel = computed<string>(
+	() => props.courseTitle || props.courseName
+)
 
 // Height of the moved subtree counting itself: a leaf section is 1.
 const subtreeHeight = computed<number>(() => {
@@ -138,7 +159,7 @@ const candidates = computed<MoveCandidate[]>(() => {
 		const level = section.level ?? 1
 		let blockedReason: string | null = null
 		if (level + subtreeHeight.value > MAX_SECTION_DEPTH) {
-			blockedReason = __('Maximum depth reached — 4 section levels')
+			blockedReason = __('Maximum depth reached — 2 section levels')
 		}
 		list.push({
 			name: section.name,
@@ -192,7 +213,8 @@ function selectTarget(target: string) {
 }
 
 function submit() {
-	if (!movedSection.value || selectedTarget.value === null || saving.value) return
+	if (!movedSection.value || selectedTarget.value === null || saving.value)
+		return
 	saving.value = true
 	moveSection.submit({
 		section: movedSection.value.name,

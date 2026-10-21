@@ -12,8 +12,13 @@ from frappe import _
 from frappe.utils import escape_html, validate_email_address
 from frappe.utils.file_manager import is_safe_path
 
+from lms.lms.utils import (
+	MAX_SECTION_DEPTH,
+	get_editorjs_blocks,
+	get_outline_sections,
+	has_moderator_role,
+)
 from lms.lms.utils import create_user as create_lms_user
-from lms.lms.utils import get_editorjs_blocks, get_outline_sections, has_moderator_role
 
 # What a course legitimately embeds. Active-document types (.html, .xhtml, .js, .xsl)
 # would be written to /files/ and served inline, which is stored XSS on the LMS origin;
@@ -637,9 +642,7 @@ def create_chapter_docs(zip_file, course_name):
 				chapter_doc.course = course_name
 				chapter_doc.insert(ignore_permissions=True)
 				chapter_docs.append(chapter_doc)
-				chapter_info.append(
-					{"old_name": old_name, "parent_old": parent_old, "doc": chapter_doc}
-				)
+				chapter_info.append({"old_name": old_name, "parent_old": parent_old, "doc": chapter_doc})
 	return chapter_docs, chapter_info
 	return chapter_docs
 
@@ -1043,7 +1046,7 @@ def add_lessons_to_chapters(zip_file, course_name, chapter_docs, chapter_info):
 	Rows are appended in archive order, so the exported interleaving of lessons
 	and nested sections survives. Chapters then save parents-first, which is
 	what lets CourseChapter.validate walk a complete parent chain: a tree that
-	claims more than 4 section levels is refused here, rolling the whole import
+	claims more than MAX_SECTION_DEPTH levels is refused here, rolling the whole import
 	back with it.
 	"""
 	old_to_new = {info["old_name"]: info["doc"].name for info in chapter_info}
@@ -1086,9 +1089,9 @@ def add_lessons_to_chapters(zip_file, course_name, chapter_docs, chapter_info):
 					new_section = old_to_new.get(child["section"])
 					if new_section:
 						chapter_doc.append("lessons", {"section": new_section})
-			if imported_depth(info) > 4:
+			if imported_depth(info) > MAX_SECTION_DEPTH:
 				frappe.throw(
-					_("Cannot save: this would exceed 4 section levels"),
+					_("Cannot save: this would exceed 2 section levels"),
 					frappe.ValidationError,
 				)
 
@@ -1103,7 +1106,6 @@ def add_lessons_to_chapters(zip_file, course_name, chapter_docs, chapter_info):
 
 def add_chapter_to_course(course_doc, chapter_docs, chapter_info):
 	course_doc.reload()
-	old_to_new = {info["old_name"]: info["doc"].name for info in chapter_info}
 	info_by_old = {info["old_name"]: info for info in chapter_info}
 	for chapter_doc in chapter_docs:
 		info = next((i for i in chapter_info if i["doc"].name == chapter_doc.name), None)

@@ -95,7 +95,7 @@ export interface OutlineChapter {
 	name: string
 	title: string
 	idx: number
-	/** Structural depth of the section, 1..4; the course root is not counted. */
+	/** Stored structural depth, 1..4 for legacy rows; new sections are limited to 2. */
 	level?: number
 	/** Position of the child-table row that places this section inside its
 	 * parent's single manual order of mixed lessons and sections. */

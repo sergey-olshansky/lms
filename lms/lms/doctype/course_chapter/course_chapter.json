@@ -108,7 +108,7 @@
    "read_only": 1
   },
   {
-   "description": "Leave empty for a top-level section. Nested sections are optional and counted up to 4 levels below the course.",
+   "description": "Leave empty for a top-level section. Nested sections are optional and counted up to 2 levels below the course.",
    "fieldname": "parent_section",
    "fieldtype": "Link",
    "label": "Parent Section",
