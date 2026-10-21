@@ -144,11 +144,10 @@ describe('SectionRow editor actions', () => {
 		const add = wrapper.get('button[aria-label="Add Lesson"]')
 		expect((add.element as HTMLButtonElement).disabled).toBe(true)
 		await add.trigger('click')
-		const fallback = wrapper
-			.findAll('button')
-			.find((button) => button.text() === 'Add Lesson')!
-		await fallback.trigger('click')
 		expect(wrapper.emitted('create-lesson')).toBeUndefined()
+		await wrapper.setProps({ creatingLesson: false })
+		await add.trigger('click')
+		expect(wrapper.emitted('create-lesson')).toHaveLength(1)
 	})
 
 	it('keeps the move action visible and exposes reorder controls to the keyboard', () => {
@@ -160,11 +159,8 @@ describe('SectionRow editor actions', () => {
 		expect(wrapper.get('button[aria-label="Move down"]').element.tagName).toBe(
 			'BUTTON'
 		)
-		expect(
-			wrapper
-				.findAll('button')
-				.some((button) => button.text().includes('Move to…'))
-		).toBe(true)
+		expect(wrapper.get('button[aria-label="Move to…"]').text()).toBe('')
+		expect(wrapper.get('[role="group"]').findAll('button')).toHaveLength(7)
 	})
 
 	it('wraps long section names instead of truncating them beside actions', () => {

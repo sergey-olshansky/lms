@@ -92,103 +92,77 @@
 			</div>
 			<div
 				v-if="allowEdit"
-				class="ms-8 mt-2 flex flex-wrap items-center gap-1.5 text-ink-gray-7"
+				class="ms-8 mt-1 flex flex-wrap items-center gap-1"
+				role="group"
+				:aria-label="section.title"
 			>
-				<button
+				<OutlineActionButton
 					v-if="!section.is_scorm_package"
-					type="button"
-					class="outline-action"
-					:title="__('Add Lesson')"
-					:aria-label="__('Add Lesson')"
+					:label="__('Add Lesson')"
 					:disabled="creatingLesson"
-					:aria-busy="creatingLesson"
+					:busy="creatingLesson"
 					@click="addLesson"
 				>
-					<span class="lucide-plus size-4" />
-				</button>
-				<button
+					<span class="lucide-plus size-4" aria-hidden="true" />
+				</OutlineActionButton>
+				<OutlineActionButton
 					v-if="!section.is_scorm_package"
-					type="button"
-					class="outline-action"
-					:title="
+					:label="
 						canAddSection
 							? __('Add Section')
 							: __('Maximum depth reached — 4 section levels')
 					"
-					:aria-label="
-						canAddSection
-							? __('Add Section')
-							: __('Maximum depth reached — 4 section levels')
-					"
-					:aria-disabled="canAddSection ? undefined : 'true'"
 					:disabled="!canAddSection"
-					@click="canAddSection && emit('add-section', section)"
+					@click="emit('add-section', section)"
 				>
-					<span class="lucide-folder-plus size-4" />
-				</button>
-				<button
+					<span class="lucide-folder-plus size-4" aria-hidden="true" />
+				</OutlineActionButton>
+				<OutlineActionButton
 					v-if="!section.is_scorm_package"
-					type="button"
-					class="outline-action"
-					:title="__('Move up')"
-					:aria-label="__('Move up')"
-					:aria-disabled="isFirstSibling ? 'true' : undefined"
+					:label="__('Move up')"
 					:disabled="isFirstSibling"
 					@click="reorderSection('up')"
 				>
-					<span class="lucide-arrow-up size-4" />
-				</button>
-				<button
+					<span class="lucide-arrow-up size-4" aria-hidden="true" />
+				</OutlineActionButton>
+				<OutlineActionButton
 					v-if="!section.is_scorm_package"
-					type="button"
-					class="outline-action"
-					:title="__('Move down')"
-					:aria-label="__('Move down')"
-					:aria-disabled="isLastSibling ? 'true' : undefined"
+					:label="__('Move down')"
 					:disabled="isLastSibling"
 					@click="reorderSection('down')"
 				>
-					<span class="lucide-arrow-down size-4" />
-				</button>
-				<button
+					<span class="lucide-arrow-down size-4" aria-hidden="true" />
+				</OutlineActionButton>
+				<OutlineActionButton
 					v-if="!section.is_scorm_package"
-					type="button"
-					class="outline-action gap-1.5 px-2"
+					:label="__('Move to…')"
 					@click="emit('move-section', section)"
 				>
-					<span class="lucide-folder-input size-4" />{{ __('Move to…') }}
-				</button>
-				<button
+					<span class="lucide-folder-input size-4" aria-hidden="true" />
+				</OutlineActionButton>
+				<OutlineActionButton
 					v-if="!section.is_scorm_package"
-					type="button"
-					class="outline-action"
-					:title="__('Rename')"
-					:aria-label="__('Rename')"
+					:label="__('Rename')"
 					@click="startRename"
 				>
-					<span class="lucide-pen-line size-4" />
-				</button>
-				<button
+					<span class="lucide-pen-line size-4" aria-hidden="true" />
+				</OutlineActionButton>
+				<OutlineActionButton
 					v-if="section.is_scorm_package"
-					type="button"
-					class="outline-action"
-					:title="__('Edit Chapter')"
-					:aria-label="__('Edit Chapter')"
+					:label="__('Edit Chapter')"
 					@click="emit('edit-chapter', section)"
 				>
-					<span class="lucide-file-pen-line size-4" />
-				</button>
-				<button
-					type="button"
-					class="outline-action text-ink-red-5"
-					:title="__('Delete Chapter')"
-					:aria-label="__('Delete Chapter')"
+					<span class="lucide-file-pen-line size-4" aria-hidden="true" />
+				</OutlineActionButton>
+				<OutlineActionButton
+					:label="__('Delete Chapter')"
+					danger
 					@click="emit('delete-chapter', section.name)"
 				>
-					<span class="lucide-trash-2 size-4" />
-				</button>
+					<span class="lucide-trash-2 size-4" aria-hidden="true" />
+				</OutlineActionButton>
 				<span
-					v-if="canAddSection === false"
+					v-if="!canAddSection"
 					:id="`section-level-${section.name}`"
 					class="sr-only"
 					>{{ __('Maximum depth reached — 4 section levels') }}</span
@@ -342,30 +316,12 @@
 			>
 				<span class="text-sm text-ink-gray-5">{{ __('Empty section') }}</span>
 			</div>
-			<div
-				v-if="allowEdit"
-				class="flex mt-2 mb-4 gap-2"
-				:class="childIndentClass"
-			>
-				<Button :loading="creatingLesson" @click="addLesson">
-					<template #prefix>
-						<span class="lucide-plus size-4" />
-					</template>
-					{{ __('Add Lesson') }}
-				</Button>
-				<Button v-if="canAddSection" @click="emit('add-section', section)">
-					<template #prefix>
-						<span class="lucide-folder-plus size-4" />
-					</template>
-					{{ __('Add Section') }}
-				</Button>
-			</div>
 		</DisclosurePanel>
 	</Disclosure>
 </template>
 
 <script setup lang="ts">
-import { Button, TextInput, toast } from 'frappe-ui'
+import { TextInput, toast } from 'frappe-ui'
 import { computed, inject, nextTick, ref, watch } from 'vue'
 import Draggable from 'vuedraggable'
 import { Disclosure, DisclosureButton, DisclosurePanel } from '@headlessui/vue'
@@ -373,6 +329,7 @@ import { useRoute, useRouter } from 'vue-router'
 import type { RouteLocationRaw } from 'vue-router'
 import type { InputExposed } from 'frappe-ui'
 import SectionRow from '@/components/SectionRow.vue'
+import OutlineActionButton from '@/components/OutlineActionButton.vue'
 import type { OutlineChapter, OutlineLesson, SessionUser } from '@/types'
 import { parseLessonNumber } from '@/utils/courseOutline'
 
@@ -687,9 +644,3 @@ function redirectToSection(event?: MouseEvent) {
 	})
 }
 </script>
-
-<style scoped>
-.outline-action {
-	@apply inline-flex h-8 min-w-8 shrink-0 items-center justify-center rounded-4 hover:bg-surface-gray-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 disabled:cursor-not-allowed disabled:opacity-40;
-}
-</style>
