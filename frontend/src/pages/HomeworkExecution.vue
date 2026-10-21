@@ -193,7 +193,7 @@ import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/Layouts/pages/PageHeader.vue'
 import Select from '@/components/Controls/Select.vue'
 import BooleanSwitch from '@/components/Controls/BooleanSwitch.vue'
-import { progressLine } from '@/utils/homeworkSelection'
+import { lessonRouteParams, progressLine } from '@/utils/homeworkSelection'
 import { resourceErrorMessage } from '@/utils/resource'
 
 const route = useRoute()
@@ -336,13 +336,12 @@ const openCard = (card) => {
 const continueCard = (card) => {
 	const target = card.continue_target
 	if (!target) return openCard(card)
-	if (target.type === 'lesson' && target.course) {
+	if (target.type === 'lesson' && target.course && target.number) {
 		router.push({
 			name: 'Lesson',
 			params: {
 				courseName: target.course,
-				chapterNumber: String(target.chapter_number),
-				lessonNumber: String(target.lesson_number),
+				...lessonRouteParams(target.number),
 			},
 			query: { hw: card.name },
 		})

@@ -448,6 +448,7 @@ import {
 import { computed, inject, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/Layouts/pages/PageHeader.vue'
+import { lessonRouteParams } from '@/utils/homeworkSelection'
 import { resourceErrorMessage } from '@/utils/resource'
 
 const route = useRoute()
@@ -595,16 +596,16 @@ const breadcrumbs = computed(() => [
 ])
 
 // A checklist row's own link into the real course page (spec 5.3.3), carrying
-// the homework context so the way back is right there after opening.
+// the homework context so the way back is right there after opening. Numbers
+// are the outline's multi-segment route numbers (task #28: "2-1-3").
 const rowRoute = (route) => {
 	if (!route) return null
-	if (route.type === 'lesson') {
+	if (route.type === 'lesson' && route.number) {
 		return {
 			name: 'Lesson',
 			params: {
 				courseName: route.course,
-				chapterNumber: String(route.chapter_number),
-				lessonNumber: String(route.lesson_number),
+				...lessonRouteParams(route.number),
 			},
 			query: { hw: props.assignmentID },
 		}
@@ -622,13 +623,12 @@ const rowRoute = (route) => {
 const continueWorking = () => {
 	const target = detail.data?.continue_target
 	if (!target) return
-	if (target.type === 'lesson' && target.course) {
+	if (target.type === 'lesson' && target.course && target.number) {
 		router.push({
 			name: 'Lesson',
 			params: {
 				courseName: target.course,
-				chapterNumber: String(target.chapter_number),
-				lessonNumber: String(target.lesson_number),
+				...lessonRouteParams(target.number),
 			},
 			query: { hw: props.assignmentID },
 		})

@@ -169,3 +169,16 @@ export function progressLine(counters: {
 	}
 	return base
 }
+
+// An outline lesson number is "path-…-lesson" (task #28: a lesson in section 2,
+// subsection 1 is "2-1-3"). The SPA route takes the section path as
+// chapterNumber and the last segment as lessonNumber -- the same split
+// SidebarSection performs for the course's own navigation.
+export function lessonRouteParams(number: string): {
+	chapterNumber: string
+	lessonNumber: string
+} {
+	const segments = String(number).split('-')
+	const lessonNumber = segments.pop() || '1'
+	return { chapterNumber: segments.join('-') || '1', lessonNumber }
+}

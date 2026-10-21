@@ -541,3 +541,113 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 		self.assertEqual(board_filtered["columns"][0]["count"], 1)
 		board_other = homework_api.get_homework_board(student=self.student.email, course="no-such-course")
 		self.assertEqual(sum(c["count"] for c in board_other["columns"]), 0)
+
+
+class TestHomeworkDeepTree(BaseTestUtils, IntegrationTestCase):
+	"""A09 for real: task #28's four-level mixed section tree through the whole
+	homework pipeline -- resolver, snapshot, and the multi-segment lesson routes
+	("1-1-1-1": section path 1-1-1, first lesson)."""
+
+	def setUp(self):
+		super().setUp()
+		self.teacher = self._create_user(
+			"hw-deep-teacher@example.com", "Dana", "Deep", ["Course Creator", "LMS Student"]
+		)
+		self.student = self._create_user("hw-deep-student@example.com", "Eve", "Deep", ["LMS Student"])
+		frappe.set_user(self.teacher.email)
+		self.course = self._create_course(title="HW Deep Course", instructor=self.teacher.email)
+
+	def _section(self, title, parent_section=None):
+		doc = frappe.new_doc("Course Chapter")
+		doc.update({"course": self.course.name, "title": title, "parent_section": parent_section})
+		doc.insert()
+		return doc
+
+	def _child_row(self, parent, idx, lesson=None, section=None):
+		row = frappe.new_doc("Lesson Reference")
+		row.update(
+			{
+				"idx": idx,
+				"lesson": lesson,
+				"section": section,
+				"parent": parent.name,
+				"parenttype": "Course Chapter",
+				"parentfield": "lessons",
+			}
+		)
+		row.insert()
+
+	def _deep_course(self):
+		"""Block -> [lesson L1, section Chapter]; Chapter -> [section Part, lesson
+		L2]; Part -> [lesson L3 with an embedded quiz]. Four structural levels,
+		mixed children on the way down."""
+		block = self._section("Block")
+		self._create_chapter_reference(self.course.name, block.name, idx=1)
+		chapter = self._section("Chapter", parent_section=block.name)
+		part = self._section("Part", parent_section=chapter.name)
+
+		questions = self._create_quiz_questions()
+		quiz = self._create_quiz(questions, title="HW Deep Quiz")
+		quiz_block = QUIZ_BLOCK.format(quiz.name)
+
+		l1 = self._create_lesson("Shallow lesson", block.name, self.course.name)
+		l2 = self._create_lesson("Mid lesson", chapter.name, self.course.name)
+		l3 = self._create_lesson("Deep lesson", part.name, self.course.name, quiz_block)
+
+		self._child_row(block, 1, lesson=l1.name)
+		self._child_row(block, 2, section=chapter.name)
+		self._child_row(chapter, 1, section=part.name)
+		self._child_row(chapter, 2, lesson=l2.name)
+		self._child_row(part, 1, lesson=l3.name)
+		return {"block": block, "chapter": chapter, "part": part, "l1": l1, "l2": l2, "l3": l3, "quiz": quiz}
+
+	def test_resolver_walks_four_levels_of_mixed_children(self):
+		fixtures = self._deep_course()
+		frappe.set_user(self.teacher.email)
+		tree = homework_sources.get_course_source_tree(self.course.name)
+
+		self.assertEqual(len(tree["nodes"]), 1)
+		block = tree["nodes"][0]
+		self.assertEqual(block["type"], "chapter")
+		self.assertEqual([child["type"] for child in block["children"]], ["lesson", "chapter"])
+
+		chapter = block["children"][1]
+		self.assertEqual([child["type"] for child in chapter["children"]], ["chapter", "lesson"])
+		part = chapter["children"][0]
+		deep_lesson = part["children"][0]
+		self.assertEqual(deep_lesson["name"], fixtures["l3"].name)
+		self.assertEqual([quiz["name"] for quiz in deep_lesson["quizzes"]], [fixtures["quiz"].name])
+
+	def test_deep_lesson_assigns_and_routes_with_multisegment_number(self):
+		fixtures = self._deep_course()
+		self._create_enrollment(self.student.email, self.course.name)
+		frappe.set_user(self.teacher.email)
+		result = homework_api.save_homework(
+			title="Deep work",
+			days=5,
+			items=[
+				{
+					"source_type": "Lesson",
+					"name": fixtures["l3"].name,
+					"course": self.course.name,
+					"title": fixtures["l3"].title,
+					"chapter": "",
+					"path": f"Course / Block / Chapter / Part / {fixtures['l3'].title}",
+				}
+			],
+		)
+		assignment = homework_api.assign_homework(
+			homework=result["name"],
+			student=self.student.email,
+			idempotency_key="deep-key",
+		)["name"]
+
+		doc = frappe.get_doc("LMS Homework Assignment", assignment)
+		self.assertEqual(len(doc.requirements), 2)  # the lesson + its embedded quiz
+
+		frappe.set_user(self.student.email)
+		detail = homework_api.get_homework_assignment(assignment)
+		lesson_row = next(row for row in detail["requirements"] if row["requirement_type"] == "Open Lesson")
+		# Section path 1-1-1 (Block->Chapter->Part), first lesson of Part.
+		self.assertEqual(lesson_row["route"]["number"], "1-1-1-1")
+		self.assertEqual(detail["continue_target"]["number"], "1-1-1-1")

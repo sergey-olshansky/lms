@@ -496,7 +496,7 @@ def get_homework_board(
 
 def _attach_continue_targets(rows: list) -> None:
 	"""The card's «Продолжить» target (spec 5.2): the first unfinished material,
-	computed for a whole page of cards in three batched queries, never one per row.
+	computed for a whole page of cards in batched queries, never one per row.
 	"""
 	names = [row.name for row in rows]
 	if not names:
@@ -507,8 +507,8 @@ def _attach_continue_targets(rows: list) -> None:
 		fields=["parent", "requirement_type", "lesson", "quiz", "status", "course"],
 		order_by="parent asc, idx asc",
 	)
-	lessons = {row.lesson for row in reqs if row.lesson}
-	positions = _lesson_positions(lessons) if lessons else {}
+	courses = {row.course for row in reqs if row.course}
+	numbers = _lesson_numbers_by_course(courses)
 
 	targets: dict[str, dict] = {}
 	for row in reqs:
@@ -516,54 +516,43 @@ def _attach_continue_targets(rows: list) -> None:
 			continue
 		if row.parent in targets:
 			continue
-		if row.requirement_type == "Open Lesson" and row.lesson and row.lesson in positions:
-			targets[row.parent] = {"type": "lesson", **positions[row.lesson]}
+		number = numbers.get(row.course, {}).get(row.lesson) if row.lesson else None
+		if row.requirement_type == "Open Lesson" and number:
+			targets[row.parent] = {"type": "lesson", "course": row.course, "number": number}
 		elif row.requirement_type == "Pass Quiz" and row.quiz:
-			if row.lesson and row.lesson in positions:
-				targets[row.parent] = {"type": "lesson", **positions[row.lesson]}
+			if number:
+				targets[row.parent] = {"type": "lesson", "course": row.course, "number": number}
 			else:
 				targets[row.parent] = {"type": "quiz", "quiz": row.quiz, "course": row.course}
 	for row in rows:
 		row["continue_target"] = targets.get(row.name)
 
 
-def _lesson_positions(lessons: set) -> dict:
-	"""lesson -> {course, chapter_number, lesson_number} matching the SPA route
-	/courses/:courseName/learn/:chapterNumber-:lessonNumber, batched."""
-	lesson_rows = frappe.get_all(
-		"Course Lesson", filters={"name": ("in", list(lessons))}, fields=["name", "chapter"]
-	)
-	chapters = {row.chapter for row in lesson_rows if row.chapter}
-	if not chapters:
-		return {}
-	chapter_rows = frappe.get_all(
-		"Course Chapter", filters={"name": ("in", list(chapters))}, fields=["name", "course"]
-	)
-	courses = {row.course for row in chapter_rows if row.course}
-	chapter_refs = (
-		frappe.get_all(
-			"Chapter Reference",
-			filters={"parent": ("in", list(courses)), "chapter": ("in", list(chapters))},
-			fields=["chapter", "parent", "idx"],
-		)
-		if courses
-		else []
-	)
-	lesson_refs = frappe.get_all(
-		"Lesson Reference",
-		filters={"parent": ("in", list(chapters)), "lesson": ("in", list(lessons))},
-		fields=["parent", "lesson", "idx"],
-	)
-	chapter_number = {row.chapter: row.idx for row in chapter_refs}
-	chapter_course = {row.name: row.course for row in chapter_rows}
-	positions = {}
-	for row in lesson_refs:
-		positions[row.lesson] = {
-			"course": chapter_course.get(row.parent),
-			"chapter_number": chapter_number.get(row.parent),
-			"lesson_number": row.idx,
-		}
-	return positions
+def _lesson_numbers_by_course(courses: set) -> dict[str, dict[str, str]]:
+	"""course -> {lesson name -> route number} straight out of the app's own
+	outline builder, so a homework link and the course sidebar can never disagree
+	-- including task #28's multi-segment numbers ("2-1-3": section path 2-1,
+	third lesson)."""
+	from lms.lms.utils import get_course_outline
+
+	maps: dict[str, dict[str, str]] = {}
+	for course in courses:
+		numbers: dict[str, str] = {}
+
+		def walk(sections) -> None:
+			for section in sections or []:
+				for lesson in section.get("lessons") or []:
+					if lesson.get("number"):
+						numbers[lesson.name] = lesson.number
+				walk(section.get("sections"))
+
+		try:
+			outline = get_course_outline(course, progress=False)
+		except Exception:
+			outline = []
+		walk(outline)
+		maps[course] = numbers
+	return maps
 
 
 def authorize_board(target: str) -> None:
@@ -669,17 +658,14 @@ def get_homework_assignment(name: str) -> dict:
 		"viewer_can_teach": doc.teacher == frappe.session.user or _is_privileged(),
 	}
 	# Spec 5.3.3: every material row carries its own working link to the real
-	# course page, not only the first unfinished one.
-	positions = _lesson_positions({row.lesson for row in doc.requirements if row.lesson})
+	# course page, not only the first unfinished one. Numbers come from the
+	# outline builder, multi-segment under task #28 ("2-1-3").
+	course_names = {row.course for row in doc.requirements if row.course}
+	numbers = _lesson_numbers_by_course(course_names)
 	for formatted, row in zip(payload["requirements"], doc.requirements, strict=True):
-		if row.lesson and row.lesson in positions:
-			position = positions[row.lesson]
-			formatted["route"] = {
-				"type": "lesson",
-				"course": position["course"],
-				"chapter_number": position["chapter_number"],
-				"lesson_number": position["lesson_number"],
-			}
+		number = numbers.get(row.course, {}).get(row.lesson) if row.lesson else None
+		if number:
+			formatted["route"] = {"type": "lesson", "course": row.course, "number": number}
 		elif row.quiz:
 			formatted["route"] = {"type": "quiz", "quiz": row.quiz, "course": row.course}
 	return payload
@@ -719,16 +705,18 @@ def format_requirement(row) -> dict:
 
 def continue_target(doc) -> dict | None:
 	"""The first unfinished material: a lesson link with homework context, falling
-	back to a standalone quiz. Lesson routes use chapter/lesson order numbers."""
-	positions = _lesson_positions({row.lesson for row in doc.requirements if row.lesson})
+	back to a standalone quiz. The lesson link carries the outline's route number,
+	multi-segment under task #28."""
+	numbers = _lesson_numbers_by_course({row.course for row in doc.requirements if row.course})
 	for row in doc.requirements:
 		if row.status in {"Completed", "Completed Earlier", "Unavailable"}:
 			continue
-		if row.requirement_type == "Open Lesson" and row.lesson and row.lesson in positions:
-			return {"type": "lesson", "lesson": row.lesson, **positions[row.lesson]}
+		number = numbers.get(row.course, {}).get(row.lesson) if row.lesson else None
+		if row.requirement_type == "Open Lesson" and number:
+			return {"type": "lesson", "lesson": row.lesson, "course": row.course, "number": number}
 		if row.requirement_type == "Pass Quiz" and row.quiz:
-			if row.lesson and row.lesson in positions:
-				return {"type": "lesson", "lesson": row.lesson, **positions[row.lesson]}
+			if number:
+				return {"type": "lesson", "lesson": row.lesson, "course": row.course, "number": number}
 			return {"type": "quiz", "quiz": row.quiz, "course": row.course}
 	return None
 

@@ -28,7 +28,6 @@ declare module 'vue' {
     Categories: typeof import('./src/components/Settings/Categories.vue')['default']
     CertificationLinks: typeof import('./src/components/CertificationLinks.vue')['default']
     ChannelView: typeof import('./src/components/Settings/Raven/ChannelView.vue')['default']
-    ChapterRow: typeof import('./src/components/ChapterRow.vue')['default']
     ChildTable: typeof import('./src/components/Controls/ChildTable.vue')['default']
     ClearableCombobox: typeof import('./src/components/Controls/ClearableCombobox.vue')['default']
     CollapsibleSection: typeof import('./src/components/CollapsibleSection.vue')['default']

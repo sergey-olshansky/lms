@@ -8,9 +8,9 @@ lives here: the courses a teacher may pick from, the course tree with embedded
 quizzes, the expansion of a selection into leaf requirements, and the pre-assignment
 access check for one student. No Vue page re-implements the tree.
 
-Tree depth: the builder is depth-agnostic on purpose. Today's chapters are a flat
-list on the course (Course -> Chapter Reference -> Lesson Reference); when task
-#28's nested chapters land, ``_chapter_children`` is the one place to extend.
+Tree depth: task #28's sections nest up to 4 structural levels with lessons and
+sub-sections mixed in one child table; ``get_course_source_tree`` walks that real
+structure, and a legacy flat course comes out of the same walk two levels deep.
 """
 
 from __future__ import annotations
@@ -72,98 +72,96 @@ def can_source_from(course: str) -> bool:
 
 
 def get_course_source_tree(course: str) -> dict:
-	"""One course's structure for the material picker.
+	"""One course's structure for the material picker, on task #28's real tree.
 
-	Shape: ``{course: {name, title}, nodes: [chapter|quiz|assignment, ...]}`` where a
-	chapter node carries ``children`` (sub-chapters today: none; lessons) and a lesson
-	node carries its student-visible embedded quizzes plus whether an Assignment is
-	embedded. Empty chapters stay in the tree so the teacher sees them, but they are
-	marked ``assignable: False``: an empty container is not homework work (spec 3.4.5).
+	Shape: ``{course: {name, title}, nodes: [section|quiz|assignment, ...]}``. Root
+	sections come from the course's Chapter Reference rows in order; a section's
+	children are its Lesson Reference child rows in idx order -- each row either a
+	lesson or a nested section (``section`` set), mixed freely, up to 4 structural
+	levels. A lesson node carries its student-visible embedded quizzes; an empty
+	section stays visible but is ``assignable: False``: an empty container is not
+	homework work (spec 3.4.5). Old flat courses walk the same code and come out
+	two levels deep, so one adapter serves both (A09).
 	"""
 	if not can_source_from(course):
 		frappe.throw(_("You cannot pick materials from this course."), frappe.PermissionError)
 
+	from lms.lms.utils import MAX_SECTION_DEPTH
+
 	course_title = frappe.db.get_value("LMS Course", course, "title")
-	chapters = _course_chapters(course)
-	lesson_rows = _chapter_lesson_rows([c["name"] for c in chapters])
+	section_titles = {
+		row.name: row.title
+		for row in frappe.get_all("Course Chapter", filters={"course": course}, fields=["name", "title"])
+	}
+	root_rows = frappe.get_all(
+		"Chapter Reference",
+		filters={"parent": course},
+		fields=["chapter", "idx"],
+		order_by="idx",
+	)
+	all_section_names = list(section_titles)
+	child_rows = frappe.get_all(
+		"Lesson Reference",
+		filters={"parent": ("in", all_section_names), "parenttype": "Course Chapter"},
+		fields=["parent", "idx", "lesson", "section"],
+		order_by="parent, idx",
+	)
+	children_by_section: dict[str, list] = {}
+	for row in child_rows:
+		children_by_section.setdefault(row.parent, []).append(row)
+
+	lesson_names = [row.lesson for row in child_rows if row.lesson]
+	lesson_titles = _titles("Course Lesson", lesson_names)
 	quizzes_by_lesson = _embedded_quizzes_by_lesson(course)
 	assignments_by_lesson = _embedded_assignments_by_lesson(course)
 
-	lesson_nodes: dict[str, dict] = {}
-	for row in lesson_rows:
-		lesson_nodes[row.name] = {
-			"key": f"lesson:{row.name}",
+	def lesson_node(name: str, parent_section: str) -> dict:
+		return {
+			"key": f"lesson:{name}",
 			"type": "lesson",
-			"name": row.name,
-			"title": row.title,
-			"chapter": row.chapter_name,
-			"quizzes": quizzes_by_lesson.get(row.name, []),
-			"has_assignment": row.name in assignments_by_lesson,
+			"name": name,
+			"title": lesson_titles.get(name, name),
+			"chapter": parent_section,
+			"quizzes": quizzes_by_lesson.get(name, []),
+			"has_assignment": name in assignments_by_lesson,
 			"assignable": True,
 		}
 
-	for chapter in chapters:
-		chapter["key"] = f"chapter:{chapter['name']}"
-		chapter["type"] = "chapter"
-		chapter["children"] = [
-			lesson_nodes[row.name] for row in lesson_rows if row.chapter_name == chapter["name"]
-		] + _chapter_children(chapter["name"])
-		chapter["assignable"] = any(child.get("assignable") for child in chapter["children"])
+	def section_node(name: str, seen: set, depth: int) -> dict | None:
+		"""Depth-first over the mixed child rows; the depth cap and seen-set only
+		bound corrupt data, the same stance get_outline_sections takes."""
+		if name in seen or depth > MAX_SECTION_DEPTH:
+			return None
+		children = []
+		for row in children_by_section.get(name, []):
+			if row.section:
+				child = section_node(row.section, seen | {name}, depth + 1)
+				if child:
+					children.append(child)
+			elif row.lesson and row.lesson in lesson_titles:
+				children.append(lesson_node(row.lesson, name))
+		return {
+			"key": f"chapter:{name}",
+			"type": "chapter",
+			"name": name,
+			"title": section_titles.get(name, name),
+			"children": children,
+			"assignable": any(child.get("assignable") for child in children),
+		}
+
+	nodes = []
+	for row in root_rows:
+		if row.chapter not in section_titles:
+			continue
+		node = section_node(row.chapter, set(), 1)
+		if node:
+			nodes.append(node)
 
 	standalone = _standalone_nodes(course, quizzes_by_lesson, assignments_by_lesson)
-
 	return {
 		"course": {"name": course, "title": course_title or course},
-		"nodes": chapters + standalone,
+		"nodes": nodes + standalone,
 	}
-
-
-def _course_chapters(course: str) -> list[dict]:
-	reference = frappe.qb.DocType("Chapter Reference")
-	chapter_table = frappe.qb.DocType("Course Chapter")
-	rows = (
-		frappe.qb.from_(reference)
-		.join(chapter_table)
-		.on(chapter_table.name == reference.chapter)
-		.select(chapter_table.name.as_("name"), chapter_table.title.as_("title"))
-		.where(reference.parent == course)
-		.orderby(reference.idx)
-	).run(as_dict=True)
-	return [{"name": row.name, "title": row.title} for row in rows]
-
-
-def _chapter_children(chapter: str) -> list[dict]:
-	"""Sub-chapters of a chapter. The current schema has none; task #28's nested
-	chapters plug in exactly here, so nothing else in the resolver assumes depth."""
-	if not frappe.get_meta("Course Chapter").has_field("parent_chapter"):
-		return []
-	rows = frappe.get_all(
-		"Course Chapter",
-		filters={"parent_chapter": chapter},
-		fields=["name", "title"],
-		order_by="idx",
-	)
-	return [
-		{"key": f"chapter:{row.name}", "type": "chapter", "name": row.name, "title": row.title}
-		for row in rows
-	]
-
-
-def _chapter_lesson_rows(chapter_names: list[str]) -> list:
-	if not chapter_names:
-		return []
-	reference = frappe.qb.DocType("Lesson Reference")
-	lesson = frappe.qb.DocType("Course Lesson")
-	return (
-		frappe.qb.from_(reference)
-		.join(lesson)
-		.on(lesson.name == reference.lesson)
-		.select(lesson.name, lesson.title, reference.parent.as_("chapter_name"))
-		.where(reference.parenttype == "Course Chapter")
-		.where(reference.parent.isin(chapter_names))
-		.orderby(reference.parent)
-		.orderby(reference.idx)
-	).run(as_dict=True)
 
 
 def _embedded_quizzes_by_lesson(course: str) -> dict[str, list[dict]]:

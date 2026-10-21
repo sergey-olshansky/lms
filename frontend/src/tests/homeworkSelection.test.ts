@@ -9,6 +9,7 @@ import {
 	checkState,
 	collectLeafKeys,
 	flattenWithPaths,
+	lessonRouteParams,
 	progressLine,
 	selectionToEntries,
 	toggleNode,
@@ -101,5 +102,22 @@ describe('homework selection', () => {
 				quizzes_total: 0,
 			})
 		).toBe('1 / 4')
+	})
+})
+
+describe('lesson route params', () => {
+	it('splits a flat number into chapter and lesson', () => {
+		expect(lessonRouteParams('2-3')).toEqual({
+			chapterNumber: '2',
+			lessonNumber: '3',
+		})
+	})
+
+	it('keeps the whole section path as the chapter for deep numbers', () => {
+		// Task #28: section path 1-1-1, first lesson of that section.
+		expect(lessonRouteParams('1-1-1-1')).toEqual({
+			chapterNumber: '1-1-1',
+			lessonNumber: '1',
+		})
 	})
 })
