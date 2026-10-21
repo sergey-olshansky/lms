@@ -90,6 +90,60 @@ def _absolute_asset_urls(html: str) -> str:
 	return _RELATIVE_SRC.sub(lambda match: f'{match.group(1)}="{site}{match.group(2)}"', html)
 
 
+def _inline_private_images(html: str) -> str:
+	"""Inline readable private raster images for the server-side PDF renderer.
+
+	wkhtmltopdf does not inherit the logged-in browser session. Making a
+	/private/files URL absolute therefore still leaves the renderer unable to
+	fetch the image. Resolve only exact File URLs the current report viewer can
+	read, then embed their bytes so the shared PDF/email renderer needs no
+	separate authenticated HTTP request.
+	"""
+	image_src = re.compile(
+		r'(<img\b[^>]*\bsrc\s*=\s*)(["\'])(/private/files/[^"\']+)\2', re.I
+	)
+	matches = list(image_src.finditer(html or ""))
+	if not matches:
+		return html
+
+	from base64 import b64encode
+	from pathlib import PurePosixPath
+
+	from lms.lms.utils import get_readable_files
+
+	allowed_extensions = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".bmp"}
+	urls = list(dict.fromkeys(match.group(3) for match in matches))
+	files = get_readable_files(urls)
+	data_urls = {}
+	for url in urls:
+		file_doc = files.get(url)
+		if (
+			not file_doc
+			or PurePosixPath(file_doc.file_name or "").suffix.lower() not in allowed_extensions
+		):
+			continue
+		content = file_doc.get_content()
+		if not isinstance(content, bytes):
+			content = bytes(content)
+		mime_type = {
+			".jpg": "image/jpeg",
+			".jpeg": "image/jpeg",
+			".png": "image/png",
+			".gif": "image/gif",
+			".webp": "image/webp",
+			".avif": "image/avif",
+			".bmp": "image/bmp",
+		}[PurePosixPath(file_doc.file_name).suffix.lower()]
+		data_urls[url] = f"data:{mime_type};base64,{b64encode(content).decode('ascii')}"
+
+	return image_src.sub(
+		lambda match: f"{match.group(1)}{match.group(2)}{data_urls[match.group(3)]}{match.group(2)}"
+		if match.group(3) in data_urls
+		else match.group(0),
+		html,
+	)
+
+
 def render_attempt_report_html(doc, correct_answers: dict[str, list[str]] | None = None) -> str:
 	"""The attempt report as one standalone HTML document.
 
@@ -117,12 +171,12 @@ def render_attempt_report_html(doc, correct_answers: dict[str, list[str]] | None
 		parts.append(f'<div class="qrow {status}">')
 		parts.append(
 			f'<div class="q"><span class="qnum">Q{index}:</span>'
-			+ (_absolute_asset_urls(question) if question else _("Question text is not available"))
+			+ (_absolute_asset_urls(_inline_private_images(question)) if question else _("Question text is not available"))
 			+ "</div>"
 		)
 		parts.append(
 			'<div class="a"><span class="alabel">' + _("Your answer:") + "</span>"
-			+ _absolute_asset_urls(row.get("answer") or "") + "</div>"
+			+ _absolute_asset_urls(_inline_private_images(row.get("answer") or "")) + "</div>"
 		)
 		marks = f'<span class="marks">{cint(row.get("marks"))} / {cint(row.get("marks_out_of"))}</span>'
 		parts.append(
@@ -187,7 +241,7 @@ def render_attempt_report_html(doc, correct_answers: dict[str, list[str]] | None
 	.keys {{ margin-top: 6px; border-left: 2px solid #dadce0; padding-left: 8px; color: #3c4043; }}
 	.klabel {{ color: #5f6368; font-size: 10px; text-transform: uppercase; margin-right: 6px; }}
 	.skipped {{ color: #5f6368; font-size: 11px; }}
-	img {{ max-width: 100%; }}
+	img {{ display: block; max-width: 100%; max-height: 240mm; height: auto; page-break-inside: avoid; }}
 </style></head>
 <body>
 <h1>{doc.quiz_title}</h1>
