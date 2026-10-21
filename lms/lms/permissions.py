@@ -1300,3 +1300,100 @@ def _evaluator_batches(user: str):
 			& (batch_course.parenttype == "LMS Batch")
 		)
 	)
+
+
+# --- Homework compilations and assignments (task #35) -------------------------
+
+# The library doctypes a teacher owns outright, and the assignment doctype that is
+# shared between the teacher who issued it and the student who works it.
+HOMEWORK_LIBRARY_DOCTYPES = ("LMS Homework Group", "LMS Homework")
+
+
+def _unrestricted_homework_access(user: str) -> bool:
+	"""Whoever the homework rules never narrow: a site administrator or a Moderator,
+	the same reach the assessment rules grant (spec section 9.1)."""
+	return is_site_administrator(user) or "Moderator" in frappe.get_roles(user)
+
+
+def homework_group_has_permission(doc, ptype="read", user=None) -> bool:
+	return homework_library_has_permission(doc, ptype, user)
+
+
+def homework_has_permission(doc, ptype="read", user=None) -> bool:
+	return homework_library_has_permission(doc, ptype, user)
+
+
+def homework_library_has_permission(doc, ptype="read", user=None) -> bool:
+	"""A library row belongs to its owner alone. Another teacher -- even another
+	Course Creator -- sees nothing of it, let alone a student."""
+	user = user or frappe.session.user
+	if _unrestricted_homework_access(user):
+		return True
+	if doc.is_new():
+		# Ownership is decided by the creator at insert; validate() checks the fields.
+		return True
+	stored_owner = frappe.db.get_value(doc.doctype, doc.name, "owner")
+	if stored_owner == user and doc.get("owner", user) == user:
+		return True
+	frappe.logger("lms.security").warning(
+		"Homework library denied: user=%s doctype=%s name=%s ptype=%s",
+		user,
+		doc.doctype,
+		doc.name,
+		ptype,
+	)
+	return False
+
+
+def homework_group_query_conditions(user: str | None = None) -> str:
+	return _homework_library_query_conditions("LMS Homework Group", user)
+
+
+def homework_query_conditions(user: str | None = None) -> str:
+	return _homework_library_query_conditions("LMS Homework", user)
+
+
+def _homework_library_query_conditions(doctype: str, user: str | None = None) -> str:
+	"""``owner = user`` as SQL for the list read a has_permission hook never sees."""
+	user = user or frappe.session.user
+	if _unrestricted_homework_access(user):
+		return ""
+	row = frappe.qb.DocType(doctype)
+	condition = row.owner == LiteralValue(frappe.db.escape(user))
+	return _render(condition)
+
+
+def homework_assignment_has_permission(doc, ptype="read", user=None) -> bool:
+	"""One assignment row belongs to the student it was issued to and to the teacher
+	who issued it. The student's branch is read-only: DocPerm gives LMS Student no
+	write, and every state move happens through the homework service's actions."""
+	user = user or frappe.session.user
+	if _unrestricted_homework_access(user):
+		return True
+	if doc.is_new():
+		return True
+	stored = frappe.db.get_value(doc.doctype, doc.name, ["student", "teacher"], as_dict=True)
+	if not stored:
+		return False
+	# Both the stored row and the submitted values must agree, or a save could
+	# relabel `student`/`teacher` into the caller's reach.
+	if stored.student == user and doc.get("student", user) == user:
+		return True
+	if stored.teacher == user and doc.get("teacher", user) == user:
+		return True
+	frappe.logger("lms.security").warning(
+		"Homework assignment denied: user=%s name=%s ptype=%s", user, doc.name, ptype
+	)
+	return False
+
+
+def homework_assignment_query_conditions(user: str | None = None) -> str:
+	"""``student = user OR teacher = user`` as SQL, so lists never leak another
+	student's board and the `student` URL parameter is never the authority."""
+	user = user or frappe.session.user
+	if _unrestricted_homework_access(user):
+		return ""
+	assignment = frappe.qb.DocType("LMS Homework Assignment")
+	member = LiteralValue(frappe.db.escape(user))
+	condition = Bracket((assignment.student == member) | (assignment.teacher == member))
+	return _render(condition)
