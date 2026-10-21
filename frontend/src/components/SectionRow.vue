@@ -9,7 +9,7 @@
 							? `section-level-${section.name}`
 							: undefined
 					"
-					@click="redirectToSection"
+					@click="toggleSection(open, $event)"
 				>
 					<span
 						:class="{
@@ -178,7 +178,11 @@
 				>
 			</div>
 		</div>
-		<DisclosurePanel v-if="!section.is_scorm_package">
+		<DisclosurePanel
+			v-if="!section.is_scorm_package"
+			class="ms-4 border-s border-outline-gray-2"
+			data-testid="section-branch"
+		>
 			<Draggable
 				:list="mergedChildren"
 				:disabled="!allowEdit || dragDisabled"
@@ -347,6 +351,11 @@ import OutlineActionButton from '@/components/OutlineActionButton.vue'
 import type { OutlineChapter, OutlineLesson, SessionUser } from '@/types'
 import { parseLessonNumber } from '@/utils/courseOutline'
 import { courseOutlineDragKey } from '@/composables/courseOutlineDrag'
+import {
+	courseOutlineExpansionKey,
+	isSectionExpanded,
+	rememberSectionExpansion,
+} from '@/utils/courseOutlineExpansion'
 
 interface DraggableEvent {
 	item: {
@@ -468,22 +477,19 @@ const sectionPath = computed<string>(() =>
 // fallback for outline data that predates the field.
 const currentLevel = computed<number>(() => props.section.level ?? props.level)
 
-// Sections on the path to the open lesson expand on (re)mount; the student
-// view carries the active lesson in route params, the in-page editor in
-// ?editLesson, with selectedLessonNumber as a fallback. With nothing active,
-// only the first level-1 section opens.
-const defaultOpen = computed<boolean>(() => {
-	const editLesson =
-		typeof route.query.editLesson === 'string' ? route.query.editLesson : ''
-	const active = String(
-		route.params.chapterNumber || editLesson || props.selectedLessonNumber || ''
-	)
-	if (!active) return props.section.idx === 1 && currentLevel.value === 1
-	const segments = active.split('-')
-	const pathSegments = sectionPath.value.split('-')
-	if (pathSegments.length > segments.length) return false
-	return pathSegments.every((segment, i) => segment === segments[i])
-})
+const expansionKey = computed(() =>
+	courseOutlineExpansionKey(props.courseName, user.data?.name ?? 'Guest')
+)
+// New sections start closed. Reopening a parent restores each child's own
+// choice instead of expanding the whole active lesson path on every remount.
+const defaultOpen = isSectionExpanded(expansionKey.value, props.section.name)
+
+function toggleSection(wasOpen: boolean, event: MouseEvent): void {
+	if (!props.section.is_scorm_package) {
+		rememberSectionExpansion(expansionKey.value, props.section.name, !wasOpen)
+	}
+	redirectToSection(event)
+}
 
 const canAddSection = computed<boolean>(
 	() => currentLevel.value < MAX_SECTION_DEPTH
@@ -537,7 +543,7 @@ const countsLabel = computed<string>(() => {
 // Legacy chapters keep their lesson-only number badge (above); a section that
 // holds both kinds shows the combined direct counts instead.
 const childIndentClass = computed<string>(() =>
-	currentLevel.value === 1 ? 'ps-8' : 'ps-4'
+	currentLevel.value === 1 ? 'ps-4' : 'ps-2'
 )
 
 const isScormSectionComplete = computed<boolean>(() =>

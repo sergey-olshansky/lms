@@ -3,6 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import SectionRow from '@/components/SectionRow.vue'
 import type { OutlineChapter } from '@/types'
+import {
+	courseOutlineExpansionKey,
+	rememberSectionExpansion,
+} from '@/utils/courseOutlineExpansion'
+
+const expansionKey = courseOutlineExpansionKey('course-1', 'admin@example.com')
 
 const pushMock = vi.hoisted(() => vi.fn())
 const focusMock = vi.hoisted(() => vi.fn())
@@ -88,6 +94,7 @@ const mountRow = (
 	})
 
 beforeEach(() => {
+	localStorage.clear()
 	pushMock.mockReset()
 	focusMock.mockReset()
 })
@@ -180,6 +187,7 @@ describe('SectionRow editor actions', () => {
 })
 
 describe('SectionRow locked lesson', () => {
+	beforeEach(() => rememberSectionExpansion(expansionKey, section.name, true))
 	it('renders a lock and no router-link for a locked lesson', () => {
 		const wrapper = mountRow({
 			...section,
@@ -299,6 +307,10 @@ describe('SectionRow locked lesson', () => {
 })
 
 describe('SectionRow mixed children (task 28)', () => {
+	beforeEach(() => {
+		rememberSectionExpansion(expansionKey, 'CH-1', true)
+		rememberSectionExpansion(expansionKey, 'CH-EMPTY', true)
+	})
 	const mixed: OutlineChapter = {
 		name: 'CH-1',
 		title: 'Mixed',
@@ -403,6 +415,7 @@ describe('SectionRow depth limit (task 28)', () => {
 })
 
 describe('SectionRow drag events', () => {
+	beforeEach(() => rememberSectionExpansion(expansionKey, section.name, true))
 	const parent: OutlineChapter = {
 		...section,
 		idx: 1,
