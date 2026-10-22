@@ -20,6 +20,7 @@ import { inject } from 'vue'
 import { Button } from 'frappe-ui'
 import Quiz from '@/components/Quiz.vue'
 import type { SessionUser } from '@/types'
+import { redirectToLogin } from '@/utils/loginReturn'
 
 const user = inject<SessionUser>('$user')!
 
@@ -32,7 +33,4 @@ defineProps<{
 	quiz: string
 }>()
 
-const redirectToLogin = (): void => {
-	window.location.href = `/login`
-}
 </script>

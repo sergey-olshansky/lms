@@ -564,6 +564,7 @@ import { formatDueAt, siteWallClock } from '@/utils/dueDate'
 import { downloadViaAnchor } from '@/utils/download'
 import { safeUrl } from '@/utils/safeUrl'
 
+import { redirectToLogin } from '@/utils/loginReturn'
 const route = useRoute()
 const router = useRouter()
 const dayjs = inject('$dayjs')
@@ -632,8 +633,7 @@ onMounted(async () => {
 		// viewer who merely lacks this card keeps the plain refusal (no data
 		// leak, no redirect loop).
 		if (!user.data?.name) {
-			const target = `${window.location.pathname}${window.location.search}${window.location.hash}`
-			window.location.href = `/login?redirect-to=${encodeURIComponent(target)}`
+			redirectToLogin()
 			return
 		}
 		toast.error(resourceErrorMessage(error, __('Error')))

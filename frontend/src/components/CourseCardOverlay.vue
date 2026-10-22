@@ -154,6 +154,7 @@ import CertificationLinks from '@/components/CertificationLinks.vue'
 import VideoPreview from '@/components/VideoPreview.vue'
 import { useTelemetry } from '@framework/ui/telemetry/index'
 import { openExternal } from '@/utils/openExternal'
+import { redirectToLogin } from '@/utils/loginReturn'
 import type {
 	CourseDetails,
 	CourseInstructorInfo,
@@ -178,7 +179,7 @@ function enrollStudent() {
 	if (!user.data) {
 		toast.warning(__('You need to login first to enroll for this course'))
 		setTimeout(() => {
-			window.location.href = `/login?redirect-to=${window.location.pathname}`
+			redirectToLogin()
 		}, 500)
 		return
 	}

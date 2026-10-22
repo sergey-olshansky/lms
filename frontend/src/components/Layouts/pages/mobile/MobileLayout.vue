@@ -78,6 +78,7 @@ import { Avatar } from 'frappe-ui'
 import { ensureMobileNavLinks, sidebarLinks } from '@/stores/mobileNavLinks'
 import { pickPrimaryTabs, tabLabel } from '@/utils/mobileNav'
 
+import { redirectToLogin } from '@/utils/loginReturn'
 const { isLoggedIn } = storeToRefs(sessionStore())
 const settingsStore = useSettings()
 const { sidebarSettings } = settingsStore
@@ -150,7 +151,7 @@ let isActive = (tab) => {
 // one exception, leaving the SPA for Frappe's own /login, which vue-router
 // knows nothing about.
 const handleClick = (tab) => {
-	if (tab.label == 'Log in') window.location.href = '/login'
+	if (tab.label == 'Log in') redirectToLogin()
 	else router.push({ name: tab.to })
 }
 </script>

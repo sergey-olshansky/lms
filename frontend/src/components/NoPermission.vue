@@ -31,13 +31,11 @@
 import { inject } from 'vue'
 import { Button, usePageMeta } from 'frappe-ui'
 import { sessionStore } from '../stores/session'
+import { redirectToLogin } from '@/utils/loginReturn'
 
 const user = inject('$user')
 const { brand } = sessionStore()
 
-const redirectToLogin = () => {
-	window.location.href = '/login'
-}
 
 usePageMeta(() => {
 	return {

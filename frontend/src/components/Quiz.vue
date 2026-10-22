@@ -1118,16 +1118,12 @@ const populateQuestions = () => {
 	} else {
 		questions.value = offered
 	}
-	// F03: the offered composition IS the attempt's composition -- snapshot
-	// it before any submission empties the pool. On a reload of a fully
-	// credited quiz the offered pool is empty by design; the card shows the
-	// last attempt's summary, whose coverage is every credited question.
+	// F03 / round 7: while an attempt is being sat, its composition is the
+	// offered pool. After a pass the pool empties and the saved rows of the
+	// newest submission (the watch above) take over -- never the quiz total,
+	// which would misdescribe a series of partial retakes.
 	if (questions.value.length) {
 		lastAttemptTypes.value = questions.value.map(
-			(row: QuizQuestionRow) => questionsByName.value[row.question]?.type
-		)
-	} else if (!lastAttemptTypes.value.length && offered.length === 0 && resolvable.length) {
-		lastAttemptTypes.value = resolvable.map(
 			(row: QuizQuestionRow) => questionsByName.value[row.question]?.type
 		)
 	}
@@ -1222,10 +1218,6 @@ const quizSubtitle = computed(() => {
 	)
 })
 
-// The types of the questions THIS attempt was offered, captured at populate
-// time -- after a pass the live pool empties (every question credited), but
-// the finished attempt's summary still describes the attempt it graded.
-const lastAttemptTypes = ref<string[]>([])
 
 const introTips = computed(() => {
 	if (!quiz.data) return []
@@ -1406,6 +1398,51 @@ const creditedQuestions = createResource<string[]>({
 const creditedQuestionNames = computed<Set<string>>(
 	() => new Set(creditedQuestions.data || [])
 )
+
+// --- F03 / round 7: the last attempt's saved composition ---------------------
+// On a reload of a fully credited quiz the retake pool is empty; the header
+// must describe the LAST attempt as it was actually sat (a series of partial
+// retakes covers fewer questions each round), not the quiz total. The
+// snapshot comes from the newest submission's saved result rows.
+const lastAttemptTypes = ref<string[]>([])
+
+const resolveLastAttemptTypes = async () => {
+	if (!quiz.data?.name || !user.data?.name || lastAttemptTypes.value.length) return
+	try {
+		// Independent of the attempts resource: that one loads only for
+		// attempt-LIMITED quizzes, and the reload scenario is exactly an
+		// unlimited quiz that was fully credited.
+		const submissions = await call('frappe.client.get_list', {
+			doctype: 'LMS Quiz Submission',
+			filters: { member: user.data.name, quiz: quiz.data.name },
+			fields: ['name'],
+			order_by: 'creation desc',
+			limit_page_length: 1,
+		})
+		const newest = submissions?.[0]?.name
+		if (!newest) return
+		const rows = await call('frappe.client.get_list', {
+			doctype: 'LMS Quiz Result',
+			filters: { parenttype: 'LMS Quiz Submission', parent: newest },
+			fields: ['question_type'],
+			limit_page_length: 0,
+		})
+		if (Array.isArray(rows) && rows.length) {
+			lastAttemptTypes.value = rows.map((row) => row.question_type).filter(Boolean)
+		}
+	} catch {
+		// A failed lookup falls back to the offered-pool wording.
+	}
+}
+
+watch(
+	() => [quiz.data?.name, creditedQuestionNames.value.size, questions.value.length] as const,
+	([name, credits, pool]) => {
+		if (name && credits > 0 && pool === 0) void resolveLastAttemptTypes()
+	},
+	{ immediate: true }
+)
+
 
 // Every current question already credited: the retake has nothing to ask.
 // Distinct from an empty quiz, which keeps its own "no questions" wording.

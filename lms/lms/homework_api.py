@@ -357,10 +357,14 @@ def save_homework(
 			},
 		)
 	doc.save()
-	# E05.10: images embedded in the rich details become managed files of the
-	# template (permissions + budget); stale references drop their rows.
-	homework_materials.sync_detail_images(doc.name, doc.details)
-	homework_materials.assert_template_budget(doc.name)
+	# E05.10 / round 7: images embedded in the rich details become managed
+	# files of the template (permissions + budget); stale references drop
+	# their rows. The sync and the budget verdict share the SAME per-template
+	# advisory lock add_material holds, with a current-read sum, so parallel
+	# saves cannot each pass and together exceed the budget.
+	with frappe.db.advisory_lock(f"homework_material_budget:{doc.name}"):
+		homework_materials.sync_detail_images(doc.name, doc.details)
+		homework_materials.assert_template_budget(doc.name)
 	return {"name": doc.name}
 
 

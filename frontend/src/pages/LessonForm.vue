@@ -151,6 +151,7 @@ import {
 	useKeyboardShortcuts,
 	saveShortcut,
 } from '@/composables/useKeyboardShortcuts'
+import { redirectToLogin } from '@/utils/loginReturn'
 
 const props = defineProps({
 	courseName: {
@@ -289,7 +290,7 @@ defineExpose({
 
 onMounted(() => {
 	if (!user.data?.is_moderator && !user.data?.is_instructor) {
-		window.location.href = '/login'
+		redirectToLogin()
 	}
 	capture('lesson_form_opened')
 	enablePlyr()

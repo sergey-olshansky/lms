@@ -87,13 +87,29 @@ def sync_detail_images(homework_name: str, details_html: str) -> None:
 	referenced_urls = set(_FILE_REF.findall(details_html or ""))
 	owner = frappe.db.get_value("LMS Homework", homework_name, "owner")
 	by_url = {}
+	public_refs = []
 	for url in referenced_urls:
 		file_name = frappe.db.get_value("File", {"file_url": url}, "name")
 		if not file_name:
 			continue
-		if frappe.db.get_value("File", file_name, "owner") != owner:
+		row = frappe.db.get_value("File", file_name, ["owner", "is_private"], as_dict=True)
+		if row.owner != owner:
+			continue
+		if not url.startswith("/private/files/") or not row.is_private:
+			# Round 7: a public image stays fetchable by its raw URL to anyone,
+			# outside every assignment's grant. Refuse it -- the editor uploads
+			# privately; the author re-uploads stray public picks.
+			public_refs.append(url)
 			continue
 		by_url[url] = file_name
+	if public_refs:
+		frappe.throw(
+			_(
+				"The description contains publicly stored images. Re-upload them"
+				" through the editor so they are private: {0}"
+			).format(", ".join(public_refs[:3])),
+			frappe.ValidationError,
+		)
 	if not by_url and not _has_detail_rows(homework_name):
 		return
 
@@ -143,17 +159,27 @@ def _content_type_of(file_name: str) -> str:
 
 
 def assert_template_budget(homework_name: str, incoming: int = 0) -> None:
-	"""E05.8: 20 MiB per template, materials and detail images together."""
-	state = _template_budget_state(homework_name)
-	if state["used"] + incoming > MATERIAL_QUOTA_BYTES:
+	"""E05.8 / round 7: 20 MiB per template, materials and detail images
+	together. The sum is a CURRENT read (FOR UPDATE): callers hold the
+	template's advisory lock, and a plain snapshot sum could miss another
+	save's uncommitted image rows under REPEATABLE READ -- two parallel
+	saves would each pass and together exceed the budget."""
+	used = frappe.db.sql(
+		"SELECT COALESCE(SUM(`file_size`), 0) AS used"
+		" FROM `tabLMS Homework Material` WHERE `parent` = %s"
+		" AND `parenttype` = 'LMS Homework' FOR UPDATE",
+		(homework_name,),
+		as_dict=True,
+	)[0].used
+	if used + incoming > MATERIAL_QUOTA_BYTES:
 		frappe.throw(
 			_(
 				"The teacher materials together cannot exceed {0} MB (images embedded in"
 				" the description included). Used: {1:.1f} MB, remaining: {2:.1f} MB."
 			).format(
 				MATERIAL_QUOTA_BYTES // (1024 * 1024),
-				state["used"] / (1024 * 1024),
-				state["remaining"] / (1024 * 1024),
+				used / (1024 * 1024),
+				max(0, MATERIAL_QUOTA_BYTES - used) / (1024 * 1024),
 			),
 			frappe.ValidationError,
 		)
