@@ -333,38 +333,84 @@ def save_homework(
 	days = homework_service.validate_days_raw(days)
 
 	normalized = homework_sources.canonicalize_selection(items or [])
+	sanitized_details = homework_materials.sanitize_details(details)
+
 	if name:
 		doc = _require_homework_access(name)
+		# E05 / round 8: the ENTIRE template write runs under the per-template
+		# budget lock, and the COMMIT happens inside it. A parallel save that
+		# released the lock before committing left the next saver reading a
+		# stale child list (its sync then REPLACED the peer's image rows) and
+		# a budget sum that missed the peer's uncommitted bytes -- both saves
+		# passed together. Holding the lock through the commit serializes the
+		# writers completely: the second one reloads fresh, sees the first
+		# one's committed rows, and the budget verdict refuses it.
+		with frappe.db.advisory_lock(f"homework_material_budget:{name}"):
+			if not frappe.flags.in_test:
+				# The waiting saver's transaction still holds its PRE-lock
+				# snapshot (REPEATABLE READ): a reload inside it cannot see the
+				# peer's committed rows, and its optimistic-timestamp UPDATE
+				# then dies with QueryDeadlockError. End the stale snapshot
+				# first -- at this point this request has written nothing yet.
+				frappe.db.rollback()
+			doc = frappe.get_doc("LMS Homework", name)
+			# get_doc serves the request cache: reload() makes the instance
+			# carry the peer's committed children too.
+			doc.reload()
+			doc.title = title
+			doc.days = days
+			doc.details = sanitized_details
+			doc.group = group or None
+			doc.require_solution = 1 if require_solution else 0
+			doc.set("items", [])
+			for item in normalized:
+				doc.append(
+					"items",
+					{
+						"source_type": item["source_type"],
+						"lesson": item["lesson"],
+						"quiz": item["quiz"],
+						"assignment": item["assignment"],
+						"course": item["course"],
+						"label": item["label"],
+						"path": item["path"],
+					},
+				)
+			doc.save()
+			homework_materials.sync_detail_images(doc, doc.details)
+			homework_materials.assert_template_budget(doc.name)
+			if not frappe.flags.in_test:
+				frappe.db.commit()
 	else:
 		doc = frappe.new_doc("LMS Homework")
-	doc.title = title
-	doc.days = days
-	doc.details = homework_materials.sanitize_details(details)
-	doc.group = group or None
-	doc.require_solution = 1 if require_solution else 0
-	doc.set("items", [])
-	for item in normalized:
-		doc.append(
-			"items",
-			{
-				"source_type": item["source_type"],
-				"lesson": item["lesson"],
-				"quiz": item["quiz"],
-				"assignment": item["assignment"],
-				"course": item["course"],
-				"label": item["label"],
-				"path": item["path"],
-			},
-		)
-	doc.save()
-	# E05.10 / round 7: images embedded in the rich details become managed
-	# files of the template (permissions + budget); stale references drop
-	# their rows. The sync and the budget verdict share the SAME per-template
-	# advisory lock add_material holds, with a current-read sum, so parallel
-	# saves cannot each pass and together exceed the budget.
-	with frappe.db.advisory_lock(f"homework_material_budget:{doc.name}"):
-		homework_materials.sync_detail_images(doc.name, doc.details)
-		homework_materials.assert_template_budget(doc.name)
+		doc.title = title
+		doc.days = days
+		doc.details = sanitized_details
+		doc.group = group or None
+		doc.require_solution = 1 if require_solution else 0
+		doc.set("items", [])
+		for item in normalized:
+			doc.append(
+				"items",
+				{
+					"source_type": item["source_type"],
+					"lesson": item["lesson"],
+					"quiz": item["quiz"],
+					"assignment": item["assignment"],
+					"course": item["course"],
+					"label": item["label"],
+					"path": item["path"],
+				},
+			)
+		doc.save()
+		# A brand-new template owns its budget alone, but the image binding
+		# still rides the lock so a first issue racing the first material
+		# add sees one consistent set.
+		with frappe.db.advisory_lock(f"homework_material_budget:{doc.name}"):
+			homework_materials.sync_detail_images(doc, doc.details)
+			homework_materials.assert_template_budget(doc.name)
+			if not frappe.flags.in_test:
+				frappe.db.commit()
 	return {"name": doc.name}
 
 

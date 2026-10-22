@@ -315,15 +315,23 @@ describe('Quiz remount', () => {
 		resourceState.attempts = [
 			{ name: 'SUBM-9', creation: '2026-10-22 10:00:00', score: 1, score_out_of: 1, percentage: 100, passing_percentage: 70 },
 		]
+		// The REAL retake shape (round 8): the newest submission was OFFERED
+		// one question, but its saved result rows carry the credited answers
+		// of earlier attempts -- two rows. The header must follow the pool.
 		resourceState.callHandler = (args) => {
-			const [method, params] = args as [string, { doctype: string; parent?: string }]
+			const [method, params] = args as [
+				string,
+				{ doctype: string; filters?: { parent?: string } },
+			]
 			if (method !== 'frappe.client.get_list') return undefined
-			if (params?.doctype === 'LMS Quiz Submission') return [{ name: 'SUBM-9' }]
+			if (params?.doctype === 'LMS Quiz Submission') {
+				return [{ name: 'SUBM-9', question_pool: JSON.stringify(['Q1']) }]
+			}
 			if (
-					params?.doctype === 'LMS Quiz Result' &&
-					params?.filters?.parent === 'SUBM-9'
-				) {
-				return [{ question_type: 'Choices' }]
+				params?.doctype === 'LMS Quiz Result' &&
+				params?.filters?.parent === 'SUBM-9'
+			) {
+				return [{ question_type: 'Choices' }, { question_type: 'Open Ended' }]
 			}
 			return undefined
 		}

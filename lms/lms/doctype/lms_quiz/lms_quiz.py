@@ -245,8 +245,9 @@ def submit_quiz(
 	quiz_questions = _quiz_question_rows(quiz)
 	credited = _credited_question_rows(quiz, frappe.session.user)
 	carried_graded = merge_credited_results(quiz_questions, credited, data["results"])
+	attempt_pool = _parse_question_pool(question_pool)
 	score_out_of = resolve_attempt_score_out_of(
-		quiz_details, quiz_questions, credited, data["results"], _parse_question_pool(question_pool)
+		quiz_details, quiz_questions, credited, data["results"], attempt_pool
 	)
 
 	proctoring = _build_proctoring_record(quiz_details, violation_count, submission_reason, violation_events)
@@ -262,6 +263,7 @@ def submit_quiz(
 		violation_count=proctoring["violation_count"],
 		submission_reason=proctoring["submission_reason"],
 		carried_graded=carried_graded,
+		attempt_pool=attempt_pool,
 	)
 	percentage = submission.percentage or 0
 	save_progress_after_quiz(quiz_details, percentage)
@@ -966,12 +968,17 @@ def create_submission(
 	violation_count: int = 0,
 	submission_reason: str = "manual",
 	carried_graded: set | None = None,
+	attempt_pool: list | None = None,
 ):
 	submission = frappe.new_doc("LMS Quiz Submission")
 	# Which open answers the SERVER carried from earlier graded attempts (D02):
 	# doc flags never cross the client boundary, so validate_grading_flags can
 	# trust exactly these rows' graded=1 on the member's own save.
 	submission.flags.carried_graded_questions = carried_graded or set()
+	# F03/round 8: what this attempt was OFFERED, distinct from its saved
+	# result rows -- merge_credited_results appends the carried answers, so
+	# the rows alone cannot answer "what was the last retake about".
+	submission.question_pool = json.dumps(attempt_pool) if attempt_pool else None
 	submission.update(
 		{
 			"doctype": "LMS Quiz Submission",

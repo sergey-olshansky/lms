@@ -78,12 +78,16 @@ def sanitize_details(details: str | None) -> str:
 	return sanitize_rich_text(details or "") or ""
 
 
-def sync_detail_images(homework_name: str, details_html: str) -> None:
+def sync_detail_images(homework_doc, details_html: str) -> None:
 	"""Bind every managed-storage image referenced by the details HTML as a
-	``Detail Image`` row, and drop rows whose reference left the HTML
-	(E05.10). Only files owned by the template's author are accepted -- a
-	pasted reference to someone else's file neither renders for students nor
-	enters the budget."""
+	``Detail Image`` row of THIS (freshly loaded) template, and drop rows
+	whose reference left the HTML (E05.10). Only files owned by the template's
+	author are accepted -- a pasted reference to someone else's file neither
+	renders for students nor enters the budget. The caller holds the template
+	budget lock and passes the doc it just reloaded, so the child list this
+	syncs against already contains every parallel writer's committed rows
+	(round 8: a stale list made one save REPLACE a peer's rows)."""
+	homework_name = homework_doc.name
 	referenced_urls = set(_FILE_REF.findall(details_html or ""))
 	owner = frappe.db.get_value("LMS Homework", homework_name, "owner")
 	by_url = {}
@@ -113,7 +117,7 @@ def sync_detail_images(homework_name: str, details_html: str) -> None:
 	if not by_url and not _has_detail_rows(homework_name):
 		return
 
-	doc = frappe.get_doc("LMS Homework", homework_name)
+	doc = homework_doc
 	current = {row.file: row for row in doc.materials if row.role == "Detail Image"}
 	wanted_names = set(by_url.values())
 	files = frappe.get_all(

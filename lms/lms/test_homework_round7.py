@@ -7,9 +7,11 @@ quota races (separate connections, real commits) for both the student
 solution quota (R10) and the teacher template budget (E05).
 """
 
+import json
 import subprocess
 import sys
 import unittest
+from pathlib import Path
 
 import frappe
 from frappe.tests import IntegrationTestCase
@@ -17,7 +19,11 @@ from frappe.tests import IntegrationTestCase
 from lms.lms import homework_api, homework_attachments, homework_materials
 from lms.lms.test_helpers import BaseTestUtils as B
 
-BENCH = "/Users/user/Documents/projects/hwbench/frappe-bench"
+# Environment-derived, not machine-specific: the races spawn child
+# processes against THIS bench/site, wherever they run (reviewer checkout or
+# CI container alike). Skipped when the site does not allow tests.
+BENCH = str(Path(frappe.utils.get_bench_path()))
+SITE = frappe.local.site
 
 
 def _file(owner, *, private=True, filename=None, content=None):
@@ -109,13 +115,27 @@ class _RaceMixin:
 		frappe.set_user("Administrator")
 
 	def _race(self, scripts):
+		"""Two children with a real cross-process barrier right before the
+		quota-verdict section, so the race is the quota lock's to settle --
+		not scheduler luck. Verdicts are STRICT: every child must exit 0 and
+		print exactly one of SAVED/ATTACHED (success) or REFUSED_QUOTA; any
+		other failure surfaces as an ERROR exit the assertions reject."""
 		procs = [
 			subprocess.Popen(
 				[sys.executable, "-c", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
 			)
 			for script in scripts
 		]
-		return [(p.wait(timeout=180), p.stdout.read(), p.stderr.read()) for p in procs]
+		return [(p.wait(timeout=240), p.stdout.read(), p.stderr.read()) for p in procs]
+
+	def _assert_strict_race(self, results, success_word, expect_sum_bytes):
+		for code, out, err in results:
+			self.assertEqual(code, 0, f"child crashed: rc={code}, out={out[-500:]}, err={err[-300:]}")
+			self.assertNotIn("ERROR", out, f"unexpected child failure: {out}")
+		successes = [out for _c, out, _e in results if success_word in out]
+		refusals = [out for _c, out, _e in results if "REFUSED_QUOTA" in out]
+		self.assertEqual(len(successes), 1, f"expected exactly one commit: {[r[1] for r in results]}")
+		self.assertEqual(len(refusals), 1, f"expected exactly one quota refusal: {[r[1] for r in results]}")
 
 	def _cleanup_tree(self):
 		frappe.set_user("Administrator")
@@ -144,17 +164,17 @@ class _RaceMixin:
 
 
 class TestRound7BudgetLock(_RaceMixin, Round7Base):
-	def test_concurrent_saves_cannot_exceed_budget(self):
-		"""Two REAL processes save the same template in parallel, each embedding
-		an 11 MiB private image: each fits alone, together they exceed 20 MiB.
-		The loser must be refused; the committed total stays within budget."""
+	def test_parallel_material_adds_cannot_exceed_budget(self):
+		"""Two REAL processes add an 11 MiB teacher material to the same
+		template in parallel, barrier-aligned before the registration: each
+		fits alone, together 22 MiB > 20 MiB. Exactly one commits, exactly one
+		is refused BY THE BUDGET, the committed total is exactly one file.
+		(Material rows are not details-synced -- nothing drops them -- so this
+		is the genuine budget race.)"""
 		frappe.set_user("Administrator")
-		self._commit()  # fixtures visible to separate connections
-		scripts = [
-			self._saver_script(11),  # each child builds its OWN image file
-			self._saver_script(11),
-		]
-		results = self._race(scripts)
+		self._commit()
+		barrier = Path(frappe.get_site_path("private", "files")) / f"r7bar-{frappe.generate_hash(6)}"
+		results = self._race([self._adder_script(11, barrier, 0), self._adder_script(11, barrier, 1)])
 		try:
 			frappe.set_user("Administrator")
 			frappe.db.rollback()  # fresh snapshot for the verdict
@@ -164,43 +184,98 @@ class TestRound7BudgetLock(_RaceMixin, Round7Base):
 				(self.template,),
 				as_dict=True,
 			)[0].s
-			refused = sum(1 for _code, out, _err in results if "REFUSED" in out)
-			self.assertGreaterEqual(refused, 1, f"nobody refused; outputs: {[r[1] for r in results]}; stderr: {[r[2][-400:] for r in results]}")
-			self.assertLessEqual(
-				used,
-				homework_materials.MATERIAL_QUOTA_BYTES,
-				f"budget exceeded: {used}",
-			)
+			self._assert_strict_race(results, "ADDED", used)
+			self.assertEqual(used, 11 * 1024 * 1024, f"expected exactly one material: {used}")
+			self.assertLessEqual(used, homework_materials.MATERIAL_QUOTA_BYTES)
 		finally:
+			barrier.unlink(missing_ok=True)
 			self._cleanup_tree()
 
-	def _saver_script(self, size_mb):
+	def test_single_save_with_oversized_images_refused(self):
+		"""One save whose details reference two 11 MiB private images is
+		refused by the budget verdict outright (22 MiB > 20 MiB) -- the
+		images-vs-budget guard does not depend on interleaving at all."""
+		frappe.set_user("Administrator")
+		images = []
+		for index in range(2):
+			# Distinct content per image: frappe dedupes byte-identical files
+			# to one URL, and one shared row cannot exceed anything.
+			img = _file(
+				self.teacher.name,
+				private=True,
+				filename=f"big-{index}-{frappe.generate_hash(6)}.png",
+				content=(
+					bytes([137, 80, 78, 71, 13, 10, 26, 10])
+					+ frappe.generate_hash(length=32).encode()
+					+ b"x" * (11 * 1024 * 1024 - 40)
+				),
+			)
+			images.append(img)
+		self.assertNotEqual(images[0].file_url, images[1].file_url)
+		frappe.set_user(self.teacher.name)
+		details = f'<p><img src="{images[0].file_url}"><img src="{images[1].file_url}"></p>'
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			homework_api.save_homework(
+				title="R7 oversize", days=3,
+				items=[{"source_type": "Lesson", "name": self.lesson.name}],
+				details=details,
+			)
+		self.assertIn("cannot exceed", str(ctx.exception))
+
+	def _adder_script(self, size_mb, barrier, slot):
 		return f"""
 from pathlib import Path
 import frappe
-frappe.init(site="hwtest.local", sites_path="{BENCH}/sites")
+frappe.init(site="{SITE}", sites_path="{BENCH}/sites")
 frappe.connect()
+# The raced operations never depend on background jobs; not enqueueing keeps
+# a workerless bench from tripping QueueOverloaded under test load.
+frappe.enqueue = lambda *args, **kwargs: None
 frappe.set_user({self.teacher.name!r})
-from lms.lms import homework_api
+from lms.lms import homework_materials
 size = {size_mb} * 1024 * 1024
+barrier = Path({str(barrier)!r})
 try:
     f = frappe.new_doc("File")
-    f.update({{"file_name": "race-" + frappe.generate_hash(6) + ".png",
-               "is_private": 1, "content": bytes([137, 80, 78, 71, 13, 10, 26, 10]) + b"x" * (size - 8)}})
+    f.update({{"file_name": "mat-" + frappe.generate_hash(6) + ".txt",
+               "is_private": 1, "content": b"x" * size}})
     f.save(ignore_permissions=True)
     frappe.db.commit()
-    homework_api.save_homework(
-        name={self.template!r},
-        title="R7 race",
-        days=3,
-        items=[{{"source_type": "Lesson", "name": {self.lesson.name!r}}}],
-        details='<p><img src="' + f.file_url + '"></p>',
-    )
+    if {slot} == 0:
+        barrier.write_text("go")
+    else:
+        import time
+        for _ in range(200):
+            if barrier.exists():
+                break
+            time.sleep(0.05)
+    import time as _t
+    for attempt in range(2):
+        try:
+            homework_materials.add_material({self.template!r}, f.name)
+            break
+        except frappe.QueryDeadlockError:
+            # A framework-level naming race on concurrent child inserts; one
+            # bounded retry, then the verdict (success or the QUOTA refusal)
+            # still comes from the serialized budget lock.
+            if attempt == 1:
+                raise
+            frappe.db.rollback()
+            _t.sleep(0.3)
     frappe.db.commit()
-    print("SAVED")
+    print("ADDED")
+except frappe.ValidationError as exc:
+    frappe.db.rollback()
+    msg = str(exc)
+    if "cannot exceed" in msg:
+        print("REFUSED_QUOTA")
+    else:
+        print("ERROR validation:", msg[:200])
+        raise SystemExit(3)
 except Exception as exc:
     frappe.db.rollback()
-    print("REFUSED", type(exc).__name__)
+    print("ERROR", type(exc).__name__, str(exc)[:200])
+    raise SystemExit(4)
 frappe.destroy()
 """
 
@@ -208,12 +283,13 @@ frappe.destroy()
 class TestRound7SolutionQuotaRace(_RaceMixin, Round7Base):
 	def test_two_connections_cannot_double_spend_quota(self):
 		"""R10 tail: two REAL processes register 15 MiB and 6 MiB solutions on
-		the same assignment in parallel; the pair exceeds 20 MiB together, so
-		exactly the fitting subset commits and the total stays within budget."""
+		the same assignment, barrier-aligned before the registration; whichever
+		wins, the pair exceeds 20 MiB together, so exactly one commits, one is
+		refused by the quota, and the committed sum is the winner's size."""
 		frappe.set_user("Administrator")
 		self._commit()
-		scripts = [self._attacher_script(15), self._attacher_script(6)]
-		results = self._race(scripts)
+		barrier = Path(frappe.get_site_path("private", "files")) / f"r7sol-{frappe.generate_hash(6)}"
+		results = self._race([self._attacher_script(15, barrier, 0), self._attacher_script(6, barrier, 1)])
 		try:
 			frappe.set_user("Administrator")
 			frappe.db.rollback()
@@ -223,36 +299,54 @@ class TestRound7SolutionQuotaRace(_RaceMixin, Round7Base):
 				(self.assignment,),
 				as_dict=True,
 			)[0].s
-			refused = sum(1 for _code, out, _err in results if "REFUSED" in out)
-			self.assertGreaterEqual(refused, 1, f"nobody refused; outputs: {[r[1] for r in results]}; stderr: {[r[2][-400:] for r in results]}")
-			self.assertLessEqual(
-				used,
-				homework_attachments.ATTACHMENT_QUOTA_BYTES,
-				f"quota exceeded: {used}",
-			)
+			self._assert_strict_race(results, "ATTACHED", used)
+			self.assertIn(used, (15 * 1024 * 1024, 6 * 1024 * 1024), f"unexpected total: {used}")
+			self.assertLessEqual(used, homework_attachments.ATTACHMENT_QUOTA_BYTES)
 		finally:
+			barrier.unlink(missing_ok=True)
 			self._cleanup_tree()
 
-	def _attacher_script(self, size_mb):
+	def _attacher_script(self, size_mb, barrier, slot):
 		return f"""
 from pathlib import Path
 import frappe
-frappe.init(site="hwtest.local", sites_path="{BENCH}/sites")
+frappe.init(site="{SITE}", sites_path="{BENCH}/sites")
 frappe.connect()
+# The raced operations never depend on background jobs; not enqueueing keeps
+# a workerless bench from tripping QueueOverloaded under test load.
+frappe.enqueue = lambda *args, **kwargs: None
 frappe.set_user({self.student.name!r})
 from lms.lms import homework_attachments
 size = {size_mb} * 1024 * 1024
+barrier = Path({str(barrier)!r})
 try:
     f = frappe.new_doc("File")
     f.update({{"file_name": "sol-" + frappe.generate_hash(6) + ".txt",
                "is_private": 1, "content": b"x" * size}})
     f.save(ignore_permissions=True)
     frappe.db.commit()
+    if {slot} == 0:
+        barrier.write_text("go")
+    else:
+        import time
+        for _ in range(200):
+            if barrier.exists():
+                break
+            time.sleep(0.05)
     homework_attachments.attach_file({self.assignment!r}, f.name)
     frappe.db.commit()
     print("ATTACHED")
+except frappe.ValidationError as exc:
+    frappe.db.rollback()
+    msg = str(exc)
+    if "cannot exceed" in msg:
+        print("REFUSED_QUOTA")
+    else:
+        print("ERROR validation:", msg[:200])
+        raise SystemExit(3)
 except Exception as exc:
     frappe.db.rollback()
-    print("REFUSED", type(exc).__name__)
+    print("ERROR", type(exc).__name__, str(exc)[:200])
+    raise SystemExit(4)
 frappe.destroy()
 """

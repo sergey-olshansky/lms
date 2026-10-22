@@ -1412,18 +1412,36 @@ const resolveLastAttemptTypes = async () => {
 		// Independent of the attempts resource: that one loads only for
 		// attempt-LIMITED quizzes, and the reload scenario is exactly an
 		// unlimited quiz that was fully credited.
+		//
+		// The OFFERED POOL of the newest attempt is the header's truth
+		// (round 8): its saved result rows also carry the credited answers
+		// of earlier attempts, so the rows alone would describe the whole
+		// cumulative coverage instead of the last retake as it was sat.
 		const submissions = await call('frappe.client.get_list', {
 			doctype: 'LMS Quiz Submission',
 			filters: { member: user.data.name, quiz: quiz.data.name },
-			fields: ['name'],
+			fields: ['name', 'question_pool'],
 			order_by: 'creation desc',
 			limit_page_length: 1,
 		})
-		const newest = submissions?.[0]?.name
-		if (!newest) return
+		const newest = submissions?.[0]
+		const pool = newest?.question_pool
+		if (typeof pool === 'string' && pool.trim()) {
+			const names = JSON.parse(pool)
+			const types = (Array.isArray(names) ? names : [])
+				.map((name) => questionsByName.value[name]?.type)
+				.filter(Boolean)
+			if (types.length) {
+				lastAttemptTypes.value = types
+				return
+			}
+		}
+		// Pre-pool submissions (or pool-less clients): the result rows are
+		// the best surviving witness of the attempt's coverage.
+		if (!newest?.name) return
 		const rows = await call('frappe.client.get_list', {
 			doctype: 'LMS Quiz Result',
-			filters: { parenttype: 'LMS Quiz Submission', parent: newest },
+			filters: { parenttype: 'LMS Quiz Submission', parent: newest.name },
 			fields: ['question_type'],
 			limit_page_length: 0,
 		})
