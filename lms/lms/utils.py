@@ -2224,10 +2224,16 @@ def get_lesson(course: str, chapter: str, lesson: int) -> dict:
 
 	# Local import: permissions imports from utils at module load, so importing it
 	# at the top of utils would create a cycle.
-	from lms.lms.permissions import get_lesson_gate
+	from lms.lms.permissions import get_lesson_gate, homework_granted_sources
+
+	# E04: a lesson the student holds through an active homework assignment
+	# opens regardless of the course's sequential gate -- the grant IS the
+	# teacher's explicit selection, and the sequence of unselected lessons
+	# must not override it (spec E04.8).
+	granted_lessons = homework_granted_sources(frappe.session.user)["lessons"]
 
 	locked, resume = get_lesson_gate(course)
-	if lesson_name in locked:
+	if lesson_name in locked and lesson_name not in granted_lessons:
 		return {
 			"locked": 1,
 			"title": lesson_details.title,
@@ -2275,7 +2281,14 @@ def get_lesson(course: str, chapter: str, lesson: int) -> dict:
 	else:
 		progress = get_progress(course, lesson_details.name)
 
-	neighbours = get_neighbour_lesson(course, chapter, lesson)
+	# E04/W06: a student whose ONLY reach into this course is the homework
+	# grant navigates within the granted set -- Prev/Next skip to the next
+	# granted lesson instead of leading into a closed neighbour. A student
+	# with a real enrollment keeps the full-course neighbours.
+	if not membership and granted_lessons:
+		neighbours = _granted_neighbours(course, chapter, lesson, granted_lessons)
+	else:
+		neighbours = get_neighbour_lesson(course, chapter, lesson)
 
 	lesson_details.chapter_title = chapter_title
 	lesson_details.next = neighbours["next"]
@@ -2310,8 +2323,8 @@ def get_video_details(lesson_name: str) -> list:
 def get_neighbour_lesson(course: str, chapter: str, lesson: int) -> dict:
 	"""Prev/next lesson numbers in document (depth-first) order, dash-path form.
 
-	The old "{chapter}.{lesson}" dot pairs are gone: a neighbour may now live in a
-	different section, so the number has to carry the whole section path.
+	The old "{chapter}.{lesson}" dot pairs are gone: a neighbour may now live in
+	a different section, so the number has to carry the whole section path.
 	"""
 	numbers = [row.number for row in get_ordered_lesson_rows(course)]
 	current = f"{chapter}-{lesson}"
@@ -2320,6 +2333,23 @@ def get_neighbour_lesson(course: str, chapter: str, lesson: int) -> dict:
 	except ValueError:
 		return {"prev": None, "next": None}
 
+	return {
+		"prev": numbers[index - 1] if index > 0 else None,
+		"next": numbers[index + 1] if index + 1 < len(numbers) else None,
+	}
+
+
+def _granted_neighbours(course: str, chapter: str, lesson: int, granted: set) -> dict:
+	"""Prev/next WITHIN the homework-granted lessons of a course (E04/W06):
+	the nearest granted lesson on either side in document order, never a
+	closed neighbour the reader cannot open."""
+	rows = [row for row in get_ordered_lesson_rows(course) if row.name in granted]
+	numbers = [row.number for row in rows]
+	current = f"{chapter}-{lesson}"
+	try:
+		index = numbers.index(current)
+	except ValueError:
+		return {"prev": None, "next": None}
 	return {
 		"prev": numbers[index - 1] if index > 0 else None,
 		"next": numbers[index + 1] if index + 1 < len(numbers) else None,

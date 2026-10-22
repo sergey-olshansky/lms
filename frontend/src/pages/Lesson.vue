@@ -17,6 +17,17 @@
 			</template>
 		</PageHeader>
 
+		<!-- Task #35: the homework context rides in ?hw=, so the way back to the
+		assignment is one click from any lesson of the composition (spec 5.3.6),
+		with live progress beside it. The query survives quiz submits (same page)
+		and prev/next navigation. -->
+		<HomeworkContextBanner
+			v-if="homeworkContext"
+			ref="homeworkBanner"
+			:assignment-id="homeworkContext"
+			data-testid="homework-back-banner"
+		/>
+
 		<div
 			v-if="isMobile && lessonTotal"
 			class="flex items-center gap-2 border-b bg-surface-base px-5 py-2.5"
@@ -259,6 +270,9 @@
 								:content="lesson.data.body"
 								:youtube="lesson.data.youtube"
 								:quizId="lesson.data.quiz_id"
+								@submitted="
+									() => homeworkBanner?.refresh()
+								"
 							/>
 						</div>
 					</div>
@@ -400,13 +414,14 @@ import LessonNavButtons from '@/components/LessonNavButtons.vue'
 import StudentLessonSidebar from '@/components/StudentLessonSidebar.vue'
 import BottomSheet from '@/components/BottomSheet.vue'
 import PageHeader from '@/components/Layouts/pages/PageHeader.vue'
+import HomeworkContextBanner from '@/components/HomeworkContextBanner.vue'
 import HeaderButton from '@/components/HeaderButton.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 import Notes from '@/components/Notes/Notes.vue'
 import InlineLessonMenu from '@/components/Notes/InlineLessonMenu.vue'
 import { parseStoredEditorJs } from '@/utils/lessonForm'
 import { isLessonSelection } from '@/utils/lessonSelection'
-import { getLmsRoute } from '@/utils/basePath'
+import { redirectToLogin as redirectToLoginHelper } from '@/utils/loginReturn'
 import { provideStudentView } from '@/composables/useStudentView'
 import type { UserResource } from '@/composables/useStudentView'
 import type { Note, Notes as NotesResource } from '@/types'
@@ -602,6 +617,10 @@ const setupLesson = (data: LessonPayload): void => {
 		editor.value = renderEditor('editor', data.content)
 		contentUnreadable.value = !editor.value
 	}
+	// Content shown (or a body/video lesson with nothing to parse): the visit is
+	// a real opening for homework purposes the moment the page is usable.
+	if (!contentUnreadable.value)
+		recordHomeworkOpen((data as { name?: string }).name)
 	if (hasInstructorNotesToRender(data.instructor_content))
 		instructorEditor.value = renderEditor(
 			'instructor-content',
@@ -831,7 +850,7 @@ const goToLessonNumber = (
 			chapterNumber,
 			lessonNumber,
 		},
-		query: studentViewQuery.value,
+		query: lessonQuery(),
 	}
 	if (replace) router.replace(target)
 	else router.push(target)
@@ -869,7 +888,7 @@ const switchLesson = (direction: 'prev' | 'next'): void => {
 			chapterNumber: target.chapterNumber,
 			lessonNumber: target.lessonNumber,
 		},
-		query: studentViewQuery.value,
+		query: lessonQuery(),
 	})
 }
 
@@ -1200,6 +1219,33 @@ const studentViewQuery = computed(() =>
 	isStudentView.value ? { studentView: 1 } : undefined
 )
 
+// Task #35: the ?hw= assignment context. Kept through prev/next navigation so
+// the homework never loses its way back between the composition's lessons.
+const homeworkContext = computed(() =>
+	typeof route.query.hw === 'string' ? route.query.hw : ''
+)
+
+const lessonQuery = () => {
+	const query: Record<string, string> = {}
+	if (studentViewQuery.value) Object.assign(query, studentViewQuery.value)
+	if (homeworkContext.value) query.hw = homeworkContext.value
+	return Object.keys(query).length ? query : undefined
+}
+
+// A confirmed opening of this lesson for the session student (spec 6.1): fired
+// only after the page actually loaded and rendered, never on hover, prefetch or
+// a teacher's preview; the server ignores it without a matching requirement.
+// B11: the banner's live progress follows the credited opening immediately.
+const homeworkBanner = ref(null)
+const recordHomeworkOpen = (lessonName?: string) => {
+	if (!lessonName || !lesson.data?.membership) return
+	call('lms.lms.homework_api.record_material_opened', {
+		lesson: lessonName,
+	})
+		.then(() => homeworkBanner.value?.refresh())
+		.catch(() => {})
+}
+
 // Reads the real user, not the student-view shadow, so the way back to the
 // editor survives ?studentView=1.
 const canEditLesson = computed(() => {
@@ -1332,11 +1378,10 @@ watch(allowDiscussions, () => {
 	}
 })
 
-const redirectToLogin = () => {
-	window.location.href = `/login?redirect-to=${getLmsRoute(
-		`courses/${props.courseName}`
-	)}`
-}
+// E01/R07: a guest deep link returns to THIS exact lesson (path, ?hw= query
+// and hash included) after login -- the shared helper, not a course-root
+// URL that loses the reader's place.
+const redirectToLogin = () => redirectToLoginHelper()
 
 usePageMeta(() => {
 	return {

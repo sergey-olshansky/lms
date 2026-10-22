@@ -41,10 +41,13 @@ def attempt_row_status(row) -> str:
 
 	Same order of questions as the frontend's ``attemptRowStatus``:
 
-	- An open-ended answer that carries content has no verdict until an
-	  instructor grades it — read as pending review, never as incorrect — unless
-	  the grade already sits at full marks, which is what "credited" means (#32)
-	  and reads as correct.
+	- An open-ended answer that carries content and no recorded verdict has no
+	  verdict yet — read as pending review, never as incorrect.
+	- A RECORDED verdict (``graded``, task #35 D03) is final whatever the
+	  marks: full marks read correct, a deliberate zero or a partial grade read
+	  incorrect — a finished judgement is never "awaiting review".
+	- A pre-flag record already sitting at full marks is the "credited" reading
+	  (#32): no manual grade is invented for it, the marks themselves speak.
 	- An empty answer is a skipped question whatever its type.
 	- Only then does the stored binary verdict decide correct vs incorrect.
 	"""
@@ -54,6 +57,8 @@ def attempt_row_status(row) -> str:
 	answered = bool((answer or "").strip())
 	if row.get("question_type") == "Open Ended" and answered:
 		marks_out_of = cint(row.get("marks_out_of"))
+		if cint(row.get("graded")):
+			return "correct" if cint(row.get("marks")) >= marks_out_of else "incorrect"
 		if marks_out_of > 0 and cint(row.get("marks")) >= marks_out_of:
 			return "correct"
 		return "pending"

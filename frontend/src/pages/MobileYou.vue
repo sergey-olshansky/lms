@@ -6,12 +6,13 @@
 			data-testid="you-signed-out"
 		>
 			<p class="text-p-base text-ink-gray-6">{{ signedOutPrompt }}</p>
-			<a
-				href="/login"
+			<button
+				type="button"
 				class="text-p-base font-medium text-ink-gray-9 underline underline-offset-2"
+				@click="redirectToLogin()"
 			>
 				{{ logInLabel }}
-			</a>
+			</button>
 		</div>
 
 		<template v-else>
@@ -80,6 +81,7 @@ import MobilePageLayout from '@/components/Layouts/pages/mobile/MobilePageLayout
 import SettingsRowList from '@/components/Layouts/settings/mobile/SettingsRowList.vue'
 import { buildYouRows } from '@/components/Settings/Mobile/mobileRows'
 import type { SettingsUser } from '@/components/Settings/Mobile/mobileRows'
+import { redirectToLogin } from '@/utils/loginReturn'
 
 const router = useRouter()
 const { logout, brand } = sessionStore()
@@ -198,9 +200,9 @@ const viewProfileLabel = __('View profile')
 // BottomSheet's body is px-2 against a px-5 header, so a caller adds 12px to
 // land on the header's 20px — which is MobilePageLayout's body inset too.
 
-// A plain <a>, not a router link: /login is Frappe's own server-rendered page,
-// outside the SPA — the same reason MobileLayout's Log in tab uses
-// `window.location`.
+// /login is Frappe's own server-rendered page, outside the SPA, so the tap
+// goes through window.location -- the shared helper, which also carries the
+// current page as the post-login return address.
 const signedOutPrompt = __('Log in to see your account.')
 const logInLabel = __('Log in')
 

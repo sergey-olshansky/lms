@@ -109,11 +109,37 @@
 								>
 									{{ __('Marks:') }}
 								</span>
+								<!-- Task #35 (C01): a typed value IS the verdict --
+								     including a deliberate 0 -- and writes the row's
+								     graded flag in the same edit; clearing the input
+								     takes the verdict back. The flag survives the Int
+								     serialization that stores an ungraded answer as 0.
+								     Task #35 (D01): grades travel through the narrow
+								     save_submission_grades action -- plain Course
+								     Creators hold no write on the doctype, so the
+								     generic document save answers them with 403.
+								     R06: the editor is tied to the ROW TYPE, not the
+								     computed verdict -- a typed verdict flips the
+								     chip to correct/incorrect at once, and the field
+								     must survive that to stay editable. Only an
+								     answered open question shows a field (skipped
+								     rows are filtered out of the report); the
+								     grader's own preview submission stays static. -->
 								<FormControl
-									v-if="row.status === 'pending'"
+									v-if="
+										resultRow.question_type === 'Open Ended' &&
+										!isOwnSubmission
+									"
 									v-model="resultRow.marks"
 									type="number"
 									class="w-20"
+									@update:model-value="
+										(value) => {
+											resultRow.graded =
+												value === null || value === '' ? 0 : 1
+											markRowDirty(resultRow)
+										}
+									"
 								/>
 								<span
 									v-else
@@ -414,7 +440,9 @@ const questionsByName = computed(
 // clears the same allowlist every external window of the app does.
 const downloadPdf = () => {
 	openExternal(
-		`/api/method/lms.lms.doctype.lms_quiz.quiz_attempt_report.download_attempt_report_pdf?submission=${encodeURIComponent(props.submission)}`
+		`/api/method/lms.lms.doctype.lms_quiz.quiz_attempt_report.download_attempt_report_pdf?submission=${encodeURIComponent(
+			props.submission
+		)}`
 	)
 }
 
@@ -518,12 +546,48 @@ const isOwnSubmission = computed(
 		submissionDetails.doc?.member === user.data?.name
 )
 
+// Task #35 (D01): grades commit through the narrow server action, not the
+// generic document save. Only rows the grader actually touched travel; the
+// endpoint re-checks the reviewer's authority server-side.
+const gradeResource = createResource({
+	url: 'lms.lms.doctype.lms_quiz_submission.lms_quiz_submission.save_submission_grades',
+})
+
+// R06: per-row sequence numbers. A save in flight captures each dirty row's
+// seq; on success only rows whose seq has NOT advanced since (no newer
+// keystroke) are cleared, so edits typed during the request stay queued for
+// the next save instead of being silently dropped.
+const dirtyRows = ref(new Map())
+const rowSeq = new Map()
+
+const markRowDirty = (resultRow) => {
+	const seq = (rowSeq.get(resultRow.name) || 0) + 1
+	rowSeq.set(resultRow.name, seq)
+	dirtyRows.value.set(resultRow.name, {
+		name: resultRow.name,
+		marks: resultRow.marks ?? 0,
+		graded: resultRow.graded ? 1 : 0,
+		seq,
+	})
+	autoSave()
+}
+
 const saveSubmission = (opts = {}) => {
-	if (isOwnSubmission.value) return
-	submissionDetails.save.submit(
-		{},
+	if (isOwnSubmission.value || !dirtyRows.value.size) return
+	const batch = [...dirtyRows.value.values()]
+	gradeResource.submit(
+		{
+			submission: props.submission,
+			grades: batch.map(({ name, marks, graded }) => ({ name, marks, graded })),
+		},
 		{
 			onSuccess() {
+				for (const sent of batch) {
+					const current = dirtyRows.value.get(sent.name)
+					if (current && current.seq === sent.seq) {
+						dirtyRows.value.delete(sent.name)
+					}
+				}
 				if (!opts.silent) toast.success(__('Saved'))
 			},
 			onError(err) {
@@ -536,18 +600,11 @@ const saveSubmission = (opts = {}) => {
 // Marks are typed one field at a time, so the grade is committed as it is
 // entered rather than left to a Save the grader may never press.
 const autoSave = useDebounceFn(() => {
-	if (submissionDetails.isDirty) saveSubmission({ silent: true })
+	saveSubmission({ silent: true })
 }, 1000)
 
-watch(
-	() => submissionDetails.isDirty,
-	(dirty) => {
-		if (dirty) autoSave()
-	}
-)
-
 onBeforeUnmount(() => {
-	if (submissionDetails.isDirty) saveSubmission({ silent: true })
+	if (dirtyRows.value.size) saveSubmission({ silent: true })
 })
 
 usePageMeta(() => ({

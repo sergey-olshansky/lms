@@ -344,6 +344,7 @@ import type { LMSBatch } from '@/types/lms/LMSBatch'
 import type { CourseInstructor } from '@/types/lms/CourseInstructor'
 import type { Resource, BatchDetails, SessionUser } from '@/types'
 import RichTextEditor from '@/components/RichTextEditor.vue'
+import { redirectToLogin } from '@/utils/loginReturn'
 
 interface DialogAction {
 	label: string
@@ -461,7 +462,7 @@ const autoSave = useDebounceFn((): void => {
 }, 1000)
 
 onMounted(() => {
-	if (!user.data) window.location.href = '/login'
+	if (!user.data) redirectToLogin()
 })
 
 useKeyboardShortcuts({ shortcuts: [saveShortcut(() => submitBatch())] })

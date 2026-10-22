@@ -1,0 +1,354 @@
+{
+ "actions": [],
+ "autoname": "format:HW-ASN-{#####}",
+ "creation": "2026-10-21 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "homework",
+  "teacher",
+  "student",
+  "column_break_0",
+  "status",
+  "due_at",
+  "snapshot_section",
+  "title",
+  "days",
+  "details",
+  "progress_section",
+  "total_requirements",
+  "completed_requirements",
+  "lessons_total",
+  "quizzes_total",
+  "quizzes_completed",
+  "column_break_progress",
+  "first_opened_at",
+  "submitted_for_review_at",
+  "reviewed_by",
+  "reviewed_at",
+  "revision_section",
+  "needs_revision",
+  "last_revision_comment",
+  "cancellation_section",
+  "cancelled",
+  "cancelled_by",
+  "cancelled_at",
+  "cancellation_reason",
+  "idempotency_section",
+  "assignment_key",
+  "assigned_at",
+  "requirements_section",
+  "requirements",
+  "history_section",
+  "history",
+  "materials",
+  "require_solution",
+  "solution_submitted_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "homework",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Homework",
+   "options": "LMS Homework",
+   "reqd": 1,
+   "search_index": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "teacher",
+   "fieldtype": "Link",
+   "label": "Teacher",
+   "options": "User",
+   "reqd": 1,
+   "search_index": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Student",
+   "options": "User",
+   "reqd": 1,
+   "search_index": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "column_break_0",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "To Do",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "To Do\nIn Progress\nReview\nDone",
+   "read_only": 1
+  },
+  {
+   "fieldname": "due_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Due At",
+   "search_index": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "snapshot_section",
+   "fieldtype": "Section Break",
+   "label": "Snapshot"
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Title"
+  },
+  {
+   "fieldname": "days",
+   "fieldtype": "Int",
+   "label": "Days"
+  },
+  {
+   "fieldname": "details",
+   "fieldtype": "Long Text",
+   "label": "Details"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "progress_section",
+   "fieldtype": "Section Break",
+   "label": "Progress"
+  },
+  {
+   "default": "0",
+   "fieldname": "total_requirements",
+   "fieldtype": "Int",
+   "label": "Total Requirements",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "completed_requirements",
+   "fieldtype": "Int",
+   "label": "Completed Requirements",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "lessons_total",
+   "fieldtype": "Int",
+   "label": "Lessons Total",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "quizzes_total",
+   "fieldtype": "Int",
+   "label": "Quizzes Total",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "quizzes_completed",
+   "fieldtype": "Int",
+   "label": "Quizzes Completed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_progress",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "first_opened_at",
+   "fieldtype": "Datetime",
+   "label": "First Opened At"
+  },
+  {
+   "fieldname": "submitted_for_review_at",
+   "fieldtype": "Datetime",
+   "label": "Submitted For Review At"
+  },
+  {
+   "fieldname": "reviewed_by",
+   "fieldtype": "Link",
+   "label": "Reviewed By",
+   "options": "User"
+  },
+  {
+   "fieldname": "reviewed_at",
+   "fieldtype": "Datetime",
+   "label": "Reviewed At"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "revision_section",
+   "fieldtype": "Section Break",
+   "label": "Revision"
+  },
+  {
+   "default": "0",
+   "fieldname": "needs_revision",
+   "fieldtype": "Check",
+   "label": "Needs Revision"
+  },
+  {
+   "fieldname": "last_revision_comment",
+   "fieldtype": "Long Text",
+   "label": "Last Revision Comment"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "cancellation_section",
+   "fieldtype": "Section Break",
+   "label": "Cancellation"
+  },
+  {
+   "default": "0",
+   "fieldname": "cancelled",
+   "fieldtype": "Check",
+   "label": "Cancelled"
+  },
+  {
+   "fieldname": "cancelled_by",
+   "fieldtype": "Link",
+   "label": "Cancelled By",
+   "options": "User"
+  },
+  {
+   "fieldname": "cancelled_at",
+   "fieldtype": "Datetime",
+   "label": "Cancelled At"
+  },
+  {
+   "fieldname": "cancellation_reason",
+   "fieldtype": "Long Text",
+   "label": "Cancellation Reason"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "idempotency_section",
+   "fieldtype": "Section Break",
+   "label": "Idempotency"
+  },
+  {
+   "fieldname": "assignment_key",
+   "fieldtype": "Data",
+   "label": "Assignment Key",
+   "read_only": 1,
+   "search_index": 1,
+   "set_only_once": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "assigned_at",
+   "fieldtype": "Datetime",
+   "label": "Assigned At"
+  },
+  {
+   "fieldname": "requirements_section",
+   "fieldtype": "Section Break",
+   "label": "Requirements"
+  },
+  {
+   "fieldname": "requirements",
+   "fieldtype": "Table",
+   "label": "Requirements",
+   "options": "LMS Homework Requirement"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "history_section",
+   "fieldtype": "Section Break",
+   "label": "History"
+  },
+  {
+   "fieldname": "history",
+   "fieldtype": "Table",
+   "label": "History",
+   "options": "LMS Homework History",
+   "read_only": 1
+  },
+  {
+   "fieldname": "materials",
+   "fieldtype": "Table",
+   "label": "LMS Homework Assignment Material",
+   "options": "LMS Homework Assignment Material"
+  },
+  {
+   "fieldname": "require_solution",
+   "fieldtype": "Check",
+   "label": "Require Solution",
+   "default": "0"
+  },
+  {
+   "fieldname": "solution_submitted_at",
+   "fieldtype": "Datetime",
+   "label": "Solution Submitted At"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-10-21 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "LMS",
+ "name": "LMS Homework Assignment",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "select": 1,
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "if_owner": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Course Creator",
+   "select": 1,
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Moderator",
+   "select": 1,
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "LMS Student",
+   "select": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title",
+ "track_changes": 1
+}

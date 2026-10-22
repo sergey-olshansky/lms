@@ -18,6 +18,7 @@
 </template>
 <script setup>
 import { Button } from 'frappe-ui'
+import { redirectToLogin } from '@/utils/loginReturn'
 
 const props = defineProps({
 	title: {
@@ -34,11 +35,17 @@ const props = defineProps({
 	},
 	buttonLink: {
 		type: String,
-		default: '/login',
+		default: '',
 	},
 })
 
 const redirect = () => {
-	window.location.href = props.buttonLink
+	// A custom link wins; the default is the shared helper so a guest who
+	// landed on a denied deep link comes back to it after signing in.
+	if (props.buttonLink) {
+		window.location.href = props.buttonLink
+	} else {
+		redirectToLogin()
+	}
 }
 </script>

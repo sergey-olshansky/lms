@@ -115,6 +115,45 @@ describe('attemptRowStatus', () => {
 		).toBe('pending')
 	})
 
+	// Task #35 (D03): a RECORDED verdict (graded) is final whatever the marks.
+	// A deliberate zero or a partial grade is a finished judgement — never
+	// "awaiting review"; only an unflagged answer may promise a review.
+	it('marks a recorded partial or zero grade incorrect, not pending', () => {
+		expect(
+			attemptRowStatus({
+				question_type: 'Open Ended',
+				answer: '<p>My essay</p>',
+				is_correct: 0,
+				marks: 2,
+				marks_out_of: 5,
+				graded: 1,
+			})
+		).toBe('incorrect')
+		expect(
+			attemptRowStatus({
+				question_type: 'Open Ended',
+				answer: '<p>My essay</p>',
+				is_correct: 0,
+				marks: 0,
+				marks_out_of: 5,
+				graded: 1,
+			})
+		).toBe('incorrect')
+	})
+
+	it('marks a recorded full grade correct', () => {
+		expect(
+			attemptRowStatus({
+				question_type: 'Open Ended',
+				answer: '<p>My essay</p>',
+				is_correct: 0,
+				marks: 5,
+				marks_out_of: 5,
+				graded: 1,
+			})
+		).toBe('correct')
+	})
+
 	it('marks a blank open-ended question skipped — nothing to review', () => {
 		expect(
 			attemptRowStatus({
