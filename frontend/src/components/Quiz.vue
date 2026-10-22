@@ -1118,6 +1118,19 @@ const populateQuestions = () => {
 	} else {
 		questions.value = offered
 	}
+	// F03: the offered composition IS the attempt's composition -- snapshot
+	// it before any submission empties the pool. On a reload of a fully
+	// credited quiz the offered pool is empty by design; the card shows the
+	// last attempt's summary, whose coverage is every credited question.
+	if (questions.value.length) {
+		lastAttemptTypes.value = questions.value.map(
+			(row: QuizQuestionRow) => questionsByName.value[row.question]?.type
+		)
+	} else if (!lastAttemptTypes.value.length && offered.length === 0 && resolvable.length) {
+		lastAttemptTypes.value = resolvable.map(
+			(row: QuizQuestionRow) => questionsByName.value[row.question]?.type
+		)
+	}
 }
 
 const setupTimer = () => {
@@ -1193,20 +1206,26 @@ const attemptsLeft = computed(() => {
 
 const quizSubtitle = computed(() => {
 	// F03: while a finished attempt's result is on screen, the header
-	// describes THAT attempt -- the composition the submission actually
-	// covers -- never the retake pool, which drops every credited question
-	// and would read as "0 questions" right after a 100% pass.
-	if (quizSubmission.data?.result?.length) {
-		return formatQuizSubtitle(
-			quizSubmission.data.result.map((row) => row.question_type),
-			quiz.data?.passing_percentage
-		)
+	// describes THAT attempt -- the composition the attempt covered -- never
+	// the retake pool, which drops every credited question and would read as
+	// "0 questions" right after a 100% pass or on a reload of a fully
+	// credited quiz.
+	if (
+		(quizSubmission.data || !questions.value.length) &&
+		lastAttemptTypes.value.length
+	) {
+		return formatQuizSubtitle(lastAttemptTypes.value, quiz.data?.passing_percentage)
 	}
 	return formatQuizSubtitle(
 		questions.value.map((row) => questionsByName.value[row.question]?.type),
 		quiz.data?.passing_percentage
 	)
 })
+
+// The types of the questions THIS attempt was offered, captured at populate
+// time -- after a pass the live pool empties (every question credited), but
+// the finished attempt's summary still describes the attempt it graded.
+const lastAttemptTypes = ref<string[]>([])
 
 const introTips = computed(() => {
 	if (!quiz.data) return []
