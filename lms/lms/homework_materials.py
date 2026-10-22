@@ -140,11 +140,16 @@ def sync_detail_images(homework_doc, details_html: str) -> None:
 				"content_type": _content_type_of(info.file_name if info else file_name),
 			},
 		)
+	removed_rows = []
 	for file_name, row in list(current.items()):
 		if file_name not in wanted_names:
+			removed_rows.append(row)
+			_detach_material_file(file_name, row.name)
 			doc.remove(row)
 	doc.flags.homework_service = True
 	doc.save(ignore_permissions=True)
+	for row in removed_rows:
+		_release_material_file(row.file, row.name)
 
 
 def _has_detail_rows(homework_name: str) -> bool:
@@ -160,6 +165,43 @@ def _content_type_of(file_name: str) -> str:
 	import mimetypes
 
 	return mimetypes.guess_type(file_name or "")[0] or ""
+
+
+def _release_material_file(file_name: str | None, material_name: str) -> None:
+	"""Detach a removed material and delete its bytes only after every frozen
+	assignment snapshot (and any remaining template row) releases the file."""
+	if not file_name or not frappe.db.exists("File", file_name):
+		return
+	_detach_material_file(file_name, material_name)
+	still_referenced = frappe.db.exists("LMS Homework Material", {"file": file_name}) or frappe.db.exists(
+		"LMS Homework Assignment Material", {"file": file_name}
+	)
+	if still_referenced:
+		return
+	# Preserve a file which has since been attached to another feature or row.
+	file_doc = frappe.get_doc("File", file_name)
+	if file_doc.attached_to_doctype or file_doc.attached_to_name:
+		return
+	try:
+		frappe.delete_doc("File", file_name, ignore_permissions=True)
+	except frappe.LinkExistsError:
+		# A concurrent snapshot may have acquired the file after our reference
+		# query. Keep the bytes; the link-integrity check is authoritative.
+		frappe.clear_last_message()
+
+
+def _detach_material_file(file_name: str | None, material_name: str) -> None:
+	"""Remove only this material child's File back-reference."""
+	if not file_name or not frappe.db.exists("File", file_name):
+		return
+	file_doc = frappe.get_doc("File", file_name)
+	if (
+		file_doc.attached_to_doctype == "LMS Homework Material"
+		and file_doc.attached_to_name == material_name
+	):
+		frappe.db.set_value(
+			"File", file_name, {"attached_to_doctype": None, "attached_to_name": None}
+		)
 
 
 def assert_template_budget(homework_name: str, incoming: int = 0) -> None:
@@ -262,27 +304,12 @@ def remove_material(material: str) -> dict:
 			_("Only the homework's author can remove teacher materials."), frappe.PermissionError
 		)
 	file_name = row.file
-	# Detach the File's back-reference first: the platform's link integrity
-	# would otherwise refuse the row's own deletion.
-	if file_name and frappe.db.exists("File", file_name):
-		frappe.db.set_value(
-			"File",
-			file_name,
-			{"attached_to_doctype": None, "attached_to_name": None},
-		)
+	# The platform's link integrity refuses deletion while File still points to
+	# this child row. Detach first; the helper below decides whether bytes remain
+	# needed by another template row or an issued snapshot.
+	_detach_material_file(file_name, row.name)
 	frappe.delete_doc("LMS Homework Material", row.name, ignore_permissions=True)
-	still_referenced = frappe.db.exists(
-		"LMS Homework Material", {"file": file_name}
-	) or frappe.db.exists(
-		"LMS Homework Assignment Material", {"file": file_name}
-	)
-	if file_name and not still_referenced and frappe.db.exists("File", file_name):
-		try:
-			frappe.delete_doc("File", file_name, ignore_permissions=True)
-		except frappe.LinkExistsError:
-			# The platform's own link integrity knows a reference we do not
-			# (a race): the bytes stay, which is the safe side of E05.6.
-			frappe.clear_last_message()
+	_release_material_file(file_name, row.name)
 	if not frappe.flags.in_test:
 		frappe.db.commit()
 	state = _template_budget_state(row.parent)

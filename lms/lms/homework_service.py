@@ -573,8 +573,9 @@ def apply_opening_job(
 
 
 def _apply_material_opening(assignment_doc, lesson: str | None = None, assignment: str | None = None) -> bool:
-	"""Idempotently credit the opening on one assignment. Returns False when the
-	row has nothing left to do here (also the dedupe across concurrent events).
+	"""Idempotently credit the opening on one assignment. A matching included
+	material starts the card even when that requirement was credited earlier;
+	False means no included material matched (also the dedupe across events).
 
 	A recalled card is frozen history (C06): every deferred or retried caller
 	lands here, so this is the one place the freeze is enforced -- a queued
@@ -582,8 +583,9 @@ def _apply_material_opening(assignment_doc, lesson: str | None = None, assignmen
 	if assignment_doc.cancelled:
 		return False
 	touched = False
+	opened_included_material = False
 	for row in assignment_doc.requirements:
-		if row.status in COMPLETED_STATUSES or row.status == "Unavailable":
+		if row.status == "Unavailable":
 			continue
 		opens_lesson = lesson and row.requirement_type == REQUIREMENT_OPEN_LESSON and row.lesson == lesson
 		opens_assignment = (
@@ -593,12 +595,15 @@ def _apply_material_opening(assignment_doc, lesson: str | None = None, assignmen
 		)
 		if not (opens_lesson or opens_assignment):
 			continue
+		opened_included_material = True
+		if row.status in COMPLETED_STATUSES:
+			continue
 		row.status = "Completed"
 		row.completed_at = now_datetime()
 		row.proof_type = "Assignment View" if opens_assignment else "Lesson View"
 		row.proof_name = assignment if opens_assignment else lesson
 		touched = True
-	if not touched:
+	if not opened_included_material:
 		return False
 	if not assignment_doc.first_opened_at:
 		# Working a material directly also starts the card (spec 7).
@@ -607,7 +612,8 @@ def _apply_material_opening(assignment_doc, lesson: str | None = None, assignmen
 		if assignment_doc.status == STATUS_TO_DO:
 			assignment_doc.status = STATUS_IN_PROGRESS
 		_add_history(assignment_doc, "started", from_status, assignment_doc.status)
-	_refresh_counts(assignment_doc)
+	if touched:
+		_refresh_counts(assignment_doc)
 	return True
 
 

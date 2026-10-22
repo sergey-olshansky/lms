@@ -22,7 +22,9 @@ free, Cyrillic and long-line wrapping included.
 
 from __future__ import annotations
 
+import base64
 import html
+import mimetypes
 import re
 
 import frappe
@@ -134,7 +136,9 @@ def render_homework_pdf_html(payload: dict) -> str:
 		meta.append(f"{_('Duration')}: {cint(payload.get('days') or 0)} {_('days')}")
 
 	materials = "".join(_material_lines(payload.get("requirements") or []))
-	details_html = _details_block(payload.get("details"))
+	details_html = _details_block(
+		payload.get("details"), payload.get("detail_materials") or []
+	)
 	teacher_materials = _teacher_material_lines(payload.get("teacher_materials") or [])
 	assignment_link = ""
 	if is_assignment and payload.get("assignment_name"):
@@ -183,7 +187,7 @@ def render_homework_pdf_html(payload: dict) -> str:
 </body></html>"""
 
 
-def _details_block(details) -> str:
+def _details_block(details, detail_materials=()) -> str:
 	"""E05/E07: rich details render as the sanitized HTML they are (images
 	absolute, so wkhtmltopdf fetches them); a legacy plain-text description
 	keeps the pre-wrap block -- never raw tags, never double-escaped."""
@@ -193,9 +197,38 @@ def _details_block(details) -> str:
 	if not text:
 		return ""
 	if "<" in text:
-		rendered = _absolute_asset_urls(sanitize_rich_text(text))
+		rendered = sanitize_rich_text(text)
+		rendered = _inline_private_detail_images(rendered, detail_materials)
+		rendered = _absolute_asset_urls(rendered)
 		return f"<h2>{_('Details')}</h2><div class='details-rich'>{rendered}</div>"
 	return f"<h2>{_('Details')}</h2><pre class='details'>{html.escape(text)}</pre>"
+
+
+def _inline_private_detail_images(rendered: str, detail_materials) -> str:
+	"""Embed only private images already included in this authorized template
+	or assignment snapshot. The isolated PDF browser has no user's session
+	cookies, so protected image URLs would otherwise render as broken links."""
+	for row in detail_materials:
+		role = row.get("role") if isinstance(row, dict) else getattr(row, "role", None)
+		if role != "Detail Image":
+			continue
+		file_name = row.get("file") if isinstance(row, dict) else getattr(row, "file", None)
+		if not file_name or not frappe.db.exists("File", file_name):
+			continue
+		file_doc = frappe.get_doc("File", file_name)
+		file_url = file_doc.file_url or ""
+		if not file_doc.is_private or not file_url or file_url not in rendered:
+			continue
+		file_name_label = file_doc.file_name or file_url
+		content_type = mimetypes.guess_type(file_name_label)[0] or ""
+		if not content_type.startswith("image/"):
+			continue
+		content = file_doc.get_content()
+		if isinstance(content, str):
+			content = content.encode("utf-8")
+		data_uri = f"data:{content_type};base64,{base64.b64encode(content).decode('ascii')}"
+		rendered = rendered.replace(file_url, data_uri)
+	return rendered
 
 
 def _absolute_asset_urls(rendered: str) -> str:
@@ -264,6 +297,7 @@ def _template_payload(doc) -> dict:
 		"title": doc.title,
 		"days": doc.days,
 		"details": doc.details,
+		"detail_materials": [row for row in (doc.materials or []) if row.role == "Detail Image"],
 		"requirements": requirements,
 		"teacher_materials": homework_materials.material_rows_public(doc.materials or []),
 	}
@@ -275,7 +309,10 @@ def _assignment_payload(doc) -> dict:
 	payload = homework_api.get_homework_assignment(doc.name)
 	return {
 		"title": payload["title"],
-		"details": payload["details"],
+		# Use the stored source URLs here so the PDF can inline only the detail
+		# images present in this assignment's frozen material snapshot.
+		"details": doc.details,
+		"detail_materials": [row for row in (doc.materials or []) if row.role == "Detail Image"],
 		"assignment_name": payload["name"],
 		"student_name": payload["student_name"],
 		"assigned_at": payload["assigned_at"],

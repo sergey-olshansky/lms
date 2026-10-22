@@ -522,9 +522,10 @@ def get_homework_students(search: str = "") -> list[dict]:
 		pluck="student",
 	)
 	if issued:
+		# pluck="name" yields plain strings -- the names ARE the values.
 		full_names = {
-			row.name: frappe.utils.get_fullname(row.name)
-			for row in frappe.get_all(
+			name: frappe.utils.get_fullname(name)
+			for name in frappe.get_all(
 				"User", filters={"name": ("in", list(set(issued)))}, pluck="name"
 			)
 		}
@@ -1222,26 +1223,50 @@ def get_homework_overview(
 	search: str = "",
 	status: str | None = None,
 	overdue: bool = False,
+	student: str | None = None,
+	course: str | None = None,
+	cancelled_only: bool = False,
 	limit: int = 25,
 	offset: int = 0,
 ) -> dict:
 	"""E08: the teacher's own issued assignments across ALL their students --
 	one table instead of walking every board hunting for Review. Scoped to the
 	session teacher (staff see everything); full server-side counts and
-	paging, never the sum of the loaded page."""
-	if not _is_teacher_scoped():
-		pass  # privileged staff: the whole table
-	filters: dict = {}
+	paging, never the sum of the loaded page. A plain student has no overview
+	(E08.3: their world is their own board) -- refused, not answered empty."""
+	if _is_teacher_scoped() and "Course Creator" not in frappe.get_roles():
+		frappe.throw(
+			_("The homework overview is available to teachers only."), frappe.PermissionError
+		)
+	common_filters: dict = {"cancelled": 1 if cancelled_only else 0}
 	if _is_teacher_scoped():
-		filters["teacher"] = frappe.session.user
+		common_filters["teacher"] = frappe.session.user
+	if student:
+		common_filters["student"] = student
 	if search:
-		filters["title"] = ("like", f"%{search}%")
+		common_filters["title"] = ("like", f"%{search}%")
+	if course:
+		course_assignments = frappe.get_all(
+			"LMS Homework Requirement",
+			filters={
+				"parenttype": "LMS Homework Assignment",
+				"course": course,
+			},
+			pluck="parent",
+		)
+		common_filters["name"] = ("in", course_assignments or ["__no_matching_homework__"])
+	filters = dict(common_filters)
 	if status:
 		filters["status"] = status
 	if overdue:
 		filters["due_at"] = ("<", now_datetime())
-		filters["status"] = ("in", [STATUS_TO_DO, STATUS_IN_PROGRESS])
+		if status and status not in (STATUS_TO_DO, STATUS_IN_PROGRESS):
+			filters["name"] = "__no_matching_homework__"
+		else:
+			filters["status"] = ("in", [STATUS_TO_DO, STATUS_IN_PROGRESS])
 
+	limit = max(1, min(cint(limit), 100))
+	offset = max(0, cint(offset))
 	total = frappe.db.count("LMS Homework Assignment", filters)
 	rows = frappe.get_all(
 		"LMS Homework Assignment",
@@ -1257,12 +1282,15 @@ def get_homework_overview(
 			"assigned_at",
 			"needs_revision",
 			"submitted_for_review_at",
-			"solution_submitted_at",
 			"total_requirements",
 			"completed_requirements",
 			"quizzes_total",
 			"quizzes_completed",
 			"cancelled",
+			"first_opened_at",
+			"require_solution",
+			"solution_submitted_at",
+			"last_revision_comment",
 		],
 		order_by="modified desc",
 		limit_page_length=limit,
@@ -1277,20 +1305,63 @@ def get_homework_overview(
 		)
 		row["cancelled_flag"] = bool(row.cancelled)
 
+	# Explain why work is not yet complete using the same live source checks as
+	# the detail page. Fetch requirements only for this page, not every card.
+	if rows:
+		requirements = frappe.get_all(
+			"LMS Homework Requirement",
+			filters={
+				"parenttype": "LMS Homework Assignment",
+				"parent": ("in", [row.name for row in rows]),
+			},
+			fields=[
+				"parent", "status", "requirement_type", "label", "lesson", "quiz",
+				"reference_assignment", "course",
+			],
+			order_by="parent asc, idx asc",
+		)
+		by_assignment: dict[str, list[str]] = {row.name: [] for row in rows}
+		cancelled_by_name = {row.name: bool(row.cancelled) for row in rows}
+		for requirement in requirements:
+			formatted = format_requirement(
+				requirement, frozen=cancelled_by_name.get(requirement.parent, False)
+			)
+			if formatted["status"] in {"Completed", "Completed Earlier"}:
+				continue
+			label = formatted.get("label") or formatted["requirement_type"]
+			by_assignment[requirement.parent].append(
+				f"{label}: {formatted['state_label']}"
+			)
+		for row in rows:
+			if row.needs_revision and row.last_revision_comment:
+				row["blocking_reason"] = f"{_('Needs rework')}: {row.last_revision_comment}"
+			elif by_assignment[row.name]:
+				row["blocking_reason"] = "; ".join(by_assignment[row.name])
+			elif row.require_solution and row.status in (STATUS_TO_DO, STATUS_IN_PROGRESS):
+				row["blocking_reason"] = _("Solution file not submitted for review")
+			elif row.status == STATUS_TO_DO and not row.first_opened_at:
+				row["blocking_reason"] = _("Not opened yet")
+			elif row.status == STATUS_REVIEW:
+				row["blocking_reason"] = _("Waiting for teacher review")
+			else:
+				row["blocking_reason"] = ""
+
 	# Full counts for the header chips: every status of THIS teacher's scope,
-	# plus the active-overdue count -- independent of the loaded page.
-	scope: dict = {"cancelled": 0} if _is_teacher_scoped() else {"cancelled": 0}
-	if _is_teacher_scoped():
-		scope["teacher"] = frappe.session.user
+	# plus the active-overdue count, respecting every non-status filter.
 	counts = {}
 	for column_status in BOARD_STATUSES:
-		counts[column_status] = frappe.db.count(
-			"LMS Homework Assignment", {**scope, "status": column_status}
-		)
+		count_filters = dict(common_filters)
+		if overdue:
+			if column_status not in (STATUS_TO_DO, STATUS_IN_PROGRESS):
+				counts[column_status] = 0
+				continue
+			count_filters["due_at"] = ("<", now)
+		count_filters["status"] = column_status
+		counts[column_status] = frappe.db.count("LMS Homework Assignment", count_filters)
 	counts["Overdue"] = frappe.db.count(
 		"LMS Homework Assignment",
 		{
-			**scope,
+			**common_filters,
 			"due_at": ("<", now),
 			"status": ("in", [STATUS_TO_DO, STATUS_IN_PROGRESS]),
 		},

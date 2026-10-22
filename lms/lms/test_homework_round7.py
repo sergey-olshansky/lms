@@ -43,13 +43,12 @@ def _file(owner, *, private=True, filename=None, content=None):
 class Round7Base(B, IntegrationTestCase):
 	def setUp(self):
 		super().setUp()
-		# Workerless bench: drop the accumulating rq backlog so nothing in
-		# this module trips frappe's QueueOverloaded refusal mid-fixture.
-		from frappe.utils.background_jobs import get_redis_conn
-
-		redis = get_redis_conn()
-		for key in redis.keys("*"):
-			redis.delete(key)
+		# This module verifies synchronous application behavior, not RQ. Keep its
+		# incidental enqueue requests local to this test process instead of
+		# mutating the shared Redis queue (which may contain unrelated work).
+		original_enqueue = frappe.enqueue
+		self.addCleanup(setattr, frappe, "enqueue", original_enqueue)
+		frappe.enqueue = lambda *args, **kwargs: None
 		frappe.set_user("Administrator")
 		token = frappe.generate_hash(length=10)
 		self.teacher = B._create_user(
@@ -117,14 +116,6 @@ class _RaceMixin:
 
 	def setUp(self):
 		super().setUp()
-		# A workerless bench accumulates queued jobs across the whole suite
-		# until frappe refuses to enqueue (QueueOverloaded at 550); the races
-		# need neither the queue nor its refusal, so drop it upfront.
-		from frappe.utils.background_jobs import get_redis_conn
-
-		redis = get_redis_conn()
-		for key in redis.keys("*"):
-			redis.delete(key)
 
 	def tearDown(self):
 		# The committed fixtures release the class savepoint; the race classes
@@ -520,7 +511,10 @@ class TestRound7AttemptPool(Round7Base):
 		second = self._submit(
 			quiz,
 			[{"question_name": questions[1].name, "answer": ["One"]}],
-			pool=[questions[1].name],
+			# Simulate a stale/corrupted client that resends the already-credited
+			# Alpha alongside Beta. The persisted offered pool must match what the
+			# score resolver actually counts: Beta only.
+			pool=[questions[0].name, questions[1].name],
 		)
 		doc = frappe.get_doc("LMS Quiz Submission", second)
 		row_names = {row.question_name for row in doc.result}

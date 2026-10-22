@@ -246,7 +246,7 @@ def submit_quiz(
 	credited = _credited_question_rows(quiz, frappe.session.user)
 	carried_graded = merge_credited_results(quiz_questions, credited, data["results"])
 	attempt_pool = _validated_question_pool(
-		quiz_questions, _parse_question_pool(question_pool)
+		quiz_questions, _parse_question_pool(question_pool), credited
 	)
 	# The SAME validated pool feeds the score denominator and the persisted
 	# record (F03/round 9): whatever the client declared, only the
@@ -834,20 +834,23 @@ def _parse_question_pool(raw) -> list[str] | None:
 	return list(seen)
 
 
-def _validated_question_pool(quiz_questions: dict, pool: list[str] | None) -> list[str] | None:
+def _validated_question_pool(
+	quiz_questions: dict, pool: list[str] | None, credited: dict | None = None
+) -> list[str] | None:
 	"""The client-declared offered pool, reduced to the form the score
-	resolver accepts (round 9): unique, and only names that are questions of
-	THIS quiz. A corrupted/foreign/duplicated declaration is silently
-	narrowed -- the pool is an optimisation input, never a trust boundary; an
-	empty result reads as "client declared nothing" (None), the legacy shape.
+	resolver accepts: unique, uncredited names that are questions of THIS quiz.
+	A corrupted/foreign/duplicated/already-credited declaration is narrowed --
+	the pool is an optimisation input, never a trust boundary. An empty result
+	reads as "client declared nothing" (None), the legacy shape.
 	"""
 	if pool is None:
 		return None
 	if not isinstance(pool, list):
 		return None
 	seen: dict[str, None] = {}
+	credited = credited or {}
 	for name in pool:
-		if isinstance(name, str) and name in quiz_questions:
+		if isinstance(name, str) and name in quiz_questions and name not in credited:
 			seen.setdefault(name)
 	return list(seen) or None
 

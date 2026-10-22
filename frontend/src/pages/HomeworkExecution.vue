@@ -47,6 +47,7 @@
 			/>
 			<BooleanSwitch v-model="overdueOnly" size="sm" :label="__('Overdue')" />
 			<BooleanSwitch
+				v-if="!overviewOpen"
 				v-model="cancelledOnly"
 				size="sm"
 				:label="__('Recalled')"
@@ -56,6 +57,13 @@
 		<!-- E08: the overview table -- one row per issued assignment, full
 		     server-side counts and paging, a jump to the card or the board. -->
 		<div v-if="overviewOpen && canPickStudent" class="px-4 pb-2 md:px-6">
+			<div class="mb-2 flex flex-wrap items-center gap-2">
+				<Select
+					v-model="overviewStudent"
+					:options="overviewStudentOptions"
+					data-testid="overview-student-filter"
+				/>
+			</div>
 			<div class="mb-2 flex flex-wrap items-center gap-2 text-xs">
 				<span
 					v-for="(count, label) in overviewCounts"
@@ -73,6 +81,7 @@
 							<th class="px-3 py-2">{{ __('Student') }}</th>
 							<th class="px-3 py-2">{{ __('Homework') }}</th>
 							<th class="px-3 py-2">{{ __('Status') }}</th>
+							<th class="px-3 py-2">{{ __('Blocked by') }}</th>
 							<th class="px-3 py-2">{{ __('Done') }}</th>
 							<th class="px-3 py-2">{{ __('Quizzes') }}</th>
 							<th class="px-3 py-2">{{ __('Due') }}</th>
@@ -104,6 +113,9 @@
 									{{ __('Needs rework') }}
 								</span>
 							</td>
+							<td class="px-3 py-2 text-xs text-ink-gray-6">
+								{{ row.blocking_reason || '—' }}
+							</td>
 							<td class="px-3 py-2">
 								{{ row.completed_requirements }}/{{ row.total_requirements }}
 							</td>
@@ -129,7 +141,7 @@
 							</td>
 						</tr>
 						<tr v-if="!overviewRows.length">
-							<td colspan="8" class="px-3 py-4 text-sm text-ink-gray-5">
+							<td colspan="9" class="px-3 py-4 text-sm text-ink-gray-5">
 								{{ overview.loading ? __('Loading…') : __('No homework found') }}
 							</td>
 						</tr>
@@ -138,15 +150,16 @@
 			</div>
 			<div class="mt-2 flex items-center gap-2">
 				<Button
-					v-if="overview.data && overview.data.total > overviewRows.length"
+					v-if="overviewTotal > overviewRows.length"
 					variant="subtle"
 					size="sm"
-					@click="overviewOffset += 25"
+					:disabled="overview.loading"
+					@click="loadMoreOverview"
 				>
 					{{ __('Load more') }}
 				</Button>
 				<span class="text-xs text-ink-gray-5">
-					{{ __('{0} of {1}').format(String(overviewRows.length), String(overview.data?.total ?? 0)) }}
+					{{ __('{0} of {1}').format(String(overviewRows.length), String(overviewTotal)) }}
 				</span>
 			</div>
 		</div>
@@ -419,7 +432,12 @@ const reloadBoard = () => {
 
 onMounted(() => {
 	if (!user.data) router.push({ name: 'Courses' })
-	else reloadBoard()
+	else if (canPickStudent.value && !route.query.student) {
+		// The canPickStudent watcher already opened (and loaded) the overview
+		// for a teacher without a ?student deep link; refetch only if that
+		// never happened (e.g. user.data landed after mount).
+		if (!overview.data) loadOverview()
+	} else reloadBoard()
 })
 
 watch(
@@ -445,13 +463,22 @@ const students = createResource({
 const courses = createResource({
 	url: 'lms.lms.homework_api.get_homework_courses',
 })
-if (canPickStudent.value) {
-	students.reload()
-	courses.reload()
-}
+watch(canPickStudent, (isTeacher) => {
+	if (isTeacher) {
+		students.reload()
+		courses.reload()
+	}
+}, { immediate: true })
 
 const studentOptions = computed(() => [
 	{ label: __('Me'), value: '' },
+	...(students.data || []).map((row) => ({
+		label: row.full_name,
+		value: row.name,
+	})),
+])
+const overviewStudentOptions = computed(() => [
+	{ label: __('All students'), value: '' },
 	...(students.data || []).map((row) => ({
 		label: row.full_name,
 		value: row.name,
@@ -478,26 +505,69 @@ const statusOptions = computed(() => [
 // assignment with full server-side counts and paging.
 const overviewOpen = ref(false)
 const overviewOffset = ref(0)
+const overviewStudent = ref('')
+const overviewTotal = ref(0)
 const overview = createResource({
 	url: 'lms.lms.homework_api.get_homework_overview',
 	makeParams: () => ({
 		search: search.value,
 		status: statusFilter.value || undefined,
 		overdue: overdueOnly.value,
+		student: overviewStudent.value || undefined,
+		course: courseFilter.value || undefined,
 		limit: 25,
 		offset: overviewOffset.value,
 	}),
 })
-const overviewRows = computed(() => overview.data?.rows || [])
+const overviewRows = ref([])
+let overviewGeneration = 0
+const loadOverview = async (append = false) => {
+	if (!overviewOpen.value || (append && overview.loading)) return
+	const generation = ++overviewGeneration
+	if (!append) {
+		overviewOffset.value = 0
+		overviewRows.value = []
+		overviewTotal.value = 0
+	} else {
+		overviewOffset.value = overviewRows.value.length
+	}
+	let data
+	try {
+		// frappe-ui's reload() REJECTS on a server error; the toast belongs
+		// here, not in an unhandled rejection.
+		data = await overview.reload()
+	} catch (error) {
+		if (generation === overviewGeneration) {
+			toast.error(resourceErrorMessage(error, __('Error')))
+		}
+		return
+	}
+	if (generation !== overviewGeneration) return
+	const page = data?.rows || []
+	overviewTotal.value = data?.total || 0
+	if (append) {
+		const combined = [...overviewRows.value, ...page]
+		overviewRows.value = [...new Map(combined.map((row) => [row.name, row])).values()]
+	} else {
+		overviewRows.value = page
+	}
+}
+const loadMoreOverview = () => loadOverview(true)
 const overviewCounts = computed(() => {
-	const counts = overview.data?.counts || {}
-	// Recalled rows are history, not a chip.
-	delete counts.Cancelled
-	return counts
+	// Recalled rows are history, not an active status chip.
+	return Object.fromEntries(
+		Object.entries(overview.data?.counts || {}).filter(([status]) => status !== 'Cancelled')
+	)
 })
-watch([overviewOpen, search, statusFilter, overdueOnly], (openChanged) => {
+watch(canPickStudent, (isTeacher) => {
+	if (isTeacher && !route.query.student) overviewOpen.value = true
+}, { immediate: true })
+watch([overviewOpen, search, statusFilter, overdueOnly, overviewStudent, courseFilter], () => {
 	overviewOffset.value = 0
-	if (overviewOpen.value) overview.reload()
+	if (overviewOpen.value) loadOverview()
+})
+watch(overviewOpen, (open) => {
+	if (!open && canPickStudent.value) reloadBoard()
 })
 const openStudentBoard = (studentName) => {
 	overviewOpen.value = false
