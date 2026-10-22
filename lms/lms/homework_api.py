@@ -1234,7 +1234,8 @@ def get_homework_overview(
 	session teacher (staff see everything); full server-side counts and
 	paging, never the sum of the loaded page. A plain student has no overview
 	(E08.3: their world is their own board) -- refused, not answered empty."""
-	if _is_teacher_scoped() and "Course Creator" not in frappe.get_roles():
+	teacher_roles = {"Course Creator", "Batch Evaluator"}
+	if _is_teacher_scoped() and not (teacher_roles & set(frappe.get_roles())):
 		frappe.throw(
 			_("The homework overview is available to teachers only."), frappe.PermissionError
 		)
