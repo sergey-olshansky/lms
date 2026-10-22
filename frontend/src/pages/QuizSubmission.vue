@@ -110,16 +110,26 @@
 									{{ __('Marks:') }}
 								</span>
 								<!-- Task #35 (C01): a typed value IS the verdict --
-							     including a deliberate 0 -- and writes the row's
-							     graded flag in the same edit; clearing the input
-							     takes the verdict back. The flag survives the Int
-							     serialization that stores an ungraded answer as 0.
-							     Task #35 (D01): grades travel through the narrow
-							     save_submission_grades action -- plain Course
-							     Creators hold no write on the doctype, so the
-							     generic document save answers them with 403. -->
+								     including a deliberate 0 -- and writes the row's
+								     graded flag in the same edit; clearing the input
+								     takes the verdict back. The flag survives the Int
+								     serialization that stores an ungraded answer as 0.
+								     Task #35 (D01): grades travel through the narrow
+								     save_submission_grades action -- plain Course
+								     Creators hold no write on the doctype, so the
+								     generic document save answers them with 403.
+								     R06: the editor is tied to the ROW TYPE, not the
+								     computed verdict -- a typed verdict flips the
+								     chip to correct/incorrect at once, and the field
+								     must survive that to stay editable. Only an
+								     answered open question shows a field (skipped
+								     rows are filtered out of the report); the
+								     grader's own preview submission stays static. -->
 								<FormControl
-									v-if="row.status === 'pending'"
+									v-if="
+										resultRow.question_type === 'Open Ended' &&
+										!isOwnSubmission
+									"
 									v-model="resultRow.marks"
 									type="number"
 									class="w-20"
@@ -543,35 +553,41 @@ const gradeResource = createResource({
 	url: 'lms.lms.doctype.lms_quiz_submission.lms_quiz_submission.save_submission_grades',
 })
 
-const dirtyRowNames = ref(new Set())
+// R06: per-row sequence numbers. A save in flight captures each dirty row's
+// seq; on success only rows whose seq has NOT advanced since (no newer
+// keystroke) are cleared, so edits typed during the request stay queued for
+// the next save instead of being silently dropped.
+const dirtyRows = ref(new Map())
+const rowSeq = new Map()
 
 const markRowDirty = (resultRow) => {
-	dirtyRowNames.value.add(resultRow.name)
+	const seq = (rowSeq.get(resultRow.name) || 0) + 1
+	rowSeq.set(resultRow.name, seq)
+	dirtyRows.value.set(resultRow.name, {
+		name: resultRow.name,
+		marks: resultRow.marks ?? 0,
+		graded: resultRow.graded ? 1 : 0,
+		seq,
+	})
 	autoSave()
 }
 
 const saveSubmission = (opts = {}) => {
-	if (isOwnSubmission.value || !dirtyRowNames.value.size) return
-	const byName = new Map(
-		(submissionDetails.doc?.result || []).map((row) => [row.name, row])
-	)
-	const grades = [...dirtyRowNames.value]
-		.map((name) => byName.get(name))
-		.filter(Boolean)
-		.map((row) => ({
-			name: row.name,
-			marks: row.marks ?? 0,
-			graded: row.graded ? 1 : 0,
-		}))
-	if (!grades.length) return
+	if (isOwnSubmission.value || !dirtyRows.value.size) return
+	const batch = [...dirtyRows.value.values()]
 	gradeResource.submit(
 		{
 			submission: props.submission,
-			grades,
+			grades: batch.map(({ name, marks, graded }) => ({ name, marks, graded })),
 		},
 		{
 			onSuccess() {
-				dirtyRowNames.value.clear()
+				for (const sent of batch) {
+					const current = dirtyRows.value.get(sent.name)
+					if (current && current.seq === sent.seq) {
+						dirtyRows.value.delete(sent.name)
+					}
+				}
 				if (!opts.silent) toast.success(__('Saved'))
 			},
 			onError(err) {
@@ -588,7 +604,7 @@ const autoSave = useDebounceFn(() => {
 }, 1000)
 
 onBeforeUnmount(() => {
-	if (dirtyRowNames.value.size) saveSubmission({ silent: true })
+	if (dirtyRows.value.size) saveSubmission({ silent: true })
 })
 
 usePageMeta(() => ({

@@ -421,7 +421,7 @@ import Notes from '@/components/Notes/Notes.vue'
 import InlineLessonMenu from '@/components/Notes/InlineLessonMenu.vue'
 import { parseStoredEditorJs } from '@/utils/lessonForm'
 import { isLessonSelection } from '@/utils/lessonSelection'
-import { getLmsRoute } from '@/utils/basePath'
+import { redirectToLogin as redirectToLoginHelper } from '@/utils/loginReturn'
 import { provideStudentView } from '@/composables/useStudentView'
 import type { UserResource } from '@/composables/useStudentView'
 import type { Note, Notes as NotesResource } from '@/types'
@@ -1378,11 +1378,10 @@ watch(allowDiscussions, () => {
 	}
 })
 
-const redirectToLogin = () => {
-	window.location.href = `/login?redirect-to=${getLmsRoute(
-		`courses/${props.courseName}`
-	)}`
-}
+// E01/R07: a guest deep link returns to THIS exact lesson (path, ?hw= query
+// and hash included) after login -- the shared helper, not a course-root
+// URL that loses the reader's place.
+const redirectToLogin = () => redirectToLoginHelper()
 
 usePageMeta(() => {
 	return {

@@ -100,12 +100,53 @@
 							{{ __('Submitted after the deadline') }}
 						</span>
 					</p>
+					<!-- E05: rich details render as the sanitized HTML they are;
+					     a legacy plain-text description keeps its line breaks. -->
+					<div
+						v-if="detail.data.details && isRichDetails"
+						class="hw-details-rich text-base text-ink-gray-8"
+						v-safe-html:rich="detail.data.details"
+						data-testid="homework-details-rich"
+					></div>
 					<p
-						v-if="detail.data.details"
+						v-else-if="detail.data.details"
 						class="whitespace-pre-line text-base text-ink-gray-8"
 					>
 						{{ detail.data.details }}
 					</p>
+
+					<!-- E05: the teacher's materials frozen into THIS assignment
+					     (or the template's current set, before any issue). -->
+					<div
+						v-if="materialRows.length"
+						class="rounded-4 border border-outline-gray-2"
+						data-testid="homework-teacher-materials-view"
+					>
+						<div class="border-b border-outline-gray-2 px-4 py-2 text-sm text-ink-gray-8">
+							{{ __('Teacher materials') }}
+						</div>
+						<div class="divide-y divide-outline-gray-1">
+							<div
+								v-for="row in materialRows"
+								:key="row.name"
+								class="flex items-center gap-2 px-4 py-2"
+							>
+								<span class="lucide-file size-4 shrink-0 text-ink-gray-5" aria-hidden="true" />
+								<span class="min-w-0 flex-1 truncate text-sm text-ink-gray-8" :title="row.file_name">
+									{{ row.file_name }}
+								</span>
+								<a
+									v-if="row.file_url"
+									:href="safeUrl(row.file_url)"
+									:download="row.file_name || undefined"
+									class="shrink-0 text-xs text-ink-gray-5 underline"
+									:data-testid="`assignment-material-download-${row.name}`"
+								>
+									{{ __('Download') }}
+								</a>
+							</div>
+						</div>
+					</div>
 				</header>
 
 				<div
@@ -114,6 +155,50 @@
 				>
 					{{ __('This homework was recalled by the teacher.') }}
 					{{ detail.data.cancellation_reason }}
+				</div>
+
+				<!-- E06: a work that must be solved by file never auto-submits.
+				     When its materials are done the card sits In Progress,
+				     "ready to submit", until the student attaches a solution
+				     and presses Send -- the button is disabled (with the
+				     reason) until both hold. -->
+				<div
+					v-if="
+						detail.data.viewer_is_student &&
+						detail.data.require_solution &&
+						detail.data.status === 'In Progress' &&
+						!detail.data.needs_revision &&
+						!detail.data.cancelled
+					"
+					class="rounded-6 border border-outline-gray-2 bg-surface-gray-1 p-3 text-sm"
+					data-testid="solution-submit-panel"
+				>
+					<p class="font-medium text-ink-gray-9">
+						{{ allConfirmed ? __('Ready to submit') : __('Finish the work first') }}
+					</p>
+					<p class="mt-1 text-ink-gray-6">
+						{{
+							__(
+								'This homework needs your file solution: attach it below, then send the work for review.'
+							)
+						}}
+					</p>
+					<Button
+						variant="solid"
+						size="sm"
+						class="mt-2"
+						data-testid="solution-submit-button"
+						:disabled="!allConfirmed || solutionUploading"
+						@click="submitSolution"
+					>
+						{{ __('Send for review') }}
+					</Button>
+					<p
+						v-if="allConfirmed && !hasSolutionFile"
+						class="mt-1 text-xs text-ink-gray-5"
+					>
+						{{ __('Attach at least one solution file first.') }}
+					</p>
 				</div>
 
 				<div
@@ -349,7 +434,7 @@
 				<!-- Task #35 (E03): the student's optional solution files. Purely
 				     additive: attaching nothing changes no requirement, no
 				     status and no review decision. -->
-				<HomeworkSolutionFiles :detail="detail" ref="solutionFiles" />
+				<HomeworkSolutionFiles :detail="detail" ref="solutionFiles" @state="onSolutionState" />
 
 				<!-- History (spec 5.3.5) -->
 				<section class="space-y-2">
@@ -476,7 +561,8 @@ import HomeworkSolutionFiles from '@/components/HomeworkSolutionFiles.vue'
 import { lessonRouteParams } from '@/utils/homeworkSelection'
 import { resourceErrorMessage } from '@/utils/resource'
 import { formatDueAt, siteWallClock } from '@/utils/dueDate'
-import { openExternal } from '@/utils/openExternal'
+import { downloadViaAnchor } from '@/utils/download'
+import { safeUrl } from '@/utils/safeUrl'
 
 const route = useRoute()
 const router = useRouter()
@@ -600,6 +686,26 @@ const courseTitle = (name) => courseTitles.value[name] || name
 
 const isDone = (row) =>
 	row.status === 'Completed' || row.status === 'Completed Earlier'
+// E05: rich details render sanitized; plain text keeps its line breaks.
+const isRichDetails = computed(() =>
+	/<[a-z][\s\S]*>/i.test(detail.data?.details || '')
+)
+
+// E05: the frozen teacher materials of this assignment -- every row carries
+// its private download URL.
+const materialRows = computed(() => {
+	const rows = detail.data?.materials || []
+	return rows.filter((row) => row.role === 'Material' || row.role === 'Detail Image')
+})
+
+// E06: the student's current solution files -- the explicit Send waits for
+// both the requirements and a file to exist.
+const solutionRows = ref([])
+const hasSolutionFile = computed(() => solutionRows.value.length > 0)
+const onSolutionState = (payload) => {
+	solutionRows.value = payload?.rows || []
+}
+
 const allConfirmed = computed(() => {
 	const data = detail.data
 	return Boolean(
@@ -772,9 +878,9 @@ const teacherMenu = computed(() => [
 ])
 
 function downloadAssignmentPdf() {
-	// The shared opener: noopener + the scheme allowlist every window of the
-	// app clears; the server sets Content-Disposition so this downloads.
-	openExternal(
+	// F04: a real download through a programmatic anchor -- the server sets
+	// Content-Disposition, no popup involved.
+	downloadViaAnchor(
 		`/api/method/lms.lms.homework_pdf.download_homework_assignment_pdf?name=${encodeURIComponent(
 			props.assignmentID
 		)}`
@@ -831,6 +937,14 @@ const accept = () =>
 			assignment: props.assignmentID,
 		}),
 		'Accepted'
+	)
+
+const submitSolution = () =>
+	runAction(
+		callAction('lms.lms.homework_api.submit_homework_solution', {
+			assignment: props.assignmentID,
+		}),
+		'Sent for review'
 	)
 
 const resubmit = () =>

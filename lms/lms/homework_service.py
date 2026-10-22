@@ -156,6 +156,7 @@ def create_assignment(
 			"title": homework.title,
 			"details": homework.details,
 			"days": days,
+			"require_solution": homework.require_solution,
 			"assigned_at": assigned_at,
 			"due_at": compute_due_at(assigned_at, days),
 			"status": STATUS_TO_DO,
@@ -164,6 +165,11 @@ def create_assignment(
 	)
 	for row in requirements:
 		assignment.append("requirements", row)
+	# E05.5: the issue freezes the CURRENT teacher materials (and detail
+	# images) onto the assignment -- later template edits never rewrite it.
+	from lms.lms.homework_materials import freeze_materials
+
+	freeze_materials(homework, assignment)
 	assignment.flags.homework_service = True
 	try:
 		assignment.insert(ignore_permissions=True)
@@ -190,6 +196,11 @@ def create_assignment(
 	_add_history(assignment, "assigned", None, STATUS_TO_DO)
 	assignment.flags.homework_service = True
 	assignment.save(ignore_permissions=True)
+	# E04: the new requirement rows just became this student's narrow grant --
+	# same-request readers must see them.
+	from lms.lms.permissions import clear_homework_grant_cache
+
+	clear_homework_grant_cache()
 
 	return {"created": True, "name": assignment.name}
 
@@ -611,6 +622,9 @@ def resubmit(assignment_name: str) -> dict:
 		frappe.throw(_("Some materials are no longer available. Ask the teacher to fix the homework."))
 	if not _all_requirements_confirmed(assignment):
 		frappe.throw(_("Some requirements are still incomplete. Finish them before resubmitting."))
+	if assignment.require_solution and not _solution_files_present(assignment.name):
+		# E06.5: a returned file-work is resubmitted with its solution aboard.
+		frappe.throw(_("Attach at least one solution file before resubmitting."))
 
 	assignment.needs_revision = 0
 	assignment.status = STATUS_REVIEW
@@ -758,6 +772,10 @@ def revoke(assignment_name: str, reason: str) -> dict:
 	_add_history(assignment, "revoked", assignment.status, assignment.status, reason)
 	assignment.flags.homework_service = True
 	assignment.save(ignore_permissions=True)
+	# E04.9: the recall ends the grant these rows gave the student.
+	from lms.lms.permissions import clear_homework_grant_cache
+
+	clear_homework_grant_cache()
 	return {"cancelled": True}
 
 
@@ -1098,6 +1116,12 @@ def recompute_assignment(
 
 
 def _eligible_for_auto_review(assignment) -> bool:
+	if assignment.require_solution:
+		# E06: a work that must be solved by file NEVER auto-submits -- the
+		# student's explicit "Send for review" is the only door to Review, and
+		# it carries the solution files with it. The card sits in In Progress,
+		# "ready to submit", until that action.
+		return False
 	return (
 		assignment.status == STATUS_IN_PROGRESS
 		and not assignment.cancelled
@@ -1105,6 +1129,41 @@ def _eligible_for_auto_review(assignment) -> bool:
 		and bool(assignment.first_opened_at)
 		and not _any_requirement_unavailable(assignment)
 		and _all_requirements_confirmed(assignment)
+	)
+
+
+def submit_solution(assignment_name: str) -> dict:
+	"""E06: the student's explicit submission of a solution-file work. All
+	learning requirements must be confirmed and at least one solution file
+	registered; the state is re-read fresh, and the move to Review carries
+	``solution_submitted_at`` and its audit row."""
+	assignment = _get_owned_assignment(assignment_name)
+	_refuse_cancelled(assignment)
+	if assignment.status != STATUS_IN_PROGRESS or assignment.needs_revision:
+		frappe.throw(_("This homework is not waiting for your submission."))
+	if not assignment.require_solution:
+		frappe.throw(_("This homework is submitted automatically when its materials are done."))
+	if _any_requirement_unavailable(assignment):
+		frappe.throw(_("Some materials are no longer available. Ask the teacher to fix the homework."))
+	if not _all_requirements_confirmed(assignment):
+		frappe.throw(_("Some requirements are still incomplete. Finish them before submitting."))
+	if not _solution_files_present(assignment.name):
+		frappe.throw(_("Attach at least one solution file before submitting."))
+
+	assignment.status = STATUS_REVIEW
+	assignment.submitted_for_review_at = now_datetime()
+	assignment.solution_submitted_at = now_datetime()
+	_add_history(assignment, "solution_submitted", STATUS_IN_PROGRESS, STATUS_REVIEW)
+	assignment.flags.homework_service = True
+	assignment.save(ignore_permissions=True)
+	return {"status": STATUS_REVIEW}
+
+
+def _solution_files_present(assignment_name: str) -> bool:
+	"""E06.4: the CURRENT set of the student's registered solution files --
+	deleted-until-empty means not submittable."""
+	return bool(
+		frappe.db.exists("LMS Homework Attachment", {"assignment": assignment_name})
 	)
 
 

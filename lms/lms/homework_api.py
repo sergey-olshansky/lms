@@ -14,7 +14,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, now_datetime
 
-from lms.lms import homework_service, homework_sources
+from lms.lms import homework_materials, homework_service, homework_sources
 from lms.lms.homework_service import (
 	STATUS_DONE,
 	STATUS_IN_PROGRESS,
@@ -226,7 +226,12 @@ def _require_homework_access(name: str):
 @frappe.whitelist()
 def get_homework(name: str) -> dict:
 	"""One compilation with its items, for the edit form. Each item carries its
-	own working link (R18), so the teacher can view a source before issuing."""
+	own working link (R18), so the teacher can view a source before issuing.
+	F01: ``counts`` is the CANONICAL composition summary -- lessons, quizzes
+	(the standalone picks PLUS the quizzes embedded in the chosen lessons) and
+	written assignments -- computed exactly the way the library counts and the
+	issue snapshot expand it, so every surface (library, form, assign dialog,
+	precheck, PDF) shows one and the same number."""
 	doc = _require_homework_access(name)
 	items = [
 		{
@@ -257,10 +262,50 @@ def get_homework(name: str) -> dict:
 		"name": doc.name,
 		"title": doc.title,
 		"days": doc.days,
-		"details": doc.details,
 		"group": doc.group,
 		"archived": doc.archived,
+		"require_solution": bool(doc.require_solution),
 		"items": items,
+		"counts": _canonical_counts(doc.items),
+		"materials": homework_materials.material_rows_public(doc.materials or []),
+		"materials_budget": (
+			lambda state: {
+				"used": state["used"],
+				"quota": state["quota"],
+				"remaining": state["remaining"],
+			}
+		)(homework_materials._template_budget_state(doc.name)),
+	}
+
+
+def _canonical_counts(items) -> dict:
+	"""F01: the one composition summary every surface shows. Embedded quizzes
+	count through the placement index exactly like the issue expansion; the
+	same quiz embedded twice in one lesson is one quiz (spec 3.4), and a quiz
+	embedded in a chosen lesson that is ALSO picked standalone stays one."""
+	lessons = {row.lesson for row in items if row.source_type == "Lesson" and row.lesson}
+	quizzes = {row.quiz for row in items if row.source_type == "Quiz" and row.quiz}
+	assignments = {
+		row.assignment for row in items if row.source_type == "Assignment" and row.assignment
+	}
+	embedded: set = set()
+	if lessons:
+		for placement in frappe.get_all(
+			"LMS Lesson Assessment",
+			filters={
+				"parent": ("in", list(lessons)),
+				"parenttype": "Course Lesson",
+				"assessment_type": "LMS Quiz",
+				"instructor_only": 0,
+			},
+			pluck="assessment_name",
+		):
+			if placement:
+				embedded.add(placement)
+	return {
+		"lessons": len(lessons),
+		"quizzes": len(quizzes | embedded),
+		"assignments": len(assignments),
 	}
 
 
@@ -272,12 +317,19 @@ def save_homework(
 	details: str | None = None,
 	group: str | None = None,
 	items: list | None = None,
+	require_solution: bool = False,
 ) -> dict:
 	"""Create or update a compilation. Re-saving updates in place -- no duplicates
 	(A04, A05). ``days`` is checked raw here: Frappe would silently truncate a
 	fraction before the controller's validate ever sees it. The composition is
 	canonicalized from the database (R04): client-sent courses, titles and paths
-	are never trusted, and unknown or unreachable sources are refused."""
+	are never trusted, and unknown or unreachable sources are refused.
+
+	E05: ``details`` carries rich text, stored SANITIZED; its embedded images
+	are bound as managed Detail Image rows. E06: ``require_solution`` freezes
+	the explicit-submit mode onto the template."""
+	from lms.lms import homework_materials
+
 	days = homework_service.validate_days_raw(days)
 
 	normalized = homework_sources.canonicalize_selection(items or [])
@@ -287,8 +339,9 @@ def save_homework(
 		doc = frappe.new_doc("LMS Homework")
 	doc.title = title
 	doc.days = days
-	doc.details = details
+	doc.details = homework_materials.sanitize_details(details)
 	doc.group = group or None
+	doc.require_solution = 1 if require_solution else 0
 	doc.set("items", [])
 	for item in normalized:
 		doc.append(
@@ -304,18 +357,25 @@ def save_homework(
 			},
 		)
 	doc.save()
+	# E05.10: images embedded in the rich details become managed files of the
+	# template (permissions + budget); stale references drop their rows.
+	homework_materials.sync_detail_images(doc.name, doc.details)
+	homework_materials.assert_template_budget(doc.name)
 	return {"name": doc.name}
 
 
 @frappe.whitelist()
 def copy_homework(name: str) -> dict:
-	"""A fresh template with new ids, same sources, no assignments inherited (8.1)."""
+	"""A fresh template with new ids, same sources, no assignments inherited (8.1).
+	Materials are NOT copied: the copy starts with an empty set under its own
+	budget (E05) -- a File bound to the source template's rows stays there."""
 	source = _require_homework_access(name)
 	doc = frappe.new_doc("LMS Homework")
 	doc.title = f"{source.title} ({_('copy')})"
 	doc.days = source.days
 	doc.details = source.details
 	doc.group = source.group
+	doc.require_solution = source.require_solution
 	for row in source.items:
 		doc.append(
 			"items",
@@ -391,27 +451,50 @@ def _stamp_tree_routes(nodes: list, course: str, numbers: dict) -> None:
 @frappe.whitelist()
 def get_homework_students(search: str = "") -> list[dict]:
 	"""Students this teacher may assign to: members enrolled in courses the teacher
-	instructs (the app's own teacher-student model); privileged staff reach every
-	enrolled student."""
+	instructs PLUS the students the teacher has already issued homework to (E04.11
+	-- issuing a draft fragment must not require enrolling the student into the
+	source course first; an existing assignment IS a "my student" relation). No
+	global user list: another teacher's students stay invisible."""
 	courses = homework_sources.get_assignable_courses()
 	names = [course["name"] for course in courses]
-	if not names:
-		return []
-	filters = {"course": ("in", names)}
-	if search:
-		filters["member_name"] = ("like", f"%{search}%")
-	rows = frappe.get_all(
-		"LMS Enrollment",
-		filters=filters,
-		fields=["member as name", "member_name as full_name"],
-		order_by="member_name",
+	filters: list = []
+	if names:
+		filters.append(
+			frappe.get_all(
+				"LMS Enrollment",
+				filters={"course": ("in", names)},
+				fields=["member as name", "member_name as full_name"],
+			)
+		)
+	issued = frappe.get_all(
+		"LMS Homework Assignment",
+		filters={"teacher": frappe.session.user},
+		pluck="student",
 	)
+	if issued:
+		full_names = {
+			row.name: frappe.utils.get_fullname(row.name)
+			for row in frappe.get_all(
+				"User", filters={"name": ("in", list(set(issued)))}, pluck="name"
+			)
+		}
+		filters.append(
+			[frappe._dict({"name": name, "full_name": full_names.get(name, name)}) for name in issued]
+		)
 	seen = set()
 	students = []
-	for row in rows:
-		if row.name not in seen:
+	for rows in filters:
+		for row in rows:
+			if row.name in seen:
+				continue
 			seen.add(row.name)
 			students.append(row)
+	if search:
+		needle = search.lower()
+		students = [
+			row for row in students if needle in (row.full_name or "").lower() or needle in row.name.lower()
+		]
+	students.sort(key=lambda row: (row.full_name or row.name).lower())
 	return students
 
 
@@ -432,12 +515,18 @@ def precheck_assignment(homework: str, student: str, days: int | None = None) ->
 		if doc.items
 		else [_("This homework has no materials.")]
 	)
-	# Which courses the student cannot reach yet, so the dialog can link straight
-	# to the app's own enrollment management instead of naming it in prose.
+	# E04: which courses the student reaches ONLY through this issue's narrow
+	# grant -- surfaced so the dialog can say the fragments open on issue
+	# instead of implying a missing enrollment blocks anything.
+	narrow_courses = (
+		homework_sources.narrow_access_courses(doc.items, student) if doc.items else []
+	)
+	# Courses the student cannot reach AT ALL remain actionable: the dialog
+	# links to the app's own enrollment management for them.
 	missing_courses = [
 		course
 		for course in {item.course for item in (doc.items or []) if item.course}
-		if not get_membership(course, student)
+		if not get_membership(course, student) and course not in narrow_courses
 	]
 	active = frappe.db.get_value(
 		"LMS Homework Assignment", {"homework": homework, "student": student, "cancelled": 0}
@@ -446,6 +535,7 @@ def precheck_assignment(homework: str, student: str, days: int | None = None) ->
 		"ok": not reasons and not doc.archived,
 		"reasons": reasons,
 		"missing_courses": missing_courses,
+		"narrow_courses": narrow_courses,
 		"archived": bool(doc.archived),
 		"due_at": datetime_to_iso(compute_due_at(now_datetime(), check_days)),
 		"days": check_days,
@@ -786,7 +876,6 @@ def get_homework_assignment(name: str) -> dict:
 		"name": doc.name,
 		"homework": doc.homework,
 		"title": doc.title,
-		"details": doc.details,
 		"days": doc.days,
 		"teacher": doc.teacher,
 		"teacher_name": frappe.utils.get_fullname(doc.teacher),
@@ -815,6 +904,12 @@ def get_homework_assignment(name: str) -> dict:
 		"reviewed_by": doc.reviewed_by,
 		"reviewed_at": doc.reviewed_at,
 		"requirements": [format_requirement(row, frozen=bool(doc.cancelled)) for row in doc.requirements],
+		"materials": homework_materials.material_rows_public(doc.materials or []),
+		# E05.10: embedded detail images ride the authorized endpoint for the
+		# reader -- the stored HTML keeps its storage URLs.
+		"details": homework_materials.rewrite_detail_urls(doc.details or ""),
+		"require_solution": bool(doc.require_solution),
+		"solution_submitted_at": doc.solution_submitted_at,
 		"history": [
 			{
 				"actor": row.actor,
@@ -1038,6 +1133,12 @@ def resubmit_homework(assignment: str) -> dict:
 
 
 @frappe.whitelist()
+def submit_homework_solution(assignment: str) -> dict:
+	"""E06: the student's explicit 'Send for review' of a solution-file work."""
+	return homework_service.submit_solution(assignment)
+
+
+@frappe.whitelist()
 def change_homework_deadline(assignment: str, days: int = 7) -> dict:
 	return homework_service.change_deadline(assignment, days)
 
@@ -1061,3 +1162,87 @@ def _is_privileged() -> bool:
 def _is_teacher_scoped() -> bool:
 	"""Whether the library list narrows to the owner: everyone but staff."""
 	return not _is_privileged()
+
+
+# --- Teacher overview (E08) ------------------------------------------------------
+
+
+@frappe.whitelist()
+def get_homework_overview(
+	search: str = "",
+	status: str | None = None,
+	overdue: bool = False,
+	limit: int = 25,
+	offset: int = 0,
+) -> dict:
+	"""E08: the teacher's own issued assignments across ALL their students --
+	one table instead of walking every board hunting for Review. Scoped to the
+	session teacher (staff see everything); full server-side counts and
+	paging, never the sum of the loaded page."""
+	if not _is_teacher_scoped():
+		pass  # privileged staff: the whole table
+	filters: dict = {}
+	if _is_teacher_scoped():
+		filters["teacher"] = frappe.session.user
+	if search:
+		filters["title"] = ("like", f"%{search}%")
+	if status:
+		filters["status"] = status
+	if overdue:
+		filters["due_at"] = ("<", now_datetime())
+		filters["status"] = ("in", [STATUS_TO_DO, STATUS_IN_PROGRESS])
+
+	total = frappe.db.count("LMS Homework Assignment", filters)
+	rows = frappe.get_all(
+		"LMS Homework Assignment",
+		filters=filters,
+		fields=[
+			"name",
+			"homework",
+			"title",
+			"student",
+			"teacher",
+			"status",
+			"due_at",
+			"assigned_at",
+			"needs_revision",
+			"submitted_for_review_at",
+			"solution_submitted_at",
+			"total_requirements",
+			"completed_requirements",
+			"quizzes_total",
+			"quizzes_completed",
+			"cancelled",
+		],
+		order_by="modified desc",
+		limit_page_length=limit,
+		limit_start=offset,
+	)
+	now = now_datetime()
+	for row in rows:
+		row["due_at_iso"] = datetime_to_iso(row.due_at)
+		row["student_name"] = frappe.utils.get_fullname(row.student)
+		row["overdue"] = bool(
+			row.due_at and row.due_at < now and row.status in (STATUS_TO_DO, STATUS_IN_PROGRESS)
+		)
+		row["cancelled_flag"] = bool(row.cancelled)
+
+	# Full counts for the header chips: every status of THIS teacher's scope,
+	# plus the active-overdue count -- independent of the loaded page.
+	scope: dict = {"cancelled": 0} if _is_teacher_scoped() else {"cancelled": 0}
+	if _is_teacher_scoped():
+		scope["teacher"] = frappe.session.user
+	counts = {}
+	for column_status in BOARD_STATUSES:
+		counts[column_status] = frappe.db.count(
+			"LMS Homework Assignment", {**scope, "status": column_status}
+		)
+	counts["Overdue"] = frappe.db.count(
+		"LMS Homework Assignment",
+		{
+			**scope,
+			"due_at": ("<", now),
+			"status": ("in", [STATUS_TO_DO, STATUS_IN_PROGRESS]),
+		},
+	)
+	return {"rows": rows, "total": total, "counts": counts}

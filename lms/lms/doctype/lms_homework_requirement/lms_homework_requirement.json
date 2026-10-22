@@ -81,7 +81,9 @@
   {
    "fieldname": "path",
    "fieldtype": "Data",
-   "label": "Path"
+   "label": "Path",
+   "length": 512,
+   "description": "Full readable path: course / ancestors / material (deep trees and long titles survive)."
   },
   {
    "fieldname": "column_break_0",

@@ -267,6 +267,23 @@ describe('Quiz submission review', () => {
 		])
 	})
 
+	// R06 (round 6): a typed verdict flips the row's chip to correct at once;
+	// the editor is bound to the row TYPE, so it must survive that flip --
+	// multi-digit marks, corrections and un-finalizing all need the field.
+	it('keeps the marks input after the first grading keystroke', async () => {
+		const { nextTick } = await import('vue')
+		const wrapper = render()
+		const input = wrapper.find('input[type="number"]')
+		await input.setValue('1')
+		await nextTick()
+		expect(wrapper.find('input[type="number"]').exists()).toBe(true)
+		// A full-mark verdict recorded: still editable, not frozen static.
+		await wrapper.find('input[type="number"]').setValue('15')
+		await nextTick()
+		expect(wrapper.find('input[type="number"]').exists()).toBe(true)
+		wrapper.unmount()
+	})
+
 	it('fetches the live questions with the submission\'s own quiz', () => {
 		const wrapper = render()
 		// The endpoint requires the quiz; a paramless fetch would throw and

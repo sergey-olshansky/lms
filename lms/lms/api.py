@@ -982,6 +982,10 @@ def delete_lesson(lesson: str, chapter: str):
 	# Renumber every child row, not just the lessons: a mixed section keeps one
 	# contiguous order across lessons and nested sections alike.
 	renumber_children(chapter)
+	# F02: raw child-row delete bypasses Course Chapter.on_update too.
+	from lms.lms.utils import get_lesson_count
+
+	frappe.db.set_value("LMS Course", course, "lessons", get_lesson_count(course))
 
 	frappe.db.delete("LMS Course Progress", {"lesson": lesson})
 	frappe.db.delete("LMS Video Watch Duration", {"lesson": lesson})
@@ -2048,6 +2052,13 @@ def add_lesson(title: str, chapter: str, course: str, idx: int):
 		}
 	)
 	lesson_reference.insert()
+
+	# F02: the raw child-row insert bypasses Course Chapter.on_update -- the
+	# only writer of LMS Course.lessons -- so the course's lesson counter is
+	# recomputed here, with the same computation the chapter hook uses.
+	from lms.lms.utils import get_lesson_count
+
+	frappe.db.set_value("LMS Course", course, "lessons", get_lesson_count(course))
 
 	return lesson.name
 

@@ -138,7 +138,7 @@ import HomeworkGroupsDialog from '@/components/Modals/HomeworkGroupsDialog.vue'
 import HomeworkAssignDialog from '@/components/Modals/HomeworkAssignDialog.vue'
 import { openFormRoute } from '@/composables/useFormRoute'
 import { resourceErrorMessage } from '@/utils/resource'
-import { openExternal } from '@/utils/openExternal'
+import { downloadViaAnchor } from '@/utils/download'
 
 const router = useRouter()
 const user = inject('$user')
@@ -312,12 +312,10 @@ const rowMenu = (row) =>
 		},
 	].filter((item) => (item.condition ? item.condition() : true))
 
-// E02: a plain navigational download -- the server sets Content-Disposition,
-// so opening the method URL hands the browser the file. The shared opener
-// adds the noopener guard and the scheme allowlist every window of the app
-// clears.
+// E02/F04: a real download -- a programmatic anchor with the server's
+// Content-Disposition, not a new window a popup blocker can swallow.
 const downloadTemplatePdf = (row) => {
-	openExternal(
+	downloadViaAnchor(
 		`/api/method/lms.lms.homework_pdf.download_homework_template_pdf?name=${encodeURIComponent(
 			row.name
 		)}`

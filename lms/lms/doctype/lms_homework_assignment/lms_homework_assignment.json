@@ -41,7 +41,10 @@
   "requirements_section",
   "requirements",
   "history_section",
-  "history"
+  "history",
+  "materials",
+  "require_solution",
+  "solution_submitted_at"
  ],
  "fields": [
   {
@@ -271,6 +274,23 @@
    "label": "History",
    "options": "LMS Homework History",
    "read_only": 1
+  },
+  {
+   "fieldname": "materials",
+   "fieldtype": "Table",
+   "label": "LMS Homework Assignment Material",
+   "options": "LMS Homework Assignment Material"
+  },
+  {
+   "fieldname": "require_solution",
+   "fieldtype": "Check",
+   "label": "Require Solution",
+   "default": "0"
+  },
+  {
+   "fieldname": "solution_submitted_at",
+   "fieldtype": "Datetime",
+   "label": "Solution Submitted At"
   }
  ],
  "index_web_pages_for_search": 1,

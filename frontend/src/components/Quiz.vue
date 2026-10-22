@@ -1191,12 +1191,22 @@ const attemptsLeft = computed(() => {
 	return Math.max(quiz.data.max_attempts - (attempts.data?.length ?? 0), 0)
 })
 
-const quizSubtitle = computed(() =>
-	formatQuizSubtitle(
+const quizSubtitle = computed(() => {
+	// F03: while a finished attempt's result is on screen, the header
+	// describes THAT attempt -- the composition the submission actually
+	// covers -- never the retake pool, which drops every credited question
+	// and would read as "0 questions" right after a 100% pass.
+	if (quizSubmission.data?.result?.length) {
+		return formatQuizSubtitle(
+			quizSubmission.data.result.map((row) => row.question_type),
+			quiz.data?.passing_percentage
+		)
+	}
+	return formatQuizSubtitle(
 		questions.value.map((row) => questionsByName.value[row.question]?.type),
 		quiz.data?.passing_percentage
 	)
-)
+})
 
 const introTips = computed(() => {
 	if (!quiz.data) return []

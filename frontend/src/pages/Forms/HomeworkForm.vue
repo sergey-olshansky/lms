@@ -20,18 +20,57 @@
 					:label="__('For how many days')"
 					:required="true"
 				/>
+				<!-- E05: rich details -- paragraphs, lists, links, images -- the
+				     project editor with private uploads; the server sanitizes
+				     whatever is stored. A legacy plain-text draft re-opens as
+				     text and keeps saving as text. -->
+				<div>
+					<p class="mb-1 text-sm text-ink-gray-7">{{ __('Homework details') }}</p>
+					<RichTextEditor
+						v-if="richDetails"
+						:content="form.details"
+						:editable="true"
+						:fixedMenu="true"
+						:uploadArgs="{ private: true }"
+						@change="(value) => (form.details = value)"
+					/>
+					<FormControl
+						v-else
+						type="textarea"
+						v-model="form.details"
+						rows="5"
+						:placeholder="__('Optional. Line breaks are preserved.')"
+					/>
+					<button
+						type="button"
+						class="mt-1 text-xs text-ink-gray-5 underline"
+						data-testid="details-mode-toggle"
+						@click="richDetails = !richDetails"
+					>
+						{{
+							richDetails
+								? __('Switch to plain text')
+								: __('Format with the rich text editor')
+						}}
+					</button>
+				</div>
+				<!-- E06: with this on, finishing the materials only readies the
+				     work -- the student must attach a solution file and press
+				     Send for review. Default off: the automatic Review flow of
+				     an ordinary compilation is untouched. -->
 				<FormControl
-					type="textarea"
-					v-model="form.details"
-					rows="5"
-					:label="__('Homework details')"
-					:placeholder="__('Optional. Line breaks are preserved.')"
+					type="checkbox"
+					v-model="form.require_solution"
+					:label="__('Requires a file solution')"
 				/>
 				<Select
 					v-model="form.group"
 					:options="groupOptions"
 					:placeholder="__('Group')"
 				/>
+
+				<!-- E05: the teacher's own files of this SAVED template. -->
+				<HomeworkTeacherMaterials v-if="savedName" :homework="savedName" />
 
 				<div class="rounded-4 border border-outline-gray-2">
 					<div
@@ -151,6 +190,8 @@ import FormShell from '@/components/FormShell.vue'
 import HeaderButton from '@/components/HeaderButton.vue'
 import Select from '@/components/Controls/Select.vue'
 import HomeworkMaterialPicker from '@/components/Modals/HomeworkMaterialPicker.vue'
+import HomeworkTeacherMaterials from '@/components/HomeworkTeacherMaterials.vue'
+import RichTextEditor from '@/components/RichTextEditor.vue'
 import HomeworkAssignDialog from '@/components/Modals/HomeworkAssignDialog.vue'
 import { useFormRoute } from '@/composables/useFormRoute'
 import { lessonRouteParams } from '@/utils/homeworkSelection'
@@ -177,7 +218,12 @@ const form = reactive({
 	details: '',
 	group: '',
 	items: [],
+	require_solution: false,
 })
+
+// E05: an existing rich-text description opens in the editor; a plain-text
+// draft keeps the textarea until the teacher opts into formatting.
+const richDetails = ref(false)
 
 const groups = createResource({
 	url: 'lms.lms.homework_api.list_homework_groups',
@@ -207,6 +253,8 @@ const existing = createResource({
 		form.days = data.days
 		form.details = data.details || ''
 		form.group = data.group || ''
+		form.require_solution = Boolean(data.require_solution)
+		richDetails.value = /<[a-z][\s\S]*>/i.test(form.details)
 		form.items = data.items.map((item) => ({
 			source_type: item.source_type,
 			name: item.name,
@@ -316,6 +364,7 @@ const save = createResource({
 		details: form.details,
 		group: form.group || null,
 		items: form.items,
+		require_solution: Boolean(form.require_solution),
 	}),
 	onSuccess(data) {
 		savedName.value = data.name

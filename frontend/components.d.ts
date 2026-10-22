@@ -76,6 +76,7 @@ declare module 'vue' {
     HomeworkGroupsDialog: typeof import('./src/components/Modals/HomeworkGroupsDialog.vue')['default']
     HomeworkMaterialPicker: typeof import('./src/components/Modals/HomeworkMaterialPicker.vue')['default']
     HomeworkSolutionFiles: typeof import('./src/components/HomeworkSolutionFiles.vue')['default']
+    HomeworkTeacherMaterials: typeof import('./src/components/HomeworkTeacherMaterials.vue')['default']
     HomeworkTreeNodeRow: typeof import('./src/components/HomeworkTreeNodeRow.vue')['default']
     IconPicker: typeof import('./src/components/Controls/IconPicker.vue')['default']
     ImageUploader: typeof import('./src/components/Controls/ImageUploader.vue')['default']

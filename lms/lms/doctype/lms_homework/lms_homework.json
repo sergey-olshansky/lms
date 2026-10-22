@@ -14,7 +14,9 @@
   "details_section",
   "details",
   "items_section",
-  "items"
+  "items",
+  "materials",
+  "require_solution"
  ],
  "fields": [
   {
@@ -75,6 +77,19 @@
    "fieldtype": "Table",
    "label": "Materials",
    "options": "LMS Homework Source"
+  },
+  {
+   "fieldname": "materials",
+   "fieldtype": "Table",
+   "label": "LMS Homework Material",
+   "options": "LMS Homework Material"
+  },
+  {
+   "fieldname": "require_solution",
+   "fieldtype": "Check",
+   "label": "Require Solution",
+   "default": "0",
+   "description": "E06: the student must attach at least one solution file and explicitly submit before review."
   }
  ],
  "index_web_pages_for_search": 1,

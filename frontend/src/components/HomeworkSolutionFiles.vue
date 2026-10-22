@@ -2,8 +2,9 @@
 	<!-- Task #35 (E03): the student's solution files for THIS assignment --
 	     images, PDFs, DOCX and the project's other accepted formats, up to
 	     20 MB TOGETHER. The quota line shows used/remaining; the server
-	     re-checks both the type and the sum on every registration, so the
-	     numbers here are a convenience, never the gate. -->
+	     re-checks ownership, privateness, real content type and the sum on
+	     every registration, so the numbers here are a convenience, never
+	     the gate. -->
 	<section
 		v-if="detail.data?.name"
 		class="rounded-4 border border-outline-gray-2"
@@ -37,6 +38,19 @@
 							{{ formatDate(row.uploaded_at) }}
 						</span>
 					</span>
+					<!-- R05: the download action both readers get -- the student and
+					     the assignment's teacher. The URL is the file's own PRIVATE
+					     path; serving re-checks the pair's permission on the row, so
+					     the anchor is safe to render for any viewer of this panel. -->
+					<a
+						v-if="row.file_url"
+						:href="safeUrl(row.file_url)"
+						:download="row.file_name || undefined"
+						class="shrink-0 text-xs text-ink-gray-5 underline"
+						:data-testid="`solution-download-${row.name}`"
+					>
+						{{ __('Download') }}
+					</a>
 					<Button
 						v-if="row.can_delete"
 						variant="ghost"
@@ -75,13 +89,15 @@
 			<div v-if="state.can_upload" class="border-t border-outline-gray-2 px-4 py-3">
 				<!-- No doctype wiring on the uploader itself: the generic
 				     upload_file requires doctype write a student does not
-				     hold. The file lands unattached; the registration call
-				     below binds it under the quota verdict. -->
+				     hold. The file lands unattached and PRIVATE; the
+				     registration call below binds it under the quota
+				     verdict. -->
 				<FileUploader
 					:fileTypes="acceptedTypes"
 					:private="true"
 					:validateFile="validateUpload"
 					@success="registerFile"
+					@failure="onUploadFailure"
 				>
 					<template #default="{ uploading, progress, openFileSelector }">
 						<div class="flex items-center gap-3">
@@ -113,15 +129,17 @@
 </template>
 
 <script setup>
-import { Button, FileUploader, createResource, toast, call } from 'frappe-ui'
+import { Button, FileUploader, toast, call } from 'frappe-ui'
 import { computed, ref, watch } from 'vue'
 import { resourceErrorMessage } from '@/utils/resource'
+import { safeUrl } from '@/utils/safeUrl'
 
 const props = defineProps({
 	// The loaded detail DTO: the server's own viewer flags decide what the
 	// student may do here, never the client.
 	detail: { type: Object, required: true },
 })
+const emit = defineEmits(['state'])
 
 const state = ref({ loading: true, rows: [], can_upload: false, used: 0, quota: 0 })
 const rows = computed(() => state.value.rows || [])
@@ -149,18 +167,25 @@ const acceptedTypes = [
 	'.zip',
 ]
 
-// E03.3: warn BEFORE the bytes travel -- the sum of what is stored plus the
-// picked files must fit the remaining quota; the server still re-checks.
+// E03.3 / R04: warn BEFORE the bytes travel -- the sum of what is stored
+// plus the picked file must fit the remaining quota. The FileUploader
+// contract is falsy = allowed, truthy message/Error = blocked before the
+// network; the server still re-checks the total on registration.
 const validateUpload = (file) => {
 	if (file.size > (state.value.remaining ?? 0)) {
-		toast.error(
-			__('This file does not fit the remaining {0} MB.').format(
-				(((state.value.remaining || 0) / (1024 * 1024)) || 0).toFixed(1)
-			)
+		return __('This file does not fit the remaining {0} MB.').format(
+			(((state.value.remaining || 0) / (1024 * 1024)) || 0).toFixed(1)
 		)
-		return false
 	}
-	return true
+	return null
+}
+
+// R04: a transport failure (network, refused upload) is surfaced, not
+// swallowed -- the file is NOT registered, so the panel stays truthful.
+const onUploadFailure = (error) => {
+	toast.error(
+		String(error?.message || error || __('The upload failed. Please retry.'))
+	)
 }
 
 const reload = () =>
@@ -169,6 +194,7 @@ const reload = () =>
 	})
 		.then((data) => {
 			state.value = { loading: false, ...data }
+			emit('state', data)
 		})
 		.catch((err) => {
 			state.value = { loading: false, rows: [], can_upload: false, used: 0, quota: 0 }
@@ -186,7 +212,9 @@ watch(
 defineExpose({ reload })
 
 // The uploader hands the stored File document; the quota verdict and the
-// private binding live on the server side of register.
+// private binding live on the server side of register. A refused
+// registration (foreign file, public file, wrong content, frozen state,
+// over-quota) is cleaned server-side and reported here.
 const registerFile = (file) => {
 	const fileName = file.name || file.file_name
 	call('lms.lms.homework_attachments.attach_file', {

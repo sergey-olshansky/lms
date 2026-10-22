@@ -23,12 +23,13 @@ free, Cyrillic and long-line wrapping included.
 from __future__ import annotations
 
 import html
+import re
 
 import frappe
 from frappe import _
 from frappe.utils import cint, format_datetime
 
-from lms.lms import homework_api
+from lms.lms import homework_api, homework_materials
 from lms.lms.utils import get_lms_route
 
 TYPE_LABELS = {
@@ -133,12 +134,8 @@ def render_homework_pdf_html(payload: dict) -> str:
 		meta.append(f"{_('Duration')}: {cint(payload.get('days') or 0)} {_('days')}")
 
 	materials = "".join(_material_lines(payload.get("requirements") or []))
-	details = str(payload.get("details") or "").strip()
-	details_html = (
-		f"<h2>{_('Details')}</h2><pre class='details'>{html.escape(details)}</pre>"
-		if details
-		else ""
-	)
+	details_html = _details_block(payload.get("details"))
+	teacher_materials = _teacher_material_lines(payload.get("teacher_materials") or [])
 	assignment_link = ""
 	if is_assignment and payload.get("assignment_name"):
 		url = _site_url(
@@ -160,6 +157,8 @@ def render_homework_pdf_html(payload: dict) -> str:
 	h2 {{ font-size: 13px; margin: 16px 0 6px; }}
 	ol.materials {{ padding-left: 0; list-style: none; }}
 	ol.materials li {{ border: 1px solid #dadce0; border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; page-break-inside: avoid; }}
+	ul.teacher {{ padding-left: 0; list-style: none; }}
+	ul.teacher li {{ border: 1px solid #dadce0; border-radius: 6px; padding: 6px 10px; margin-bottom: 6px; }}
 	.num {{ color: #5f6368; }}
 	.tag {{ display: inline-block; background: #f1f3f4; border-radius: 8px; font-size: 10px; padding: 1px 8px; margin: 0 6px; color: #3c4043; }}
 	a.mat {{ color: #1a73e8; text-decoration: underline; font-size: 12px; }}
@@ -167,6 +166,9 @@ def render_homework_pdf_html(payload: dict) -> str:
 	.dead-note {{ color: #d93025; font-size: 11px; }}
 	.path {{ color: #5f6368; font-size: 11px; }}
 	.details {{ font-family: sans-serif; white-space: pre-wrap; word-break: break-word; border: 1px solid #dadce0; border-radius: 6px; padding: 10px; }}
+	.details-rich {{ border: 1px solid #dadce0; border-radius: 6px; padding: 10px; }}
+	.details-rich img {{ max-width: 100%; }}
+	.details-rich p {{ margin: 0 0 8px; }}
 	.selflink {{ margin-top: 18px; }}
 </style></head>
 <body>
@@ -175,9 +177,56 @@ def render_homework_pdf_html(payload: dict) -> str:
 <div class="meta">{''.join(f'<span>{part}</span>' for part in meta)}</div>
 <h2>{_('Materials')}</h2>
 <ol class="materials">{''.join(materials) or f'<li>{_("No materials")}</li>'}</ol>
+{teacher_materials}
 {details_html}
 {assignment_link}
 </body></html>"""
+
+
+def _details_block(details) -> str:
+	"""E05/E07: rich details render as the sanitized HTML they are (images
+	absolute, so wkhtmltopdf fetches them); a legacy plain-text description
+	keeps the pre-wrap block -- never raw tags, never double-escaped."""
+	from lms.lms.html_sanitizer import sanitize_rich_text
+
+	text = str(details or "").strip()
+	if not text:
+		return ""
+	if "<" in text:
+		rendered = _absolute_asset_urls(sanitize_rich_text(text))
+		return f"<h2>{_('Details')}</h2><div class='details-rich'>{rendered}</div>"
+	return f"<h2>{_('Details')}</h2><pre class='details'>{html.escape(text)}</pre>"
+
+
+def _absolute_asset_urls(rendered: str) -> str:
+	"""Root-relative image/storage URLs become absolute: the PDF renderer has
+	no page origin to inherit them from (same stance as the attempt report)."""
+	site = frappe.utils.get_url()
+	if not site:
+		return rendered
+	return _RELATIVE_SRC.sub(lambda m: f'{m.group(1)}="{site}{m.group(2)}"', rendered)
+
+
+_RELATIVE_SRC = re.compile(r"""(src|href)=["'](?!https?://|data:|#)(/[^"']+)["']""")
+
+
+def _teacher_material_lines(rows: list[dict]) -> str:
+	"""E07.2: the teacher's own materials (or the assignment's frozen snapshot
+	of them) as REAL download links -- absolute, permission-checked on click."""
+	visible = [row for row in rows if row.get("role") == "Material" and row.get("file_url")]
+	if not visible:
+		return ""
+	parts = [f"<h2>{_('Teacher materials')}</h2><ul class='teacher'>"]
+	for row in visible:
+		url = _site_url(row["file_url"])
+		label = html.escape(str(row.get("file_name") or row.get("file") or ""))
+		size_kb = cint(row.get("file_size")) / 1024
+		parts.append(
+			f'<li><a class="mat" href="{html.escape(url, quote=True)}">{label}</a> '
+			f'<span class="path">{size_kb:.0f} KB</span></li>'
+		)
+	parts.append("</ul>")
+	return "".join(parts)
 
 
 def _template_payload(doc) -> dict:
@@ -216,6 +265,7 @@ def _template_payload(doc) -> dict:
 		"days": doc.days,
 		"details": doc.details,
 		"requirements": requirements,
+		"teacher_materials": homework_materials.material_rows_public(doc.materials or []),
 	}
 
 
@@ -232,6 +282,7 @@ def _assignment_payload(doc) -> dict:
 		"due_at_iso": payload["due_at_iso"],
 		"status": payload["status"],
 		"requirements": payload["requirements"],
+		"teacher_materials": payload.get("materials") or [],
 	}
 
 

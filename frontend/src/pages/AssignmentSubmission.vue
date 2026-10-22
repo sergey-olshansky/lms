@@ -33,6 +33,7 @@ import { sessionStore } from '../stores/session'
 import Assignment from '@/components/Assignment.vue'
 import { provideStudentView } from '@/composables/useStudentView'
 import type { UserResource } from '@/composables/useStudentView'
+import { redirectToLogin } from '@/utils/loginReturn'
 
 const user = inject<UserResource>('$user')!
 const route = useRoute()
@@ -112,7 +113,9 @@ const title = createResource<{ title: string }>({
 
 onMounted(() => {
 	if (!user.data) {
-		window.location.href = '/login'
+		// E01/R07: the whole current address (path, query, hash) rides along,
+		// so a guest deep link returns to this exact page after login.
+		redirectToLogin()
 	}
 
 	if (new URLSearchParams(window.location.search).get('fromLesson')) {

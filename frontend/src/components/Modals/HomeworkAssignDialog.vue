@@ -18,12 +18,23 @@
 					<p class="font-medium text-ink-gray-9">
 						{{ homeworkDoc.data.title }}
 					</p>
-					<p class="mt-1 text-ink-gray-6">
+					<p class="mt-1 text-ink-gray-6" data-testid="assign-composition">
 						{{
 							__('{0} lessons · {1} quizzes').format(
 								String(composition.lessons),
 								String(composition.quizzes)
 							)
+						}}
+					</p>
+					<!-- F01: the count includes the chosen lessons' mandatory
+					     embedded quizzes -- say so when no quiz was picked
+					     standalone, so the number is never a surprise. -->
+					<p
+						v-if="includesEmbedded"
+						class="mt-0.5 text-xs text-ink-gray-5"
+					>
+						{{
+							__('Choosing a lesson includes its mandatory quizzes.')
 						}}
 					</p>
 				</div>
@@ -205,13 +216,22 @@ const homeworkDoc = createResource({
 	makeParams: () => ({ name: props.homework }),
 })
 
-const composition = computed(() => {
-	const items = homeworkDoc.data?.items || []
-	return {
-		lessons: items.filter((item) => item.source_type === 'Lesson').length,
-		quizzes: items.filter((item) => item.source_type === 'Quiz').length,
-	}
-})
+// F01: the CANONICAL server summary -- the same numbers the library shows
+// and the issue snapshot expands. A chosen lesson carries its mandatory
+// embedded quizzes, so the dialog must never count bare quiz picks only.
+const composition = computed(() => ({
+	lessons: homeworkDoc.data?.counts?.lessons ?? 0,
+	quizzes: homeworkDoc.data?.counts?.quizzes ?? 0,
+	assignments: homeworkDoc.data?.counts?.assignments ?? 0,
+}))
+
+// The hint a teacher needs when the quiz count is not what the picker seemed
+// to say: choosing a lesson includes its mandatory activities.
+const includesEmbedded = computed(
+	() => (composition.value.quizzes || 0) > 0 && (homeworkDoc.data?.items || []).every(
+		(item) => item.source_type !== 'Quiz'
+	)
+)
 
 const filteredStudents = computed(() => {
 	const rows = students.data || []

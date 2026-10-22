@@ -373,6 +373,64 @@ def coupon_query_conditions(user=None) -> str:
 	return _render(coupon.name.isin(authored_coupons))
 
 
+def homework_granted_sources(user: str) -> dict[str, set[str]]:
+	"""The stable sources `user` reaches through their ACTIVE homework
+	assignments (task #35, E04) -- the assignment's own requirement rows, no
+	shadow enrollment, no published flip, no course-wide grant.
+
+	A recalled assignment's grant dies with its ``cancelled`` flag; Review and
+	Done keep the reading right so the student can re-read the work and their
+	own history (spec E04.9). Cached per request: this resolver sits on the
+	lesson and assessment read paths."""
+	empty = {"lessons": set(), "quizzes": set(), "assignments": set()}
+	if not user or user == "Guest":
+		return empty
+	cache = getattr(frappe.local, "hw_granted_cache", None)
+	if cache is None:
+		cache = {}
+		frappe.local.hw_granted_cache = cache
+	if user in cache:
+		return cache[user]
+	active = frappe.get_all(
+		"LMS Homework Assignment",
+		filters={"student": user, "cancelled": 0},
+		pluck="name",
+	)
+	if not active:
+		cache[user] = empty
+		return empty
+	granted = empty
+	rows = frappe.get_all(
+		"LMS Homework Requirement",
+		filters={"parenttype": "LMS Homework Assignment", "parent": ("in", active)},
+		fields=["requirement_type", "lesson", "quiz", "reference_assignment"],
+	)
+	for row in rows:
+		if row.requirement_type == "Open Lesson" and row.lesson:
+			granted["lessons"].add(row.lesson)
+		elif row.requirement_type == "Pass Quiz":
+			if row.quiz:
+				granted["quizzes"].add(row.quiz)
+			# The placing lesson rides with its quiz: the reader needs the
+			# lesson page the quiz lives on.
+			if row.lesson:
+				granted["lessons"].add(row.lesson)
+		elif row.requirement_type == "Open Assignment":
+			if row.reference_assignment:
+				granted["assignments"].add(row.reference_assignment)
+			if row.lesson:
+				granted["lessons"].add(row.lesson)
+	cache[user] = granted
+	return granted
+
+
+def clear_homework_grant_cache() -> None:
+	"""Invalidate the per-request grant cache: issuing, recalling or otherwise
+	changing a student's assignments changes what they reach, and a caller in
+	the SAME request (a test driver, a service chain) must see the new state."""
+	frappe.local.hw_granted_cache = {}
+
+
 def resolve_lesson_access(lesson: str, *, user: str | None = None) -> tuple[bool, bool]:
 	"""Return ``(is_instructor, can_access)`` for a lesson, computed in a single pass.
 
@@ -399,6 +457,11 @@ def resolve_lesson_access(lesson: str, *, user: str | None = None) -> tuple[bool
 		if can_modify_course(lesson_row.course):
 			return True, True
 		if get_membership(lesson_row.course, user):
+			return False, True
+		# E04: an active homework assignment naming this lesson grants the
+		# student a NARROW read -- the lesson and the resources it needs,
+		# never the course, its outline or its instructor media.
+		if lesson in homework_granted_sources(user)["lessons"]:
 			return False, True
 		# Preview is for prospective students of a LIVE course. Require the course to be
 		# published so draft lessons don't leak via this gate (matches get_course_details,
@@ -622,6 +685,14 @@ def file_has_permission(doc, ptype="read", user=None):
 		# another student's guess is refused.
 		if doc.attached_to_doctype == "LMS Homework Attachment":
 			return _homework_attachment_file_allowed(doc, user)
+		# Task #35 (E05): teacher materials. A file on the TEMPLATE is readable
+		# by the template's author and by every student holding an ACTIVE
+		# assignment whose frozen snapshot references it; a file on an
+		# assignment SNAPSHOT row by that assignment's student and teacher.
+		if doc.attached_to_doctype == "LMS Homework Material":
+			return _homework_template_material_file_allowed(doc, user)
+		if doc.attached_to_doctype == "LMS Homework Assignment Material":
+			return _homework_snapshot_material_file_allowed(doc, user)
 		return True
 	if doc.attached_to_field not in INSTRUCTOR_FIELDS:
 		return True
@@ -874,9 +945,23 @@ def _assessment_answer(doctype: str, name: str, user: str | None, *, include_mem
 		frappe.session.user = user
 		if is_site_administrator(user) or has_moderator_role(user) or is_content_author(doctype, name, user):
 			return True
-		return _reaches_through_a_course(
+		if _reaches_through_a_course(
 			doctype, name, user, include_members=include_members
-		) or _reaches_through_a_batch(doctype, name, user, include_members=include_members)
+		) or _reaches_through_a_batch(doctype, name, user, include_members=include_members):
+			return True
+		# E04: an active homework assignment that froze a requirement on THIS
+		# assessment grants its student a narrow REACH -- including past a
+		# sequential lock the enrolled-member branch just refused (the grant
+		# IS the teacher's explicit selection; the sequence of unselected
+		# lessons must not override it). Administer (``include_members=False``)
+		# never rides on a homework grant.
+		if include_members:
+			granted = homework_granted_sources(user)
+			if doctype == "LMS Quiz" and name in granted["quizzes"]:
+				return True
+			if doctype == "LMS Assignment" and name in granted["assignments"]:
+				return True
+		return False
 	finally:
 		frappe.session.user = original_user
 
@@ -1480,10 +1565,73 @@ def homework_attachment_query_conditions(user: str | None = None) -> str:
 	member = LiteralValue(frappe.db.escape(user))
 	own = (
 		frappe.qb.from_(attachment)
-		.select(assignment.name)
 		.inner_join(assignment)
 		.on(attachment.assignment == assignment.name)
 		.where((assignment.student == member) | (assignment.teacher == member))
+		.select(attachment.name)
 	)
 	condition = attachment.name.isin(own)
 	return _render(condition)
+
+
+def _homework_template_material_file_allowed(doc, user: str) -> bool:
+	"""Who may read one TEACHER MATERIAL file on a template (E05.7): the
+	template's author (and staff), plus any student holding an ACTIVE
+	assignment whose frozen snapshot still references this file -- the file is
+	shared storage, the access rides on the snapshot rows. The File is bound
+	to the material ROW, so the parent homework resolves through it."""
+	if user == "Administrator" or has_moderator_role(user):
+		return True
+	homework_name = frappe.db.get_value(
+		"LMS Homework Material", doc.attached_to_name, "parent"
+	)
+	owner = (
+		frappe.db.get_value("LMS Homework", homework_name, "owner") if homework_name else None
+	)
+	if owner and owner == user:
+		return True
+	assignment_names = set(
+		frappe.get_all(
+			"LMS Homework Assignment Material",
+			filters={"file": doc.name, "parenttype": "LMS Homework Assignment"},
+			pluck="parent",
+		)
+	)
+	for assignment_name in assignment_names:
+		row = frappe.db.get_value(
+			"LMS Homework Assignment",
+			assignment_name,
+			["student", "teacher", "cancelled"],
+			as_dict=True,
+		)
+		if not row or row.cancelled:
+			continue
+		if user in (row.student, row.teacher):
+			return True
+	return False
+
+
+def _homework_snapshot_material_file_allowed(doc, user: str) -> bool:
+	"""Who may read one SNAPSHOT material file (E05.7): the issued
+	assignment's own student and teacher, the template's author, and staff.
+	The File is bound to the snapshot ROW, so the parent assignment resolves
+	through it."""
+	if user == "Administrator" or has_moderator_role(user):
+		return True
+	assignment_name = frappe.db.get_value(
+		"LMS Homework Assignment Material", doc.attached_to_name, "parent"
+	)
+	row = (
+		frappe.db.get_value(
+			"LMS Homework Assignment",
+			assignment_name,
+			["student", "teacher", "homework"],
+			as_dict=True,
+		)
+		if assignment_name
+		else None
+	)
+	if row and user in (row.student, row.teacher):
+		return True
+	owner = frappe.db.get_value("LMS Homework", row.homework, "owner") if row else None
+	return bool(owner and owner == user)

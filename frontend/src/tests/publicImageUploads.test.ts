@@ -325,12 +325,18 @@ const MANIFEST: Record<string, Privacy[]> = {
 	// Task #35 (E03): the homework solution-files uploader is private by
 	// design -- a student's submitted work is never public storage.
 	'components/HomeworkSolutionFiles.vue': ['private'],
+	// Task #35 (E05): the teacher-materials uploader -- same private-only
+	// contract, the teacher's files are never public storage either.
+	'components/HomeworkTeacherMaterials.vue': ['private'],
 	'pages/Forms/AssignmentForm.vue': ['undeclared'],
 	// Moved out of AnnouncementForm.vue when it adopted FormLayout: the
 	// `<RichTextEditor>` tag now lives in this reusable field adapter instead.
 	'components/FormLayout/RichTextEditorField.vue': ['undeclared'],
 	'pages/Batches/BatchForm.vue': ['undeclared'],
 	'pages/Forms/EmailTemplateForm.vue': ['undeclared'],
+	// Task #35 (E05): the homework details rich editor -- its image uploads
+	// are declared private: a teacher's embedded images are managed files.
+	'pages/Forms/HomeworkForm.vue': ['private'],
 	'pages/Forms/NewBatchForm.vue': ['undeclared'],
 	'components/Courses/CourseOverviewSection.vue': ['undeclared'],
 	'pages/Forms/NewCourseForm.vue': ['undeclared'],

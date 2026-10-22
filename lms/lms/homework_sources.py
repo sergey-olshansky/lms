@@ -40,15 +40,18 @@ REQUIREMENT_REFERENCE = "Reference"
 
 
 def get_assignable_courses() -> list[dict]:
-	"""Courses the current teacher may pick homework materials from.
+	"""Courses the current teacher may pick homework materials from, with the
+	published flag (E04.1: the picker labels the unpublished ones -- a draft
+	course is a legitimate homework library).
 
 	Moderators and site administrators reach every course; a Course Creator reaches
 	the courses they instruct. Other users get nothing: another teacher's closed
-	courses never open here (spec 3.4).
-	"""
+	courses never open here (spec 3.4)."""
 	user = frappe.session.user
 	if is_site_administrator(user) or "Moderator" in frappe.get_roles(user):
-		return frappe.get_all("LMS Course", fields=["name", "title"], order_by="title")
+		return frappe.get_all(
+			"LMS Course", fields=["name", "title", "published"], order_by="title"
+		)
 
 	instructor = frappe.qb.DocType("Course Instructor")
 	names = (
@@ -60,7 +63,10 @@ def get_assignable_courses() -> list[dict]:
 	if not names:
 		return []
 	return frappe.get_all(
-		"LMS Course", filters={"name": ("in", names)}, fields=["name", "title"], order_by="title"
+		"LMS Course",
+		filters={"name": ("in", names)},
+		fields=["name", "title", "published"],
+		order_by="title",
 	)
 
 
@@ -618,11 +624,16 @@ def validate_sources_for_student(items: list, student: str) -> list[str]:
 			reasons.append(
 				_("You cannot assign materials from the course {0}.").format(frappe.bold(course_title))
 			)
-		if not get_membership(course, student):
-			course_title = frappe.db.get_value("LMS Course", course, "title") or course
-			reasons.append(_("Student is not enrolled in the course {0}.").format(frappe.bold(course_title)))
+		elif not get_membership(course, student):
+			# E04: the teacher's own course without enrollment is the narrow
+			# grant (draft-fragment mode) -- the issued assignment's
+			# requirement rows become the student's reach. A course the
+			# teacher cannot source from never gets here (refused above).
+			pass
 
-	locked = _locked_lessons_for_student(courses, student) & selected_lessons
+	locked = _locked_lessons_for_student(
+		{course for course in courses if get_membership(course, student)}, student
+	) & selected_lessons
 	if locked:
 		titles = _titles("Course Lesson", list(locked))
 		for lesson in sorted(locked, key=lambda name: titles.get(name, name)):
@@ -669,7 +680,12 @@ def _assessment_block_reasons(assessment_type: str, names: list[str], student: s
 	"""Why `student` cannot work these assessments RIGHT NOW (D08): gone, out of
 	reach through the app's own access resolver, or outside its schedule window.
 	Only the named materials are judged -- nothing here opens access, and an
-	assessment nowhere in the composition stays nobody's business (R05)."""
+	assessment nowhere in the composition stays nobody's business (R05).
+
+	E04: on the narrow grant -- the assessment's course is the session
+	teacher's own and the student holds no enrollment -- today's reachability
+	is not the question (the grant itself opens exactly this material), so
+	only existence and the hard schedule window decide."""
 	reasons: list[str] = []
 	for name in names:
 		if not name or not frappe.db.exists(assessment_type, name):
@@ -681,7 +697,9 @@ def _assessment_block_reasons(assessment_type: str, names: list[str], student: s
 				)
 			continue
 		title = frappe.db.get_value(assessment_type, name, "title") or name
-		if not can_access_assessment(assessment_type, name, user=student):
+		if not _narrow_grant_mode(assessment_type, name, student) and not can_access_assessment(
+			assessment_type, name, user=student
+		):
 			reasons.append(
 				_("{0} is not available to this student.").format(frappe.bold(title))
 			)
@@ -689,6 +707,41 @@ def _assessment_block_reasons(assessment_type: str, names: list[str], student: s
 		if reason:
 			reasons.append(reason)
 	return reasons
+
+
+def _narrow_grant_mode(assessment_type: str, name: str, student: str) -> bool:
+	"""E04: whether this assessment rides on the assignment's narrow grant --
+	its course is the session teacher's own and the student is not enrolled,
+	so the platform's member reachability cannot speak for it yet."""
+	course = frappe.db.get_value(assessment_type, name, "course") or _course_of_placed(
+		assessment_type, name
+	)
+	if not course:
+		return False
+	return can_source_from(course) and not get_membership(course, student)
+
+
+def narrow_access_courses(items: list, student: str) -> list[str]:
+	"""E04: the composition's courses the student will reach ONLY through the
+	issued assignment's narrow grant (no enrollment today). The precheck
+	surfaces this so the teacher sees which fragments open on issue."""
+	courses: set[str] = set()
+	for item in items:
+		if item.source_type == "Lesson" and item.lesson:
+			course = frappe.db.get_value("Course Lesson", item.lesson, "course")
+		elif item.source_type == "Quiz" and item.quiz:
+			course = frappe.db.get_value("LMS Quiz", item.quiz, "course") or _course_of_placed(
+				"LMS Quiz", item.quiz
+			)
+		elif item.source_type == "Assignment" and item.assignment:
+			course = frappe.db.get_value("LMS Assignment", item.assignment, "course") or _course_of_placed(
+				"LMS Assignment", item.assignment
+			)
+		else:
+			course = None
+		if course and can_source_from(course) and not get_membership(course, student):
+			courses.add(course)
+	return sorted(courses)
 
 
 def _schedule_block_reason(assessment_type: str, name: str, title: str) -> str | None:

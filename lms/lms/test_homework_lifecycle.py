@@ -146,16 +146,38 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			self._assign(template, self.student, "key-empty")
 
-	def test_unenrolled_student_blocked_with_reason(self):
-		template = self._template("Blocked", [self.lesson_plain])
+	def test_unenrolled_student_gets_narrow_grant_on_own_course(self):
+		"""E04 replaced the flat refusal: the teacher's OWN course without
+		enrollment is the draft-fragment mode -- the issued requirement rows
+		become the student's narrow grant. A course the teacher CANNOT source
+		from is still refused outright."""
+		template = self._template("Narrow", [self.lesson_plain])
 		frappe.set_user(self.teacher.email)
 		precheck = homework_api.precheck_assignment(template, self.student.email, 3)
-		self.assertFalse(precheck["ok"])
-		self.assertTrue(any("not enrolled" in reason for reason in precheck["reasons"]))
-		# The dialog turns these into links to the app's own access management.
-		self.assertEqual(precheck["missing_courses"], [self.course.name])
-		with self.assertRaises(frappe.ValidationError):
-			self._assign(template, self.student, "key-blocked")
+		self.assertTrue(precheck["ok"], precheck["reasons"])
+		self.assertEqual(precheck["narrow_courses"], [self.course.name])
+		self.assertEqual(precheck["missing_courses"], [])
+		self._assign(template, self.student, "key-narrow")
+		from lms.lms.permissions import can_access_lesson
+
+		self.assertTrue(can_access_lesson(self.lesson_plain.name, user=self.student.email))
+		# A foreign teacher's course is refused for everyone but its author.
+		frappe.set_user("Administrator")
+		from lms.lms.test_helpers import BaseTestUtils as B
+
+		other_teacher = B._create_user(
+			"hw-foreign-t@example.com", "F", "T", ["Course Creator", "LMS Student"]
+		)
+		foreign_course = B._create_course(title="Foreign course", instructor=other_teacher.email)
+		foreign_chapter = B._create_chapter("Foreign ch", foreign_course.name)
+		B._create_chapter_reference(foreign_course.name, foreign_chapter.name)
+		foreign_lesson = B._create_lesson("Foreign lesson", foreign_chapter.name, foreign_course.name)
+		B._create_lesson_reference(foreign_chapter.name, foreign_lesson.name)
+		frappe.set_user(self.teacher.email)
+		# The refusal is even earlier than precheck: canonicalization refuses
+		# to put another teacher's material into a composition at all (B01).
+		with self.assertRaises(frappe.PermissionError):
+			self._template("Foreign", [foreign_lesson])
 
 	def test_accept_refused_when_source_deleted(self):
 		"""Spec 7: acceptance requires the requirements to still be valid."""
@@ -229,7 +251,8 @@ class TestHomeworkLifecycle(BaseTestUtils, IntegrationTestCase):
 		doc = frappe.get_doc("LMS Homework Assignment", name)
 		self.assertEqual(doc.title, "Snapshot")
 		self.assertEqual(doc.days, 3)
-		self.assertEqual(doc.details, None)
+		# sanitize_details normalizes an empty description to "" (E05).
+		self.assertFalse(doc.details)
 		self.assertEqual(len(doc.requirements), 1)
 		self.assertEqual(doc.requirements[0].lesson, self.lesson_plain.name)
 

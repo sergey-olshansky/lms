@@ -2,8 +2,19 @@
 	<div class="flex h-full flex-col">
 		<PageHeader :breadcrumbs="breadcrumbs">
 			<template #actions>
-				<Select
+				<!-- E08: the teacher flips between one student's board and the
+				     overview of ALL their issued work. -->
+				<Button
 					v-if="canPickStudent"
+					variant="subtle"
+					size="sm"
+					data-testid="overview-toggle"
+					@click="overviewOpen = !overviewOpen"
+				>
+					{{ overviewOpen ? __('Student board') : __('All my students') }}
+				</Button>
+				<Select
+					v-if="canPickStudent && !overviewOpen"
 					v-model="student"
 					:options="studentOptions"
 					:placeholder="__('Student')"
@@ -42,8 +53,106 @@
 				data-testid="board-cancelled-switch"
 			/>
 		</div>
+		<!-- E08: the overview table -- one row per issued assignment, full
+		     server-side counts and paging, a jump to the card or the board. -->
+		<div v-if="overviewOpen && canPickStudent" class="px-4 pb-2 md:px-6">
+			<div class="mb-2 flex flex-wrap items-center gap-2 text-xs">
+				<span
+					v-for="(count, label) in overviewCounts"
+					:key="label"
+					class="rounded-4 bg-surface-gray-2 px-2 py-1 text-ink-gray-7"
+					:data-testid="`overview-count-${label}`"
+				>
+					{{ statusLabel(label) }}: {{ count }}
+				</span>
+			</div>
+			<div class="overflow-x-auto rounded-6 border border-outline-gray-2">
+				<table class="w-full min-w-[760px] text-sm" data-testid="homework-overview">
+					<thead class="bg-surface-gray-1 text-left text-xs text-ink-gray-5">
+						<tr>
+							<th class="px-3 py-2">{{ __('Student') }}</th>
+							<th class="px-3 py-2">{{ __('Homework') }}</th>
+							<th class="px-3 py-2">{{ __('Status') }}</th>
+							<th class="px-3 py-2">{{ __('Done') }}</th>
+							<th class="px-3 py-2">{{ __('Quizzes') }}</th>
+							<th class="px-3 py-2">{{ __('Due') }}</th>
+							<th class="px-3 py-2">{{ __('Sent') }}</th>
+							<th class="px-3 py-2"></th>
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-outline-gray-1">
+						<tr
+							v-for="row in overviewRows"
+							:key="row.name"
+							:data-testid="`overview-row-${row.name}`"
+						>
+							<td class="px-3 py-2">{{ row.student_name }}</td>
+							<td class="px-3 py-2">
+								<router-link
+									:to="{ name: 'HomeworkDetail', params: { assignmentID: row.name } }"
+									class="text-ink-gray-9 underline"
+								>
+									{{ row.title }}
+								</router-link>
+							</td>
+							<td class="px-3 py-2">
+								{{ statusLabel(row.status) }}
+								<span
+									v-if="row.needs_revision"
+									class="ml-1 rounded-4 bg-surface-orange-1 px-1.5 py-0.5 text-xs text-ink-orange-5"
+								>
+									{{ __('Needs rework') }}
+								</span>
+							</td>
+							<td class="px-3 py-2">
+								{{ row.completed_requirements }}/{{ row.total_requirements }}
+							</td>
+							<td class="px-3 py-2">
+								{{ row.quizzes_completed }}/{{ row.quizzes_total }}
+							</td>
+							<td class="px-3 py-2">
+								<span :class="row.overdue ? 'text-ink-red-5' : ''">
+									{{ siteWallClockShort(row.due_at_iso) }}
+								</span>
+							</td>
+							<td class="px-3 py-2 text-xs text-ink-gray-5">
+								{{ siteWallClockShort(toIso(row.submitted_for_review_at)) || '—' }}
+							</td>
+							<td class="px-3 py-2">
+								<Button
+									variant="ghost"
+									size="sm"
+									@click="openStudentBoard(row.student)"
+								>
+									{{ __('Board') }}
+								</Button>
+							</td>
+						</tr>
+						<tr v-if="!overviewRows.length">
+							<td colspan="8" class="px-3 py-4 text-sm text-ink-gray-5">
+								{{ overview.loading ? __('Loading…') : __('No homework found') }}
+							</td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+			<div class="mt-2 flex items-center gap-2">
+				<Button
+					v-if="overview.data && overview.data.total > overviewRows.length"
+					variant="subtle"
+					size="sm"
+					@click="overviewOffset += 25"
+				>
+					{{ __('Load more') }}
+				</Button>
+				<span class="text-xs text-ink-gray-5">
+					{{ __('{0} of {1}').format(String(overviewRows.length), String(overview.data?.total ?? 0)) }}
+				</span>
+			</div>
+		</div>
+
 		<p
-			v-if="cancelledOnly"
+			v-if="cancelledOnly && !overviewOpen"
 			class="px-4 pb-2 text-sm text-ink-gray-5 md:px-6"
 			data-testid="board-cancelled-note"
 		>
@@ -51,6 +160,7 @@
 		</p>
 
 		<div
+			v-if="!overviewOpen"
 			class="board-scroll min-h-0 flex-1 overflow-x-auto overflow-y-auto px-4 pb-4 md:px-6"
 			data-testid="homework-board"
 		>
@@ -364,6 +474,37 @@ const statusOptions = computed(() => [
 // U01: the card reads the site-local wall clock straight from the offset-aware
 // ISO the server sends -- `dayjs(naive)` would repaint it in the browser's
 // zone and disagree with the dialog and the detail page.
+// E08: the teacher's cross-student overview -- one table of every issued
+// assignment with full server-side counts and paging.
+const overviewOpen = ref(false)
+const overviewOffset = ref(0)
+const overview = createResource({
+	url: 'lms.lms.homework_api.get_homework_overview',
+	makeParams: () => ({
+		search: search.value,
+		status: statusFilter.value || undefined,
+		overdue: overdueOnly.value,
+		limit: 25,
+		offset: overviewOffset.value,
+	}),
+})
+const overviewRows = computed(() => overview.data?.rows || [])
+const overviewCounts = computed(() => {
+	const counts = overview.data?.counts || {}
+	// Recalled rows are history, not a chip.
+	delete counts.Cancelled
+	return counts
+})
+watch([overviewOpen, search, statusFilter, overdueOnly], (openChanged) => {
+	overviewOffset.value = 0
+	if (overviewOpen.value) overview.reload()
+})
+const openStudentBoard = (studentName) => {
+	overviewOpen.value = false
+	student.value = studentName
+}
+const toIso = (value) => (value ? new Date(value).toISOString() : '')
+
 const dueLabel = (card) => siteWallClockShort(card.due_at_iso || '')
 
 const progressPercent = (card) =>

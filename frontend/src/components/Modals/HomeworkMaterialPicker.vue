@@ -26,7 +26,7 @@
 							v-for="course in filteredCourses"
 							:key="course.name"
 							type="button"
-							class="block w-full px-3 py-2 text-left text-sm transition-colors"
+							class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors"
 							:class="
 								course.name === activeCourse
 									? 'bg-surface-gray-3 text-ink-gray-9'
@@ -35,7 +35,16 @@
 							:aria-current="course.name === activeCourse"
 							@click="selectCourse(course.name)"
 						>
-							{{ course.title }}
+							<span class="min-w-0 flex-1 truncate">{{ course.title }}</span>
+							<!-- E04: an unpublished course is a legitimate homework
+							     library (draft fragments); the badge says so. -->
+							<span
+								v-if="!course.published"
+								class="shrink-0 rounded-4 bg-surface-orange-1 px-1.5 py-0.5 text-xs text-ink-orange-5"
+								:data-testid="`draft-course-${course.name}`"
+							>
+								{{ __('Draft') }}
+							</span>
 						</button>
 						<p
 							v-if="!filteredCourses.length"
