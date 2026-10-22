@@ -6,6 +6,10 @@ that button sends rendered page images to Z.AI and immediately creates the quiz
 from the returned questions and answers. There is no draft step. PDFs over 30
 pages are not sent.
 
+The import dialog also has a **Force AI** checkbox for PDFs that use a supported
+quiz structure but an unfamiliar layout. When checked, each uploaded PDF skips
+format detection and is sent directly to Z.AI; the quiz is created immediately.
+
 The request uses Z.AI's Anthropic Messages-compatible endpoint and
 `glm-5.3-flash`. The authenticated key must be a GLM Coding Plan key because
 Z.AI manages Coding Plan keys separately from standard model API keys.

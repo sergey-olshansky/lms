@@ -610,6 +610,12 @@ msgstr "Импорт PDF-тренажёра Chemedge"
 msgid "Import PDF Trainer"
 msgstr "Загрузить PDF-тренажёр"
 #: frontend/src lms
+msgid "Force AI"
+msgstr "ИИ принудительно"
+#: frontend/src lms
+msgid "When enabled, every PDF is sent to Z.AI directly and a quiz is created without format detection."
+msgstr "Если включено, каждый PDF сразу отправляется в Z.AI, тест создаётся без распознавания формата."
+#: frontend/src lms
 msgid "Imported Quiz"
 msgstr "Импортированный тест"
 #: frontend/src lms

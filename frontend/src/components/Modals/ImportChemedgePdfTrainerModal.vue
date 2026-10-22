@@ -69,6 +69,19 @@
 				:disabled="isProcessing"
 				@update:model-value="(checked) => (showAnswers = !!checked)"
 			/>
+			<div class="space-y-1">
+				<Checkbox
+					:label="__('Force AI')"
+					:model-value="forceAi"
+					:disabled="isProcessing"
+					@update:model-value="(checked) => (forceAi = !!checked)"
+				/>
+				<p v-if="forceAi" class="ms-6 text-xs text-ink-gray-6">
+					{{
+						__('When enabled, every PDF is sent to Z.AI directly and a quiz is created without format detection.')
+					}}
+				</p>
+			</div>
 			<div
 				class="rounded border border-dashed border-outline-gray-3 p-4 text-center"
 				@dragover.prevent
@@ -214,6 +227,7 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const directoryInput = ref<HTMLInputElement | null>(null)
 const uploading = ref(false)
 const uploadProgress = ref(0)
+const forceAi = ref(false)
 let nextFileId = 1
 
 const importer = createResource({
@@ -395,6 +409,7 @@ async function importPdfs() {
 				pdf_file: file.name,
 				source_folder: file.source_folder,
 				show_answers: showAnswers.value ? 1 : 0,
+				use_ai: forceAi.value ? 1 : 0,
 				...taskRangeParams(file),
 			})) as ImportResponse
 			if ('needs_ai' in response) {
