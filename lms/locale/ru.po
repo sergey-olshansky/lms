@@ -606,6 +606,9 @@ msgstr "Неявный SSL — именно его ожидает порт 993."
 #: frontend/src lms
 msgid "Import Chemedge PDF Trainer"
 msgstr "Импорт PDF-тренажёра Chemedge"
+
+msgid "Import PDF Trainer"
+msgstr "Загрузить PDF-тренажёр"
 #: frontend/src lms
 msgid "Imported Quiz"
 msgstr "Импортированный тест"
@@ -937,8 +940,38 @@ msgstr "В этом уроке пока нет содержимого."
 msgid "This lesson will start from the beginning. Reload the page to try resuming where you left off."
 msgstr "Урок начнётся с самого начала. Обновите страницу, чтобы попробовать продолжить с места остановки."
 #: frontend/src lms
-msgid "This PDF does not match a supported trainer format (Chemedge or Stepenin): {0}"
-msgstr "Этот PDF не соответствует поддерживаемому формату тренажёра (Chemedge или Степенин): {0}"
+msgid "This PDF does not match a supported trainer format: {0}"
+msgstr "Этот PDF не соответствует поддерживаемому формату тренажёра: {0}"
+
+msgid "This PDF was not recognized. If you continue, all PDF pages will be sent to Z.AI for analysis and a quiz will be created immediately."
+msgstr "Не удалось распознать этот PDF. Если продолжить, все его страницы будут отправлены в Z.AI для анализа, а тест будет создан сразу."
+
+msgid "Send to Z.AI and create quiz"
+msgstr "Отправить в Z.AI и создать тест"
+
+msgid "Discard PDF"
+msgstr "Удалить PDF"
+
+msgid "This PDF is already attached to a quiz and cannot be discarded here."
+msgstr "Этот PDF уже прикреплён к тесту, его нельзя удалить здесь."
+
+msgid "AI PDF import is not configured on the server."
+msgstr "Импорт PDF через ИИ не настроен на сервере."
+
+msgid "AI import supports PDFs with up to {0} pages."
+msgstr "Импорт через ИИ поддерживает PDF не длиннее {0} страниц."
+
+msgid "The uploaded PDF has no pages."
+msgstr "В загруженном PDF нет страниц."
+
+msgid "AI could not read this PDF. Please try again later."
+msgstr "ИИ не смог обработать этот PDF. Попробуйте позже."
+
+msgid "AI returned an unreadable result for this PDF."
+msgstr "ИИ вернул нечитаемый результат для этого PDF."
+
+msgid "AI did not find a usable set of questions and answers in this PDF."
+msgstr "ИИ не нашёл в этом PDF пригодный набор заданий и ответов."
 #: lms/locale/main.pot
 msgid "This replaces what is in the editor with the starting code. Your run results are cleared too."
 msgstr "Это заменит содержимое редактора стартовым кодом. Результаты запуска тоже будут очищены."
