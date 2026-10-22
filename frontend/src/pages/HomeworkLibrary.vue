@@ -14,11 +14,6 @@
 		@load-more="loadMore"
 	>
 		<template #actions>
-			<HeaderButton
-				:label="__('Groups')"
-				icon="lucide-folder"
-				@click="groupsOpen = true"
-			/>
 			<Button variant="solid" @click="openForm('new')">
 				<template #prefix>
 					<span class="lucide-plus size-4" />
@@ -38,11 +33,6 @@
 					<span class="lucide-search size-4 text-ink-gray-5" />
 				</template>
 			</FormControl>
-			<Select
-				v-model="groupFilter"
-				:options="groupFilterOptions"
-				:placeholder="__('Group')"
-			/>
 			<BooleanSwitch v-model="archivedOnly" size="sm" :label="__('Archived')" />
 		</template>
 
@@ -71,12 +61,6 @@
 			</div>
 			<div v-else-if="column.key == 'days'" class="text-sm text-ink-gray-7">
 				{{ __('{0} days').format(String(row.days)) }}
-			</div>
-			<div
-				v-else-if="column.key == 'group_title'"
-				class="text-sm text-ink-gray-7"
-			>
-				{{ row.group_title || '—' }}
 			</div>
 			<div v-else-if="column.key == 'modified'" class="text-sm text-ink-gray-5">
 				{{ formatDate(row.modified) }}
@@ -111,12 +95,6 @@
 
 	<router-view @created="resetAndReload" />
 
-	<HomeworkGroupsDialog
-		:open="groupsOpen"
-		@changed="reloadGroupsAndRows"
-		@close="groupsOpen = false"
-	/>
-
 	<HomeworkAssignDialog
 		:open="Boolean(assignTarget)"
 		:homework="assignTarget ? assignTarget.name : ''"
@@ -132,9 +110,7 @@ import { computed, inject, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import ListPage from '@/components/Layouts/pages/ListPage.vue'
 import HeaderButton from '@/components/HeaderButton.vue'
-import Select from '@/components/Controls/Select.vue'
 import BooleanSwitch from '@/components/Controls/BooleanSwitch.vue'
-import HomeworkGroupsDialog from '@/components/Modals/HomeworkGroupsDialog.vue'
 import HomeworkAssignDialog from '@/components/Modals/HomeworkAssignDialog.vue'
 import { openFormRoute } from '@/composables/useFormRoute'
 import { resourceErrorMessage } from '@/utils/resource'
@@ -145,13 +121,11 @@ const user = inject('$user')
 const dayjs = inject('$dayjs')
 
 const search = ref('')
-const groupFilter = ref('')
 const archivedOnly = ref(false)
 const rows = ref([])
 const total = ref(0)
 const offset = ref(0)
 const pageLength = ref(25)
-const groupsOpen = ref(false)
 const assignTarget = ref(null)
 
 onMounted(() => {
@@ -164,11 +138,10 @@ onMounted(() => {
 	reload()
 })
 
-watch([search, groupFilter, archivedOnly], () => {
+watch([search, archivedOnly], () => {
 	router.replace({
 		query: {
 			title: search.value || undefined,
-			group: groupFilter.value || undefined,
 			archived: archivedOnly.value ? 1 : undefined,
 		},
 	})
@@ -185,7 +158,7 @@ const library = createResource({
 	url: 'lms.lms.homework_api.get_homework_library',
 	makeParams: () => ({
 		search: search.value,
-		group: groupFilter.value || null,
+		group: null,
 		archived: archivedOnly.value,
 		limit: pageLength.value,
 		offset: rows.value.length,
@@ -219,26 +192,8 @@ const loadMore = () => {
 // hiding the last page of a 60-row library at 25 per page.
 const hasMore = computed(() => rows.value.length < total.value)
 
-const groups = createResource({
-	url: 'lms.lms.homework_api.list_homework_groups',
-})
-groups.reload()
-const groupFilterOptions = computed(() => [
-	{ label: '', value: '' },
-	...(groups.data || []).map((group) => ({
-		label: group.path,
-		value: group.name,
-	})),
-])
-
-const reloadGroupsAndRows = () => {
-	groups.reload()
-	resetAndReload()
-}
-
 const columns = computed(() => [
 	{ label: __('Title'), key: 'title', width: 2, icon: 'lucide-book-marked' },
-	{ label: __('Group'), key: 'group_title', width: 1, icon: 'lucide-folder' },
 	{
 		label: __('Composition'),
 		key: 'composition',

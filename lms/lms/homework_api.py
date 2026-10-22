@@ -30,12 +30,22 @@ BOARD_PAGE_SIZE = 10
 BOARD_STATUSES = [STATUS_TO_DO, STATUS_IN_PROGRESS, STATUS_REVIEW, STATUS_DONE]
 
 
+def _homework_group_table_exists() -> bool:
+	"""Groups are optional; some restored databases predate their DocType."""
+	return frappe.db.table_exists("LMS Homework Group")
+
+
 # --- Library groups (spec 3.2) --------------------------------------------------
 
 
 @frappe.whitelist()
 def list_homework_groups() -> list[dict]:
 	"""The session teacher's groups as a two-level tree, for filters and forms."""
+	# A production database clone can predate this optional DocType. Keep the
+	# homework library and creation flow usable until the post-clone migration
+	# syncs it; an absent group table means there simply are no groups yet.
+	if not _homework_group_table_exists():
+		return []
 	owner_scope = {"owner": frappe.session.user}
 	if _is_privileged():
 		owner_scope = {}
@@ -119,6 +129,10 @@ def _group_titles(rows: list) -> None:
 	"""Fill ``group_title`` as the readable "Group / Subgroup" path, in two queries."""
 	group_names = {row.group for row in rows if row.group}
 	if not group_names:
+		for row in rows:
+			row["group_title"] = ""
+		return
+	if not _homework_group_table_exists():
 		for row in rows:
 			row["group_title"] = ""
 		return
@@ -262,7 +276,7 @@ def get_homework(name: str) -> dict:
 		"name": doc.name,
 		"title": doc.title,
 		"days": doc.days,
-		"group": doc.group,
+		"group": doc.group if _homework_group_table_exists() else None,
 		"archived": doc.archived,
 		"require_solution": bool(doc.require_solution),
 		"items": items,
@@ -331,6 +345,10 @@ def save_homework(
 	from lms.lms import homework_materials
 
 	days = homework_service.validate_days_raw(days)
+	if group and not _homework_group_table_exists():
+		# A restored production clone can lack this optional DocType. Ignore stale
+		# group IDs from an older client so save/assign still works.
+		group = None
 
 	normalized = homework_sources.canonicalize_selection(items or [])
 	sanitized_details = homework_materials.sanitize_details(details)

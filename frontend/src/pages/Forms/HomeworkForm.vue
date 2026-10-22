@@ -63,12 +63,6 @@
 					v-model="form.require_solution"
 					:label="__('Requires a file solution')"
 				/>
-				<Select
-					v-model="form.group"
-					:options="groupOptions"
-					:placeholder="__('Group')"
-				/>
-
 				<!-- E05: the teacher's own files of this SAVED template. -->
 				<HomeworkTeacherMaterials v-if="savedName" :homework="savedName" />
 
@@ -151,12 +145,14 @@
 				<HeaderButton
 					data-testid="homework-save"
 					:label="__('Save')"
+					variant="subtle"
 					:loading="saving"
 					@click="saveHomework(false)"
 				/>
 				<HeaderButton
 					data-testid="homework-save-assign"
 					:label="__('Save and assign')"
+					variant="solid"
 					:disabled="!form.items.length"
 					:loading="saving"
 					@click="saveHomework(true)"
@@ -188,7 +184,6 @@ import { computed, inject, nextTick, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import FormShell from '@/components/FormShell.vue'
 import HeaderButton from '@/components/HeaderButton.vue'
-import Select from '@/components/Controls/Select.vue'
 import HomeworkMaterialPicker from '@/components/Modals/HomeworkMaterialPicker.vue'
 import HomeworkTeacherMaterials from '@/components/HomeworkTeacherMaterials.vue'
 import RichTextEditor from '@/components/RichTextEditor.vue'
@@ -224,21 +219,6 @@ const form = reactive({
 // E05: an existing rich-text description opens in the editor; a plain-text
 // draft keeps the textarea until the teacher opts into formatting.
 const richDetails = ref(false)
-
-const groups = createResource({
-	url: 'lms.lms.homework_api.list_homework_groups',
-})
-groups.reload()
-const groupOptions = computed(() => {
-	const rows = [
-		{ label: '', value: '' },
-		...(groups.data || []).map((group) => ({
-			label: group.path,
-			value: group.name,
-		})),
-	]
-	return rows
-})
 
 const courses = createResource({
 	url: 'lms.lms.homework_api.get_homework_courses',
