@@ -698,6 +698,48 @@ def validate_stepenin_format(pdf: Any, header: str) -> tuple:
 						3.0,
 					),
 				}
+	# EGE variants can mix keyed multiple-choice tasks with open-response
+	# tasks whose worked solutions follow the answer grid (for example, "№29").
+	# Keep the complete solution as the answer reference and crop it for feedback.
+	for page_index in range(answer_page_start, len(pdf.pages)):
+		page = pdf.pages[page_index]
+		lines = extract_lines(page)
+		starts = [
+			(index, int(match.group(1)))
+			for index, line in enumerate(lines)
+			if (match := re.match(r"^№\s*(\d+)\s*$", str(line["text"]).strip()))
+		]
+		for position, (line_index, number) in enumerate(starts):
+			if number in numbered_answers:
+				continue
+			end_index = starts[position + 1][0] if position + 1 < len(starts) else len(lines)
+			content_lines = lines[line_index:end_index]
+			content_lines = [
+				line for line in content_lines
+				if not re.search(r"@chem|stepenin\.ru/tasks", str(line["text"]), re.IGNORECASE)
+			]
+			if not content_lines:
+				continue
+			text = "\n".join(str(line["text"]).strip() for line in content_lines).strip()
+			if not text:
+				continue
+			content_bbox = (
+				min(float(line["x0"]) for line in content_lines),
+				min(float(line["top"]) for line in content_lines),
+				max(float(line["x1"]) for line in content_lines),
+				max(float(line["bottom"]) for line in content_lines),
+			)
+			if number in numbered_answers:
+				raise FormatError(f"Duplicate answer number: {number}")
+			numbered_answers[number] = {
+				"number": number,
+				"text": text,
+				"page_index": page_index,
+				"page_number": page_index + 1,
+				"page_width": float(page.width),
+				"page_height": float(page.height),
+				"bbox": pad_bbox(content_bbox, float(page.width), float(page.height), 3.0, 3.0),
+			}
 	missing = sorted(set(numbers) - set(numbered_answers))
 	extra = sorted(set(numbered_answers) - set(numbers))
 	if missing or extra:
@@ -719,7 +761,6 @@ def validate_format(
 	if len(pdf.pages) < 2:
 		raise FormatError("The PDF must contain task pages and at least one answer page")
 
-	first_page_text = pdf.pages[0].extract_text() or ""
 	stepenin_header = next(
 		(
 			line["text"].strip()
@@ -728,8 +769,22 @@ def validate_format(
 		),
 		None,
 	)
-	if stepenin_header and "stepenin.ru/tasks/" in first_page_text:
-		return validate_stepenin_format(pdf, stepenin_header)
+	# Stepenin trainers use bracketed task numbers and a tabular answer key
+	# across both OGE and EGE materials. Branding and title placement varies, so
+	# recognize this format by its task/answer structure.
+	answer_pages = find_answer_page_starts(pdf)
+	if answer_pages and any(
+		find_stepenin_task_headings(page) for page in pdf.pages[: answer_pages[0]]
+	):
+		title = stepenin_header or next(
+			(
+				line["text"].strip()
+				for line in extract_lines(pdf.pages[0])
+				if re.match(r"^Вариант\s+№\s*\d+", line["text"].strip(), re.IGNORECASE)
+			),
+			"Тренажёр Степенина",
+		)
+		return validate_stepenin_format(pdf, title)
 
 	header, header_lines = extract_red_header(pdf.pages[0])
 	if not header_lines:

@@ -1,13 +1,13 @@
 <template>
 	<Dialog
 		v-model:open="show"
-		title="Import Chemedge PDF Trainer"
+		title="Import PDF Trainer"
 		size="lg"
 		:actions="showSummary ? successActions : importActions"
 	>
 		<div v-if="showSummary" class="space-y-4 text-base">
 			<div class="space-y-1">
-				<p>Import complete.</p>
+				<p>PDF processing complete.</p>
 				<p class="text-ink-gray-6">{{ completedCount }} imported.</p>
 			</div>
 			<div class="max-h-64 space-y-2 overflow-y-auto">
@@ -30,14 +30,38 @@
 					<p v-if="file.error" class="w-full text-xs text-ink-red-5">
 						{{ file.error }}
 					</p>
+					<div
+						v-if="file.status === 'needs_ai'"
+						class="w-full space-y-2 rounded bg-surface-amber-1 p-3 text-sm"
+					>
+						<p>
+							{{
+								__('This PDF was not recognized. If you continue, all PDF pages will be sent to Z.AI for analysis and a quiz will be created immediately.')
+							}}
+						</p>
+						<Button
+							variant="solid"
+							:disabled="isProcessing"
+							@click="importWithAi(file)"
+						>
+							{{ __('Send to Z.AI and create quiz') }}
+						</Button>
+						<Button
+							variant="ghost"
+							:disabled="isProcessing"
+							@click="removeFile(file.id)"
+						>
+							{{ __('Discard PDF') }}
+						</Button>
+					</div>
 				</div>
 			</div>
 		</div>
 		<div v-else class="space-y-4 text-base">
 			<p class="text-ink-gray-6">
-				Upload one or more supported Chemedge or Stepenin OGE PDFs. The imported
-				quizzes will have two attempts, an 85% passing score, and one mark per
-				question.
+				Upload Chemedge PDFs or trainers with bracketed task numbers and an answer
+				section at the end, including Stepenin OGE/EGE PDFs. The imported quizzes
+				will have two attempts, an 85% passing score, and one mark per question.
 			</p>
 			<Checkbox
 				label="Show correct answers"
@@ -167,7 +191,8 @@ import { useRouter } from 'vue-router'
 
 type UploadedFile = { name: string; file_name: string }
 type ImportResult = { quiz: string; title: string; question_count: number }
-type ImportStatus = 'uploaded' | 'processing' | 'success' | 'error'
+type ImportResponse = ImportResult | { needs_ai: true; message: string }
+type ImportStatus = 'uploaded' | 'processing' | 'success' | 'needs_ai' | 'error'
 type ImportFile = UploadedFile & {
 	id: number
 	status: ImportStatus
@@ -194,6 +219,9 @@ let nextFileId = 1
 const importer = createResource({
 	url: 'lms.lms.chemedge_pdf_import.import_pdf_trainer',
 })
+const discarder = createResource({
+	url: 'lms.lms.chemedge_pdf_import.discard_pdf_trainer_upload',
+})
 
 const importActions = computed(() => [
 	{
@@ -219,7 +247,10 @@ const successActions = computed(() => [
 
 const hasCompletedImports = computed(() =>
 	files.value.some(
-		(file) => file.status === 'success' || file.status === 'error'
+		(file) =>
+			file.status === 'success' ||
+			file.status === 'needs_ai' ||
+			file.status === 'error'
 	)
 )
 const showSummary = computed(
@@ -231,7 +262,10 @@ const completedCount = computed(
 const processedCount = computed(
 	() =>
 		files.value.filter(
-			(file) => file.status === 'success' || file.status === 'error'
+			(file) =>
+				file.status === 'success' ||
+				file.status === 'needs_ai' ||
+				file.status === 'error'
 		).length
 )
 
@@ -357,13 +391,19 @@ async function importPdfs() {
 		}
 		file.status = 'processing'
 		try {
-			file.result = await importer.submit({
+			const response = (await importer.submit({
 				pdf_file: file.name,
 				source_folder: file.source_folder,
 				show_answers: showAnswers.value ? 1 : 0,
 				...taskRangeParams(file),
-			})
-			file.status = 'success'
+			})) as ImportResponse
+			if ('needs_ai' in response) {
+				file.status = 'needs_ai'
+				file.error = response.message
+			} else {
+				file.result = response
+				file.status = 'success'
+			}
 		} catch (error) {
 			file.status = 'error'
 			file.error = getErrorMessage(error, 'PDF import failed')
@@ -371,6 +411,29 @@ async function importPdfs() {
 		}
 	}
 	isProcessing.value = false
+}
+
+async function importWithAi(file: ImportFile) {
+	if (file.status !== 'needs_ai' || isProcessing.value) return
+	isProcessing.value = true
+	file.status = 'processing'
+	file.error = ''
+	try {
+		file.result = (await importer.submit({
+			pdf_file: file.name,
+			source_folder: file.source_folder,
+			show_answers: showAnswers.value ? 1 : 0,
+			use_ai: 1,
+			...taskRangeParams(file),
+		})) as ImportResult
+		file.status = 'success'
+	} catch (error) {
+		file.status = 'needs_ai'
+		file.error = getErrorMessage(error, 'AI PDF import failed')
+		toast.error(`${file.file_name}: ${file.error}`)
+	} finally {
+		isProcessing.value = false
+	}
 }
 
 function validateTaskRange(file: ImportFile) {
@@ -406,7 +469,16 @@ function taskRangeParams(file: ImportFile) {
 	return { first_task_number: first, last_task_number: last }
 }
 
-function removeFile(id: number) {
+async function removeFile(id: number) {
+	const file = files.value.find((item) => item.id === id)
+	if (file?.status === 'needs_ai') {
+		try {
+			await discarder.submit({ pdf_file: file.name })
+		} catch (error) {
+			toast.error(getErrorMessage(error, 'Could not discard PDF'))
+			return
+		}
+	}
 	files.value = files.value.filter((file) => file.id !== id)
 }
 
@@ -419,6 +491,7 @@ function statusLabel(status: ImportStatus) {
 		uploaded: 'Ready',
 		processing: 'Processing…',
 		success: 'Done',
+		needs_ai: 'Not recognized',
 		error: 'Error',
 	}[status]
 }
@@ -428,6 +501,7 @@ function statusIconClass(status: ImportStatus) {
 		uploaded: 'lucide-circle-check text-ink-gray-5',
 		processing: 'lucide-loader-circle animate-spin text-ink-blue-5',
 		success: 'lucide-circle-check text-ink-green-5',
+		needs_ai: 'lucide-brain text-ink-amber-5',
 		error: 'lucide-circle-x text-ink-red-5',
 	}[status]
 }
