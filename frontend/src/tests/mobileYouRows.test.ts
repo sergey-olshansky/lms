@@ -31,8 +31,8 @@ const link = (label: string, icon: string, to?: string): NavLink => ({
 // link, since the phone has no settings page for one to point at.
 const SIDEBAR = [
 	link('Home', 'Home', 'Home'),
-	link('Programs', 'Route', 'Programs'),
 	link('Courses', 'BookOpen', 'Courses'),
+	link('Homework workspace', 'KanbanSquare', 'HomeworkExecution'),
 	link('Batches', 'Users', 'Batches'),
 	link('Certifications', 'GraduationCap', 'Certifications'),
 	link('Jobs', 'Briefcase', 'Jobs'),
@@ -40,13 +40,12 @@ const SIDEBAR = [
 ]
 const OTHER = [
 	link('Quizzes', 'CircleHelp', 'Quizzes'),
-	link('Assignments', 'Pencil', 'Assignments'),
 	link('Programming Exercises', 'Code', 'ProgrammingExercises'),
 	link('Notifications', 'Bell', 'Notifications'),
 	link('Profile', 'UserRound'),
 	link('Log out', 'LogOut'),
 ]
-const PRIMARY = ['Home', 'Courses', 'Certifications', 'You']
+const PRIMARY = ['Home', 'Courses', 'Homework workspace', 'You']
 
 // Every fixture above names a real route, so the default answer is yes. A
 // test that cares about the other shapes passes its own.
@@ -84,8 +83,7 @@ describe('destinations', () => {
 
 	it('keeps the section order inside the one group', () => {
 		// The heading is gone, the clustering is not: LEARN, then DISCOVER, then
-		// MORE. Arrival order would read Programs, Batches, Jobs, Statistics,
-		// Quizzes, course content split around the discovery links.
+		// MORE. Programs and Assignments are intentionally absent from navigation.
 		expect(
 			labelsIn(
 				build({
@@ -94,10 +92,8 @@ describe('destinations', () => {
 				'Pages'
 			)
 		).toEqual([
-			'Programs',
 			'Batches',
 			'Quizzes',
-			'Assignments',
 			'Programming Exercises',
 			'Jobs',
 			'Statistics',
@@ -107,16 +103,16 @@ describe('destinations', () => {
 
 	it('leaves out everything already on the bottom bar', () => {
 		const labels = allRows(build()).map((row) => row.label)
-		for (const primary of ['Home', 'Courses', 'Certifications']) {
+		for (const primary of ['Home', 'Courses', 'Homework workspace']) {
 			expect(labels).not.toContain(primary)
 		}
 	})
 
 	it('shows a destination once when it is in both link lists', () => {
 		const rows = allRows(
-			build({ otherLinks: [link('Programs', 'Route', 'Programs'), ...OTHER] })
+			build({ otherLinks: [link('Quizzes', 'CircleHelp', 'Quizzes'), ...OTHER] })
 		)
-		expect(rows.filter((row) => row.label === 'Programs')).toHaveLength(1)
+		expect(rows.filter((row) => row.label === 'Quizzes')).toHaveLength(1)
 	})
 
 	it('keeps an unrecognised destination rather than dropping it', () => {
@@ -233,7 +229,6 @@ describe('iconClass', () => {
 		'Headset',
 		'Mail',
 		'CircleHelp',
-		'Pencil',
 		'Code',
 	])('spells out %s, a destination nav link icon', (icon) => {
 		const name = iconClass(icon)?.slice('lucide-'.length) ?? ''

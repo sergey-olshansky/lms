@@ -183,8 +183,7 @@ let sidebarStore = useSidebar()
 const socket = inject('$socket')
 const sidebarLinks = ref(null)
 const { capture } = useTelemetry()
-const isInstructor = ref(false)
-const { sidebarSettings, programs, loadSidebarSettings } = useSettings()
+const { sidebarSettings, loadSidebarSettings } = useSettings()
 const settingsStore = useSettings()
 const showOnboarding = ref(false)
 const showIntermediateModal = ref(false)
@@ -467,8 +466,6 @@ const setUpOnboarding = () => {
 watch(userResource, async () => {
 	await userResource.promise
 	if (userResource.data) {
-		isInstructor.value = userResource.data.is_instructor
-		await programs.reload()
 		setUpOnboarding()
 	}
 	updateSidebarLinks()

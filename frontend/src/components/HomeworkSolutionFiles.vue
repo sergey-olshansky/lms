@@ -1,10 +1,7 @@
 <template>
-	<!-- Task #35 (E03): the student's solution files for THIS assignment --
-	     images, PDFs, DOCX and the project's other accepted formats, up to
-	     20 MB TOGETHER. The quota line shows used/remaining; the server
-	     re-checks ownership, privateness, real content type and the sum on
-	     every registration, so the numbers here are a convenience, never
-	     the gate. -->
+	<!-- Task #35 (E03): the student's image/document solution files for THIS
+	     assignment, up to 20 MB TOGETHER. The server re-checks ownership,
+	     privateness, supported type and quota on every registration. -->
 	<section
 		v-if="detail.data?.name"
 		class="rounded-4 border border-outline-gray-2"
@@ -43,8 +40,8 @@
 					     path; serving re-checks the pair's permission on the row, so
 					     the anchor is safe to render for any viewer of this panel. -->
 					<a
-						v-if="row.file_url"
-						:href="safeUrl(row.file_url)"
+						v-if="row.download_url || row.file_url"
+						:href="safeUrl(row.download_url || row.file_url)"
 						:download="row.file_name || undefined"
 						class="shrink-0 text-xs text-ink-gray-5 underline"
 						:data-testid="`solution-download-${row.name}`"
@@ -80,20 +77,21 @@
 			</p>
 
 			<p class="px-4 pb-2 text-xs text-ink-gray-5" v-if="state.can_upload">
-				{{
-					__('Allowed: images, PDF, DOCX, ODT, TXT, XLSX, PPTX, ZIP — up to {0} MB total.')
-						.format(mbQuota)
-				}}
+				{{ __('Images, documents, PDF and text files — up to {0} MB total.').format(mbQuota) }}
 			</p>
 
 			<div v-if="state.can_upload" class="border-t border-outline-gray-2 px-4 py-3">
-				<!-- No doctype wiring on the uploader itself: the generic
-				     upload_file requires doctype write a student does not
-				     hold. The file lands unattached and PRIVATE; the
-				     registration call below binds it under the quota
-				     verdict. -->
+				<!-- Single-request transport (prod incident 2026-10-25): the
+				     bytes are posted straight to the homework endpoint, which
+				     stores the file PRIVATE and registers it under the quota
+				     verdict in one transaction -- no client-side hand-off of a
+				     generic-upload response, and no generic-endpoint mime
+				     allowlist for website users, while the homework endpoint accepts
+				     the supported image and document formats. -->
 				<FileUploader
-					:fileTypes="acceptedTypes"
+					upload-endpoint="/api/method/lms.lms.homework_attachments.upload_solution_file"
+					:doctype="'LMS Homework Assignment'"
+					:docname="detail.data?.name"
 					:private="true"
 					:validateFile="validateUpload"
 					@success="registerFile"
@@ -155,23 +153,6 @@ const mbQuota = computed(() =>
 	String(Math.round((state.value.quota || 0) / (1024 * 1024)))
 )
 
-const acceptedTypes = [
-	'image/*',
-	'.pdf',
-	'.doc',
-	'.docx',
-	'.odt',
-	'.rtf',
-	'.txt',
-	'.csv',
-	'.xls',
-	'.xlsx',
-	'.ods',
-	'.ppt',
-	'.pptx',
-	'.zip',
-]
-
 // E03.3 / R04: warn BEFORE the bytes travel -- the sum of what is stored
 // plus the picked file must fit the remaining quota. The FileUploader
 // contract is falsy = allowed, truthy message/Error = blocked before the
@@ -218,28 +199,18 @@ watch(
 
 defineExpose({ reload })
 
-// The uploader hands the stored File document; the quota verdict and the
-// private binding live on the server side of register. A refused
-// registration (foreign file, public file, wrong content, frozen state,
-// over-quota) is cleaned server-side and reported here.
+// The upload endpoint did the registering in the same request: its payload
+// carries the fresh quota state. Whatever shape comes back, the panel never
+// depends on parsing it -- the server stays the single source of truth, and
+// reload() reconciles the rows (prod incident 2026-10-25: the old two-step
+// hand-off broke exactly there).
 const registerFile = (file) => {
-	const fileName = file.name || file.file_name
-	call('lms.lms.homework_attachments.attach_file', {
-		assignment: props.detail.data?.name,
-		file_name: fileName,
-	})
-		.then((data) => {
-			toast.success(__('File attached'))
-			if (data?.state) {
-				state.value = { ...state.value, ...data.state }
-			}
-			reload()
-		})
-		.catch((err) => {
-			toast.error(resourceErrorMessage(err, __('Error')))
-			reload()
-		})
-		.finally(() => setBusy(false))
+	toast.success(__('File attached'))
+	if (file && file.state) {
+		state.value = { ...state.value, ...file.state }
+	}
+	reload()
+	setBusy(false)
 }
 
 const removeFile = (row) => {

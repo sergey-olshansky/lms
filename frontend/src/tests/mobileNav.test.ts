@@ -14,12 +14,11 @@ import {
 
 const link = (label: string, icon = 'Circle'): NavLink => ({ label, icon })
 
-// Mirrors what MobileLayout assembles at runtime: getSidebarLinks() output with
-// Programs spliced in, plus the moderator extras and session actions that
+// Mirrors what MobileLayout assembles at runtime: getSidebarLinks() output,
+// plus the moderator extras and session actions that
 // addOtherLinks()/addQuizzes() append to the separate `otherLinks` array.
 const sidebarLinks = [
 	link('Home'),
-	link('Programs'),
 	link('Courses'),
 	link('Homework workspace'),
 	link('Jobs'),
@@ -28,7 +27,6 @@ const sidebarLinks = [
 ]
 const otherLinks = [
 	link('Quizzes'),
-	link('Assignments'),
 	link('Programming Exercises'),
 	link('Notifications'),
 	link('Profile'),
@@ -43,7 +41,6 @@ describe('pickPrimaryTabs', () => {
 			'Home',
 			'Courses',
 			'Homework workspace',
-			'Programs',
 			'You',
 		])
 	})
@@ -53,15 +50,13 @@ describe('pickPrimaryTabs', () => {
 		expect(pickPrimaryTabs(withoutBatches, true).map((t) => t.label)).toEqual([
 			'Home',
 			'Courses',
-			'Programs',
 			'You',
 		])
 	})
 
 	it('never exceeds five tabs', () => {
-		// Four PRIMARY_LABELS plus You, and You is pushed last — a fifth primary
-		// would cost it its place.
-		expect(pickPrimaryTabs(sidebarLinks, true)).toHaveLength(5)
+		// Three primary destinations leave the final slot for You.
+		expect(pickPrimaryTabs(sidebarLinks, true)).toHaveLength(4)
 	})
 
 	it('falls back to You alone when the links have not loaded yet', () => {
@@ -209,7 +204,7 @@ describe('isLinkEnabled', () => {
 describe('sectionFor', () => {
 	it('files course content under LEARN wherever it came from', () => {
 		expect(sectionFor('Quizzes')).toBe('LEARN')
-		expect(sectionFor('Assignments')).toBe('LEARN')
+		expect(sectionFor('Assignments')).toBe('MORE')
 		expect(sectionFor('Programming Exercises')).toBe('LEARN')
 	})
 
@@ -227,18 +222,16 @@ describe('sectionFor', () => {
 // What the More sheet used to be built from, and what the You page is built
 // from now. The grouping moved to buildYouRows; the selection stayed here.
 describe('overflowLinks', () => {
-	const primaryLabels = ['Home', 'Courses', 'Certifications', 'You']
+	const primaryLabels = ['Home', 'Courses', 'Homework workspace', 'You']
 	const build = () => overflowLinks(sidebarLinks, otherLinks, primaryLabels)
 	const labels = () => build().map((l) => l.label)
 
 	it('keeps everything that did not fit on the bar, in arrival order', () => {
 		expect(labels()).toEqual([
-			'Programs',
-			'Homework workspace',
+			'Certifications',
 			'Jobs',
 			'Statistics',
 			'Quizzes',
-			'Assignments',
 			'Programming Exercises',
 			'Notifications',
 			'Profile',
@@ -248,14 +241,14 @@ describe('overflowLinks', () => {
 	})
 
 	it('returns a destination once when it appears in both link lists', () => {
-		// Regression: a re-entrant sidebar reload left Programs in both arrays
-		// and the sheet rendered it twice.
+		// Dedupe overlapping links even when a re-entrant reload leaves one in
+		// both arrays.
 		const duplicated = overflowLinks(
-			[...sidebarLinks, link('Programs')],
-			[link('Programs'), ...otherLinks],
+			[...sidebarLinks, link('Quizzes')],
+			[link('Quizzes'), ...otherLinks],
 			primaryLabels
 		)
-		expect(duplicated.filter((l) => l.label === 'Programs')).toHaveLength(1)
+		expect(duplicated.filter((l) => l.label === 'Quizzes')).toHaveLength(1)
 	})
 
 	it('leaves out anything already on the bottom bar', () => {

@@ -39,19 +39,25 @@ from lms.lms.homework_attachments import (
 
 MATERIAL_QUOTA_BYTES = 20 * 1024 * 1024
 
-_ALLOWED_EXTENSIONS = None  # resolved lazily from the attachments module
-
-# src/href references into managed storage: private files and (legacy) public
-_FILE_REF = re.compile(r"""(?:src|href)=["'](/(?:private/)?files/[^"']+)["']""")
+# Teacher materials keep their own type policy (E05): the "any file type"
+# decision of 2026-10-25 applies to STUDENT SOLUTION files, not to the
+# template-managed material library.
+_ALLOWED_EXTENSIONS = frozenset(
+	{
+		".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp",
+		".pdf",
+		".doc", ".docx", ".odt", ".rtf", ".txt", ".csv",
+		".xls", ".xlsx", ".ods", ".ppt", ".pptx",
+		".zip",
+	}
+)
 
 
 def _allowed_extensions():
-	global _ALLOWED_EXTENSIONS
-	if _ALLOWED_EXTENSIONS is None:
-		from lms.lms.homework_attachments import ALLOWED_EXTENSIONS
-
-		_ALLOWED_EXTENSIONS = ALLOWED_EXTENSIONS
 	return _ALLOWED_EXTENSIONS
+
+# src/href references into managed storage: private files and (legacy) public
+_FILE_REF = re.compile(r"""(?:src|href)=["'](/(?:private/)?files/[^"']+)["']""")
 
 
 def _template_budget_state(homework: str) -> dict:
