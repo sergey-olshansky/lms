@@ -27,33 +27,15 @@
 					>
 						Open
 					</Button>
+					<p v-if="file.result?.warning" role="alert" class="w-full rounded bg-surface-amber-1 p-2 text-sm text-ink-amber-7">
+						{{ file.result.warning }}
+					</p>
 					<p v-if="file.error" class="w-full text-xs text-ink-red-5">
 						{{ file.error }}
 					</p>
-					<div
-						v-if="file.status === 'needs_ai'"
-						class="w-full space-y-2 rounded bg-surface-amber-1 p-3 text-sm"
-					>
-						<p>
-							{{
-								__('This PDF was not recognized. If you continue, all PDF pages will be sent to Z.AI for analysis and a quiz will be created immediately.')
-							}}
-						</p>
-						<Button
-							variant="solid"
-							:disabled="isProcessing"
-							@click="importWithAi(file)"
-						>
-							{{ __('Send to Z.AI and create quiz') }}
-						</Button>
-						<Button
-							variant="ghost"
-							:disabled="isProcessing"
-							@click="removeFile(file.id)"
-						>
-							{{ __('Discard PDF') }}
-						</Button>
-					</div>
+					<Button v-if="file.status === 'error'" variant="outline" :disabled="isProcessing" @click="retryImport(file)">
+						{{ __('Retry import') }}
+					</Button>
 				</div>
 			</div>
 		</div>
@@ -69,18 +51,23 @@
 				:disabled="isProcessing"
 				@update:model-value="(checked) => (showAnswers = !!checked)"
 			/>
+			<div class="rounded bg-surface-blue-1 p-3 text-sm text-ink-gray-7">
+				{{ __('Every PDF is reviewed by AI for complete questions and the presence of answers. If needed, Z.AI plans the required pages and extracts each task separately. Answer correctness is not checked. If AI is unavailable, recognised PDFs are imported by the standard parser with a warning.') }}
+			</div>
 			<div class="space-y-1">
-				<Checkbox
-					:label="__('Force AI')"
-					:model-value="forceAi"
+				<label class="text-xs text-ink-gray-6" for="ai-instruction">
+					{{ __('Extra instruction for AI (optional)') }}
+				</label>
+				<textarea
+					id="ai-instruction"
+					v-model="aiInstruction"
+					maxlength="1000"
+					rows="3"
 					:disabled="isProcessing"
-					@update:model-value="(checked) => (forceAi = !!checked)"
+					class="w-full rounded border border-outline-gray-2 px-3 py-2 text-sm"
+					:placeholder="__('For example: preserve answer choices and chemical notation')"
 				/>
-				<p v-if="forceAi" class="ms-6 text-xs text-ink-gray-6">
-					{{
-						__('When enabled, every PDF is sent to Z.AI directly and a quiz is created without format detection.')
-					}}
-				</p>
+				<p class="text-end text-xs text-ink-gray-5">{{ aiInstruction.length }}/1000</p>
 			</div>
 			<div
 				class="rounded border border-dashed border-outline-gray-3 p-4 text-center"
@@ -185,6 +172,7 @@
 				class="rounded bg-surface-gray-2 p-3 text-sm text-ink-gray-6"
 			>
 				Processing {{ processedCount }} of {{ files.length }}…
+				<p v-if="progressText" class="mt-1">{{ progressText }}</p>
 			</div>
 		</div>
 	</Dialog>
@@ -203,11 +191,12 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 type UploadedFile = { name: string; file_name: string }
-type ImportResult = { quiz: string; title: string; question_count: number }
-type ImportResponse = ImportResult | { needs_ai: true; message: string }
-type ImportStatus = 'uploaded' | 'processing' | 'success' | 'needs_ai' | 'error'
+type ImportResult = { quiz: string; title: string; question_count: number; used_ai?: boolean; warning?: string }
+type ImportJobStatus = { status: 'queued' | 'processing' | 'done' | 'error'; message?: string; result?: ImportResult; error?: string }
+type ImportStatus = 'uploaded' | 'processing' | 'success' | 'error'
 type ImportFile = UploadedFile & {
 	id: number
+	request_id: string
 	status: ImportStatus
 	source_folder: string
 	// Vue casts <input type="number"> values to numbers, so both shapes occur.
@@ -222,20 +211,32 @@ const router = useRouter()
 const files = ref<ImportFile[]>([])
 const uploadError = ref('')
 const isProcessing = ref(false)
+const progressText = ref('')
 const showAnswers = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 const directoryInput = ref<HTMLInputElement | null>(null)
 const uploading = ref(false)
 const uploadProgress = ref(0)
-const forceAi = ref(false)
+const aiInstruction = ref('')
 let nextFileId = 1
 
 const importer = createResource({
-	url: 'lms.lms.chemedge_pdf_import.import_pdf_trainer',
+	url: 'lms.lms.pdf_trainer_jobs.start_import',
 })
-const discarder = createResource({
-	url: 'lms.lms.chemedge_pdf_import.discard_pdf_trainer_upload',
+const importStatus = createResource({
+	url: 'lms.lms.pdf_trainer_jobs.get_status',
+	method: 'GET',
 })
+const importSession = createResource({
+	url: 'lms.lms.pdf_trainer_jobs.get_import_session',
+	method: 'GET',
+})
+
+async function refreshImportSession() {
+	const session = (await importSession.fetch()) as { csrf_token: string }
+	if (!session?.csrf_token) throw new Error('Could not refresh the upload session')
+	;(window as Window & { csrf_token: string }).csrf_token = session.csrf_token
+}
 
 const importActions = computed(() => [
 	{
@@ -263,7 +264,6 @@ const hasCompletedImports = computed(() =>
 	files.value.some(
 		(file) =>
 			file.status === 'success' ||
-			file.status === 'needs_ai' ||
 			file.status === 'error'
 	)
 )
@@ -278,8 +278,7 @@ const processedCount = computed(
 		files.value.filter(
 			(file) =>
 				file.status === 'success' ||
-				file.status === 'needs_ai' ||
-				file.status === 'error'
+					file.status === 'error'
 		).length
 )
 
@@ -358,6 +357,7 @@ async function uploadFile(file: File) {
 			: 0
 	})
 	try {
+		await refreshImportSession()
 		const uploadedFile = await uploader.upload(file, { private: true })
 		onUpload(uploadedFile as UploadedFile, sourceFolder(file))
 	} catch (error) {
@@ -378,6 +378,7 @@ function onUpload(file: UploadedFile, source_folder: string) {
 	files.value.push({
 		...file,
 		id: nextFileId++,
+		request_id: crypto.randomUUID(),
 		status: 'uploaded',
 		source_folder,
 		first_task_number: '',
@@ -405,20 +406,19 @@ async function importPdfs() {
 		}
 		file.status = 'processing'
 		try {
-			const response = (await importer.submit({
+			await refreshImportSession()
+			const job = (await importer.submit({
 				pdf_file: file.name,
+				request_id: file.request_id,
 				source_folder: file.source_folder,
 				show_answers: showAnswers.value ? 1 : 0,
-				use_ai: forceAi.value ? 1 : 0,
+				use_ai: 1,
+				ai_instruction: aiInstruction.value,
 				...taskRangeParams(file),
-			})) as ImportResponse
-			if ('needs_ai' in response) {
-				file.status = 'needs_ai'
-				file.error = response.message
-			} else {
-				file.result = response
-				file.status = 'success'
-			}
+			})) as { job_id: string }
+			file.result = await waitForImport(job.job_id)
+			file.status = 'success'
+			if (file.result.warning) toast.warning(file.result.warning)
 		} catch (error) {
 			file.status = 'error'
 			file.error = getErrorMessage(error, 'PDF import failed')
@@ -426,29 +426,34 @@ async function importPdfs() {
 		}
 	}
 	isProcessing.value = false
+	progressText.value = ''
 }
 
-async function importWithAi(file: ImportFile) {
-	if (file.status !== 'needs_ai' || isProcessing.value) return
-	isProcessing.value = true
-	file.status = 'processing'
-	file.error = ''
-	try {
-		file.result = (await importer.submit({
-			pdf_file: file.name,
-			source_folder: file.source_folder,
-			show_answers: showAnswers.value ? 1 : 0,
-			use_ai: 1,
-			...taskRangeParams(file),
-		})) as ImportResult
-		file.status = 'success'
-	} catch (error) {
-		file.status = 'needs_ai'
-		file.error = getErrorMessage(error, 'AI PDF import failed')
-		toast.error(`${file.file_name}: ${file.error}`)
-	} finally {
-		isProcessing.value = false
+async function waitForImport(jobId: string): Promise<ImportResult> {
+	const deadline = Date.now() + 22 * 60 * 1000
+	let failures = 0
+	while (Date.now() < deadline) {
+		let state: ImportJobStatus
+		try {
+			state = (await importStatus.submit({ job_id: jobId })) as ImportJobStatus
+			failures = 0
+		} catch (error) {
+			if (++failures >= 3) throw error
+			await new Promise((resolve) => setTimeout(resolve, 2000))
+			continue
+		}
+		progressText.value = state.message || ''
+		if (state.status === 'done' && state.result) return state.result
+		if (state.status === 'error') throw new Error(state.error || 'AI review failed')
+		await new Promise((resolve) => setTimeout(resolve, 2000))
 	}
+	throw new Error('AI review is taking longer than expected. Retry to check the same import job.')
+}
+
+async function retryImport(file: ImportFile) {
+	file.status = 'uploaded'
+	file.error = ''
+	await importPdfs()
 }
 
 function validateTaskRange(file: ImportFile) {
@@ -485,15 +490,7 @@ function taskRangeParams(file: ImportFile) {
 }
 
 async function removeFile(id: number) {
-	const file = files.value.find((item) => item.id === id)
-	if (file?.status === 'needs_ai') {
-		try {
-			await discarder.submit({ pdf_file: file.name })
-		} catch (error) {
-			toast.error(getErrorMessage(error, 'Could not discard PDF'))
-			return
-		}
-	}
+
 	files.value = files.value.filter((file) => file.id !== id)
 }
 
@@ -506,7 +503,6 @@ function statusLabel(status: ImportStatus) {
 		uploaded: 'Ready',
 		processing: 'Processing…',
 		success: 'Done',
-		needs_ai: 'Not recognized',
 		error: 'Error',
 	}[status]
 }
@@ -516,7 +512,6 @@ function statusIconClass(status: ImportStatus) {
 		uploaded: 'lucide-circle-check text-ink-gray-5',
 		processing: 'lucide-loader-circle animate-spin text-ink-blue-5',
 		success: 'lucide-circle-check text-ink-green-5',
-		needs_ai: 'lucide-brain text-ink-amber-5',
 		error: 'lucide-circle-x text-ink-red-5',
 	}[status]
 }
