@@ -432,15 +432,22 @@ const STATUS_LABELS = {
 	Done: 'Homework accepted',
 }
 const statusLabel = (status) => __(STATUS_LABELS[status] || status)
-const columnHint = (status) =>
-	__(
-		{
-			'To Do': 'Open the card to start.',
-			'In Progress': 'Finish the checklist and required tests.',
-			Review: 'Waiting for the teacher to check.',
-			Done: 'Accepted by the teacher.',
-		}[status] || ''
-	)
+const columnHint = (status) => {
+	const hints = canPickStudent.value
+		? {
+				'To Do': 'The student has not started yet.',
+				'In Progress': 'The student is completing the homework.',
+				Review: 'Open the work to accept it or return it with a comment.',
+				Done: 'Accepted by the teacher.',
+			}
+		: {
+				'To Do': 'Open the card to start.',
+				'In Progress': 'Finish the checklist and required tests.',
+				Review: 'Waiting for the teacher to check.',
+				Done: 'Accepted by the teacher.',
+			}
+	return __(hints[status] || '')
+}
 
 const canPickStudent = computed(() =>
 	Boolean(
