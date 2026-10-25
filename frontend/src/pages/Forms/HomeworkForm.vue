@@ -5,6 +5,13 @@
 				{{ __('You are not permitted to manage homework.') }}
 			</div>
 			<div v-else data-testid="homework-fields" class="space-y-4 text-base">
+				<p class="rounded-5 bg-surface-gray-1 p-3 text-sm text-ink-gray-6">
+					{{
+						__(
+							'Name the homework, choose materials from one or more courses, then assign it to a student. The deadline starts when you assign it.'
+						)
+					}}
+				</p>
 				<!-- U03: the server's Data cap, shown and enforced in the input, so a
 				     141st character can never be typed and lost on save. -->
 				<FormControl
@@ -20,52 +27,11 @@
 					:label="__('For how many days')"
 					:required="true"
 				/>
-				<!-- E05: rich details -- paragraphs, lists, links, images -- the
-				     project editor with private uploads; the server sanitizes
-				     whatever is stored. A legacy plain-text draft re-opens as
-				     text and keeps saving as text. -->
-				<div>
-					<p class="mb-1 text-sm text-ink-gray-7">{{ __('Homework details') }}</p>
-					<RichTextEditor
-						v-if="richDetails"
-						:content="form.details"
-						:editable="true"
-						:fixedMenu="true"
-						:uploadArgs="{ private: true }"
-						@change="(value) => (form.details = value)"
-					/>
-					<FormControl
-						v-else
-						type="textarea"
-						v-model="form.details"
-						rows="5"
-						:placeholder="__('Optional. Line breaks are preserved.')"
-					/>
-					<button
-						type="button"
-						class="mt-1 text-xs text-ink-gray-5 underline"
-						data-testid="details-mode-toggle"
-						@click="richDetails = !richDetails"
-					>
-						{{
-							richDetails
-								? __('Switch to plain text')
-								: __('Format with the rich text editor')
-						}}
-					</button>
-				</div>
-				<!-- E06: with this on, finishing the materials only readies the
-				     work -- the student must attach a solution file and press
-				     Send for review. Default off: the automatic Review flow of
-				     an ordinary compilation is untouched. -->
-				<FormControl
-					type="checkbox"
-					v-model="form.require_solution"
-					:label="__('Requires a file solution')"
-				/>
-				<!-- E05: the teacher's own files of this SAVED template. -->
-				<HomeworkTeacherMaterials v-if="savedName" :homework="savedName" />
-
+				<p class="text-xs text-ink-gray-5">
+					{{
+						__('The student has this many days from the date of assignment.')
+					}}
+				</p>
 				<div class="rounded-4 border border-outline-gray-2">
 					<div
 						class="flex items-center justify-between gap-2 border-b border-outline-gray-2 px-4 py-2"
@@ -137,7 +103,103 @@
 						</div>
 					</div>
 				</div>
+				<details class="rounded-5 border border-outline-gray-2 p-3">
+					<summary class="cursor-pointer text-sm font-medium text-ink-gray-8">
+						{{ __('Instructions and extra files (optional)') }}
+					</summary>
+					<div class="mt-3 space-y-4">
+						<!-- E05: rich details -- paragraphs, lists, links, images -- the
+				     project editor with private uploads; the server sanitizes
+				     whatever is stored. A legacy plain-text draft re-opens as
+				     text and keeps saving as text. -->
+						<div>
+							<p class="mb-1 text-sm text-ink-gray-7">
+								{{ __('Homework details') }}
+							</p>
+							<RichTextEditor
+								v-if="richDetails"
+								:content="form.details"
+								:editable="true"
+								:fixedMenu="true"
+								:uploadArgs="{ private: true }"
+								@change="(value) => (form.details = value)"
+							/>
+							<FormControl
+								v-else
+								type="textarea"
+								v-model="form.details"
+								rows="5"
+								:placeholder="__('Optional. Line breaks are preserved.')"
+							/>
+							<button
+								type="button"
+								class="mt-1 text-xs text-ink-gray-5 underline"
+								data-testid="details-mode-toggle"
+								@click="richDetails = !richDetails"
+							>
+								{{
+									richDetails
+										? __('Switch to plain text')
+										: __('Format with the rich text editor')
+								}}
+							</button>
+						</div>
+						<!-- E05: the teacher's own files of this SAVED template. -->
+						<HomeworkTeacherMaterials v-if="savedName" :homework="savedName" />
+						<div
+							v-else
+							class="space-y-2 rounded-5 border border-outline-gray-2 p-3"
+						>
+							<p class="text-sm text-ink-gray-6">
+								{{
+									__(
+										'Want to attach your own files? Save the draft here, then add files without closing this window.'
+									)
+								}}
+							</p>
+							<Button
+								variant="subtle"
+								:loading="saving"
+								@click="saveHomework(false, true)"
+								>{{ __('Save draft and attach files') }}</Button
+							>
+						</div>
+					</div>
+				</details>
+				<!-- E06: with this on, finishing the materials only readies the
+				     work -- the student must attach a solution file and press
+				     Send for review. Default off: the automatic Review flow of
+				     an ordinary compilation is untouched. -->
+				<FormControl
+					type="checkbox"
+					v-model="form.require_solution"
+					:label="__('Require a solution file from the student')"
+				/>
+				<p class="text-xs text-ink-gray-5">
+					{{
+						__(
+							'When enabled, the student must attach a solution and send it for review. Otherwise completed materials and passed tests send the work for review automatically.'
+						)
+					}}
+				</p>
 			</div>
+			<HomeworkMaterialPicker
+				:open="pickerOpen"
+				:courses="courses.data || []"
+				:courses-loading="Boolean(courses.loading)"
+				:initial-items="form.items"
+				@confirm="onPickerConfirm"
+				@cancel="pickerOpen = false"
+			/>
+
+			<HomeworkAssignDialog
+				:open="assignDialogOpen"
+				:homework="savedName"
+				:preset-days="Number(form.days)"
+				:preset-student="String(route.query.student || '')"
+				@done="onAssigned"
+				@cancel="assignDialogOpen = false"
+			/>
 		</template>
 		<template #actions>
 			<div v-if="canManage" class="flex items-center justify-end gap-2">
@@ -160,28 +222,12 @@
 			</div>
 		</template>
 	</FormShell>
-
-	<HomeworkMaterialPicker
-		:open="pickerOpen"
-		:courses="courses.data || []"
-		:initial-items="form.items"
-		@confirm="onPickerConfirm"
-		@cancel="pickerOpen = false"
-	/>
-
-	<HomeworkAssignDialog
-		:open="assignDialogOpen"
-		:homework="savedName"
-		:preset-days="Number(form.days)"
-		@done="onAssigned"
-		@cancel="assignDialogOpen = false"
-	/>
 </template>
 
 <script setup>
 import { Button, FormControl, createResource, toast } from 'frappe-ui'
 import { computed, inject, nextTick, reactive, ref, watch } from 'vue'
-import { onBeforeRouteLeave } from 'vue-router'
+import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import FormShell from '@/components/FormShell.vue'
 import HeaderButton from '@/components/HeaderButton.vue'
 import HomeworkMaterialPicker from '@/components/Modals/HomeworkMaterialPicker.vue'
@@ -196,6 +242,7 @@ const props = defineProps({ homeworkID: { type: String, default: 'new' } })
 const emit = defineEmits(['created'])
 
 const user = inject('$user')
+const route = useRoute()
 const { close, saveAndReplace } = useFormRoute({ name: 'HomeworkLibrary' })
 
 const isNew = computed(() => !props.homeworkID || props.homeworkID === 'new')
@@ -218,7 +265,7 @@ const form = reactive({
 
 // E05: an existing rich-text description opens in the editor; a plain-text
 // draft keeps the textarea until the teacher opts into formatting.
-const richDetails = ref(false)
+const richDetails = ref(true)
 
 const courses = createResource({
 	url: 'lms.lms.homework_api.get_homework_courses',
@@ -229,6 +276,7 @@ const existing = createResource({
 	makeParams: () => ({ name: props.homeworkID }),
 	onSuccess(data) {
 		hydrating.value = true
+		savedName.value = data.name
 		form.title = data.title
 		form.days = data.days
 		form.details = data.details || ''
@@ -353,7 +401,7 @@ const save = createResource({
 		emit('created')
 		if (pendingAssign.value) {
 			assignDialogOpen.value = true
-		} else {
+		} else if (!pendingStay.value) {
 			suppressLeaveGuard.value = true
 			saveAndReplace({ name: 'HomeworkLibrary' })
 		}
@@ -366,10 +414,11 @@ const save = createResource({
 
 const saving = computed(() => Boolean(save.loading))
 const pendingAssign = ref(false)
+const pendingStay = ref(false)
 const savedName = ref('')
 const assignDialogOpen = ref(false)
 
-const saveHomework = (andAssign) => {
+const saveHomework = (andAssign, stayOpen = false) => {
 	if (!canManage.value) return
 	if (!String(form.title || '').trim()) {
 		toast.error(__('Title is required'))
@@ -387,12 +436,17 @@ const saveHomework = (andAssign) => {
 		return
 	}
 	pendingAssign.value = andAssign
+	pendingStay.value = stayOpen
 	save.submit()
 }
 
-const onAssigned = () => {
+const onAssigned = (result) => {
 	assignDialogOpen.value = false
 	suppressLeaveGuard.value = true
-	saveAndReplace({ name: 'HomeworkLibrary' })
+	saveAndReplace(
+		result?.name
+			? { name: 'HomeworkDetail', params: { assignmentID: result.name } }
+			: { name: 'HomeworkExecution' }
+	)
 }
 </script>

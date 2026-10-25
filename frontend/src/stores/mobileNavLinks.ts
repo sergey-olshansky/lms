@@ -122,9 +122,6 @@ export async function loadMobileNavLinks(
 		addLink(others, 'Quizzes', 'CircleHelp', 'Quizzes')
 		addLink(others, 'Assignments', 'Pencil', 'Assignments')
 		addLink(others, 'Programming Exercises', 'Code', 'ProgrammingExercises')
-		// Task #35 (R17): the teacher's homework library is reachable on the
-		// phone too -- through the You page, like the other staff lists.
-		addLink(others, 'Homework', 'BookMarked', 'HomeworkLibrary')
 	}
 
 	addSessionLinks(others, viewer)

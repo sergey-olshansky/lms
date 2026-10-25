@@ -2,31 +2,49 @@
 	<div class="flex h-full flex-col">
 		<PageHeader :breadcrumbs="breadcrumbs">
 			<template #actions>
-				<!-- E08: the teacher flips between one student's board and the
-				     overview of ALL their issued work. -->
 				<Button
-					v-if="canPickStudent"
-					variant="subtle"
-					size="sm"
-					data-testid="overview-toggle"
-					@click="overviewOpen = !overviewOpen"
+					v-if="canCreateHomework"
+					variant="solid"
+					@click="
+						router.push({
+							name: 'HomeworkNew',
+							query: { student: student || undefined },
+						})
+					"
+					>{{ __('Create homework') }}</Button
 				>
-					{{ overviewOpen ? __('Student board') : __('All my students') }}
-				</Button>
-				<Select
-					v-if="canPickStudent && !overviewOpen"
-					v-model="student"
-					:options="studentOptions"
-					:placeholder="__('Student')"
-					data-testid="board-student-select"
-				/>
 			</template>
 		</PageHeader>
-
+		<HomeworkWorkspaceTabs
+			v-if="canCreateHomework"
+			active="HomeworkExecution"
+			:student="student"
+		/>
+		<div class="space-y-3 px-4 py-4 md:px-6">
+			<p class="text-sm text-ink-gray-6">
+				{{
+					canPickStudent
+						? __(
+								'Track assigned homework here. Choose a student to open their board. Open work awaiting review to accept it or return it with a comment.'
+							)
+						: __(
+								'Open a homework card, read the materials and pass the tests. Your progress is saved automatically; the teacher accepts the completed work.'
+							)
+				}}
+			</p>
+			<HomeworkStudentPicker
+				v-if="canPickStudent"
+				v-model="student"
+				empty-label="All students"
+				class="w-full sm:w-96"
+				data-testid="board-student-select"
+			/>
+		</div>
 		<div class="flex flex-wrap items-center gap-2 px-4 pb-2 md:px-6">
 			<FormControl
 				type="text"
 				v-model="search"
+				class="w-full sm:w-64"
 				:placeholder="__('Search')"
 				:aria-label="__('Search')"
 			>
@@ -38,32 +56,39 @@
 				v-model="statusFilter"
 				:options="statusOptions"
 				:placeholder="__('Status')"
+				class="w-full sm:w-48"
 			/>
-			<Select
-				v-if="canPickStudent"
-				v-model="courseFilter"
-				:options="courseOptions"
-				:placeholder="__('Course')"
-			/>
-			<BooleanSwitch v-model="overdueOnly" size="sm" :label="__('Overdue')" />
-			<BooleanSwitch
-				v-if="!overviewOpen"
-				v-model="cancelledOnly"
-				size="sm"
-				:label="__('Recalled')"
-				data-testid="board-cancelled-switch"
-			/>
+			<details class="relative text-sm text-ink-gray-6">
+				<summary class="cursor-pointer px-2 py-2">
+					{{ __('Homework filters') }}
+				</summary>
+				<div
+					class="absolute start-0 top-full z-20 w-64 space-y-3 rounded-5 border border-outline-gray-2 bg-surface-base p-3 shadow-md"
+				>
+					<Select
+						v-if="canPickStudent"
+						v-model="courseFilter"
+						:options="courseOptions"
+						:placeholder="__('Course')"
+					/>
+					<BooleanSwitch
+						v-model="overdueOnly"
+						size="sm"
+						:label="__('Overdue')"
+					/>
+					<BooleanSwitch
+						v-if="!overviewOpen"
+						v-model="cancelledOnly"
+						size="sm"
+						:label="__('Recalled')"
+						data-testid="board-cancelled-switch"
+					/>
+				</div>
+			</details>
 		</div>
 		<!-- E08: the overview table -- one row per issued assignment, full
 		     server-side counts and paging, a jump to the card or the board. -->
 		<div v-if="overviewOpen && canPickStudent" class="px-4 pb-2 md:px-6">
-			<div class="mb-2 flex flex-wrap items-center gap-2">
-				<Select
-					v-model="overviewStudent"
-					:options="overviewStudentOptions"
-					data-testid="overview-student-filter"
-				/>
-			</div>
 			<div class="mb-2 flex flex-wrap items-center gap-2 text-xs">
 				<span
 					v-for="(count, label) in overviewCounts"
@@ -75,17 +100,16 @@
 				</span>
 			</div>
 			<div class="overflow-x-auto rounded-6 border border-outline-gray-2">
-				<table class="w-full min-w-[760px] text-sm" data-testid="homework-overview">
+				<table
+					class="w-full min-w-[580px] text-sm"
+					data-testid="homework-overview"
+				>
 					<thead class="bg-surface-gray-1 text-left text-xs text-ink-gray-5">
 						<tr>
 							<th class="px-3 py-2">{{ __('Student') }}</th>
 							<th class="px-3 py-2">{{ __('Homework') }}</th>
 							<th class="px-3 py-2">{{ __('Status') }}</th>
-							<th class="px-3 py-2">{{ __('Blocked by') }}</th>
-							<th class="px-3 py-2">{{ __('Done') }}</th>
-							<th class="px-3 py-2">{{ __('Quizzes') }}</th>
 							<th class="px-3 py-2">{{ __('Due') }}</th>
-							<th class="px-3 py-2">{{ __('Sent') }}</th>
 							<th class="px-3 py-2"></th>
 						</tr>
 					</thead>
@@ -98,11 +122,29 @@
 							<td class="px-3 py-2">{{ row.student_name }}</td>
 							<td class="px-3 py-2">
 								<router-link
-									:to="{ name: 'HomeworkDetail', params: { assignmentID: row.name } }"
+									:to="{
+										name: 'HomeworkDetail',
+										params: { assignmentID: row.name },
+									}"
 									class="text-ink-gray-9 underline"
 								>
 									{{ row.title }}
 								</router-link>
+								<p class="mt-1 text-xs text-ink-gray-5">
+									{{
+										__('{0} of {1} items completed').format(
+											String(row.completed_requirements),
+											String(row.total_requirements)
+										)
+									}}
+									·
+									{{
+										__('Tests: {0}/{1}').format(
+											String(row.quizzes_completed),
+											String(row.quizzes_total)
+										)
+									}}
+								</p>
 							</td>
 							<td class="px-3 py-2">
 								{{ statusLabel(row.status) }}
@@ -112,23 +154,17 @@
 								>
 									{{ __('Needs rework') }}
 								</span>
-							</td>
-							<td class="px-3 py-2 text-xs text-ink-gray-6">
-								{{ row.blocking_reason || '—' }}
-							</td>
-							<td class="px-3 py-2">
-								{{ row.completed_requirements }}/{{ row.total_requirements }}
-							</td>
-							<td class="px-3 py-2">
-								{{ row.quizzes_completed }}/{{ row.quizzes_total }}
+								<p
+									v-if="row.blocking_reason"
+									class="mt-1 max-w-56 text-xs text-ink-gray-5"
+								>
+									{{ row.blocking_reason }}
+								</p>
 							</td>
 							<td class="px-3 py-2">
 								<span :class="row.overdue ? 'text-ink-red-5' : ''">
 									{{ siteWallClockShort(row.due_at_iso) }}
 								</span>
-							</td>
-							<td class="px-3 py-2 text-xs text-ink-gray-5">
-								{{ siteWallClockShort(toIso(row.submitted_for_review_at)) || '—' }}
 							</td>
 							<td class="px-3 py-2">
 								<Button
@@ -136,13 +172,15 @@
 									size="sm"
 									@click="openStudentBoard(row.student)"
 								>
-									{{ __('Board') }}
+									{{ __('Student board') }}
 								</Button>
 							</td>
 						</tr>
 						<tr v-if="!overviewRows.length">
-							<td colspan="9" class="px-3 py-4 text-sm text-ink-gray-5">
-								{{ overview.loading ? __('Loading…') : __('No homework found') }}
+							<td colspan="5" class="px-3 py-4 text-sm text-ink-gray-5">
+								{{
+									overview.loading ? __('Loading…') : __('No homework found')
+								}}
 							</td>
 						</tr>
 					</tbody>
@@ -159,7 +197,12 @@
 					{{ __('Load more') }}
 				</Button>
 				<span class="text-xs text-ink-gray-5">
-					{{ __('{0} of {1}').format(String(overviewRows.length), String(overviewTotal)) }}
+					{{
+						__('{0} of {1}').format(
+							String(overviewRows.length),
+							String(overviewTotal)
+						)
+					}}
 				</span>
 			</div>
 		</div>
@@ -172,8 +215,45 @@
 			{{ __('Recalled assignments: history only, no updates.') }}
 		</p>
 
+		<p
+			v-if="!overviewOpen && !boardLoaded"
+			class="px-4 py-6 text-sm text-ink-gray-5 md:px-6"
+		>
+			{{ __('Loading…') }}
+		</p>
 		<div
-			v-if="!overviewOpen"
+			v-else-if="!overviewOpen && !columns.some((column) => column.count)"
+			class="mx-4 rounded-6 border border-outline-gray-2 p-6 text-sm md:mx-6"
+			data-testid="homework-board-empty"
+		>
+			<p class="text-ink-gray-7">
+				{{
+					search || statusFilter || courseFilter || overdueOnly || cancelledOnly
+						? __('No homework matches these filters.')
+						: canPickStudent
+							? __(
+									'No homework has been assigned to this student yet. Choose a template and assign it to them.'
+								)
+							: __(
+									'Your homework will appear here when your teacher assigns it.'
+								)
+				}}
+			</p>
+			<Button
+				v-if="canCreateHomework"
+				class="mt-3"
+				variant="solid"
+				@click="
+					router.push({
+						name: 'HomeworkLibrary',
+						query: { student: student || undefined },
+					})
+				"
+				>{{ __('Choose homework template') }}</Button
+			>
+		</div>
+		<div
+			v-else-if="!overviewOpen"
 			class="board-scroll min-h-0 flex-1 overflow-x-auto overflow-y-auto px-4 pb-4 md:px-6"
 			data-testid="homework-board"
 		>
@@ -196,6 +276,9 @@
 							{{ column.count }}
 						</span>
 					</header>
+					<p class="px-3 pt-1 text-xs text-ink-gray-5">
+						{{ columnHint(column.status) }}
+					</p>
 
 					<div class="flex flex-1 flex-col gap-2 overflow-y-auto p-2">
 						<p
@@ -277,14 +360,22 @@
 							</div>
 
 							<Button
-								v-if="card.continue_target && column.status !== 'Done'"
+								v-if="
+									!canPickStudent &&
+									card.continue_target &&
+									['To Do', 'In Progress'].includes(column.status)
+								"
 								variant="outline"
 								size="sm"
 								class="mt-2 w-full"
 								:aria-label="__('Continue')"
 								@click.stop="continueCard(card)"
 							>
-								{{ __('Continue') }}
+								{{
+									column.status === 'To Do'
+										? __('Start homework')
+										: __('Continue homework')
+								}}
 							</Button>
 						</article>
 
@@ -310,9 +401,18 @@
 // `student` URL parameter is never the authority, the server re-checks it. A
 // teacher picks a student and the whole board state is re-fetched with the new
 // target, so no card of the previous student survives the switch (A33).
-import { Button, FormControl, call, createResource, toast } from 'frappe-ui'
+import {
+	Button,
+	FormControl,
+	call,
+	createResource,
+	toast,
+	usePageMeta,
+} from 'frappe-ui'
 import { computed, inject, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import HomeworkWorkspaceTabs from '@/components/HomeworkWorkspaceTabs.vue'
+import HomeworkStudentPicker from '@/components/HomeworkStudentPicker.vue'
 import PageHeader from '@/components/Layouts/pages/PageHeader.vue'
 import Select from '@/components/Controls/Select.vue'
 import BooleanSwitch from '@/components/Controls/BooleanSwitch.vue'
@@ -329,16 +429,28 @@ const STATUS_LABELS = {
 	'To Do': 'To Do',
 	'In Progress': 'In Progress',
 	Review: 'Review',
-	Done: 'Done',
+	Done: 'Homework accepted',
 }
 const statusLabel = (status) => __(STATUS_LABELS[status] || status)
+const columnHint = (status) =>
+	__(
+		{
+			'To Do': 'Open the card to start.',
+			'In Progress': 'Finish the checklist and required tests.',
+			Review: 'Waiting for the teacher to check.',
+			Done: 'Accepted by the teacher.',
+		}[status] || ''
+	)
 
 const canPickStudent = computed(() =>
 	Boolean(
 		user.data?.is_moderator ||
-			user.data?.is_instructor ||
-			user.data?.is_evaluator
+		user.data?.is_instructor ||
+		user.data?.is_evaluator
 	)
+)
+const canCreateHomework = computed(() =>
+	Boolean(user.data?.is_moderator || user.data?.is_instructor)
 )
 
 const student = ref(String(route.query.student || ''))
@@ -359,6 +471,7 @@ const emptyColumns = () =>
 	}))
 
 const columns = ref(emptyColumns())
+const boardLoaded = ref(false)
 const offsets = ref({})
 
 // R11: every fetch carries a generation number; a late answer of an earlier
@@ -395,6 +508,7 @@ const fetchBoard = ({ merge = false, offsets: requestedOffsets } = {}) => {
 		.catch((error) => {
 			if (generation !== boardGeneration) return
 			restoreOffsetsFromColumns()
+			boardLoaded.value = true
 			toast.error(resourceErrorMessage(error, __('Error')))
 			console.error(error)
 		})
@@ -419,6 +533,7 @@ const restoreOffsetsFromColumns = () => {
 // the call sites; with full-depth windows, replacing IS the merge.
 const applyBoard = (data, { merge }) => {
 	columns.value = data.columns
+	boardLoaded.value = true
 }
 
 const reloadBoard = () => {
@@ -426,6 +541,7 @@ const reloadBoard = () => {
 	// screen while the fetch is in flight (spec 5.1: the client cache is
 	// re-isolated on student change), and paging resets with it.
 	columns.value = emptyColumns()
+	boardLoaded.value = false
 	offsets.value = {}
 	fetchBoard()
 }
@@ -453,45 +569,30 @@ watch(
 				recalled: cancelledOnly.value ? 1 : undefined,
 			},
 		})
-		reloadBoard()
+		if (!(canPickStudent.value && !student.value)) reloadBoard()
 	}
 )
 
-const students = createResource({
-	url: 'lms.lms.homework_api.get_homework_students',
-})
 const courses = createResource({
 	url: 'lms.lms.homework_api.get_homework_courses',
 })
-watch(canPickStudent, (isTeacher) => {
-	if (isTeacher) {
-		students.reload()
-		courses.reload()
-	}
-}, { immediate: true })
-
-const studentOptions = computed(() => [
-	{ label: __('Me'), value: '' },
-	...(students.data || []).map((row) => ({
-		label: row.full_name,
-		value: row.name,
-	})),
-])
-const overviewStudentOptions = computed(() => [
-	{ label: __('All students'), value: '' },
-	...(students.data || []).map((row) => ({
-		label: row.full_name,
-		value: row.name,
-	})),
-])
+watch(
+	canPickStudent,
+	(isTeacher) => {
+		if (isTeacher) {
+			courses.reload()
+		}
+	},
+	{ immediate: true }
+)
 
 const courseOptions = computed(() => [
-	{ label: '', value: '' },
+	{ label: __('All courses'), value: '' },
 	...(courses.data || []).map((row) => ({ label: row.title, value: row.name })),
 ])
 
 const statusOptions = computed(() => [
-	{ label: __('All'), value: '' },
+	{ label: __('All homework statuses'), value: '' },
 	...BOARD_STATUSES.map((status) => ({
 		label: statusLabel(status),
 		value: status,
@@ -505,7 +606,6 @@ const statusOptions = computed(() => [
 // assignment with full server-side counts and paging.
 const overviewOpen = ref(false)
 const overviewOffset = ref(0)
-const overviewStudent = ref('')
 const overviewTotal = ref(0)
 const overview = createResource({
 	url: 'lms.lms.homework_api.get_homework_overview',
@@ -513,8 +613,9 @@ const overview = createResource({
 		search: search.value,
 		status: statusFilter.value || undefined,
 		overdue: overdueOnly.value,
-		student: overviewStudent.value || undefined,
+		student: student.value || undefined,
 		course: courseFilter.value || undefined,
+		cancelled_only: cancelledOnly.value,
 		limit: 25,
 		offset: overviewOffset.value,
 	}),
@@ -547,7 +648,9 @@ const loadOverview = async (append = false) => {
 	overviewTotal.value = data?.total || 0
 	if (append) {
 		const combined = [...overviewRows.value, ...page]
-		overviewRows.value = [...new Map(combined.map((row) => [row.name, row])).values()]
+		overviewRows.value = [
+			...new Map(combined.map((row) => [row.name, row])).values(),
+		]
 	} else {
 		overviewRows.value = page
 	}
@@ -556,25 +659,39 @@ const loadMoreOverview = () => loadOverview(true)
 const overviewCounts = computed(() => {
 	// Recalled rows are history, not an active status chip.
 	return Object.fromEntries(
-		Object.entries(overview.data?.counts || {}).filter(([status]) => status !== 'Cancelled')
+		Object.entries(overview.data?.counts || {}).filter(
+			([status]) => status !== 'Cancelled'
+		)
 	)
 })
-watch(canPickStudent, (isTeacher) => {
-	if (isTeacher && !route.query.student) overviewOpen.value = true
-}, { immediate: true })
-watch([overviewOpen, search, statusFilter, overdueOnly, overviewStudent, courseFilter], () => {
-	overviewOffset.value = 0
-	if (overviewOpen.value) loadOverview()
-})
-watch(overviewOpen, (open) => {
-	if (!open && canPickStudent.value) reloadBoard()
+watch(
+	canPickStudent,
+	(isTeacher) => {
+		overviewOpen.value = isTeacher && !student.value
+	},
+	{ immediate: true }
+)
+watch(
+	[
+		overviewOpen,
+		search,
+		statusFilter,
+		overdueOnly,
+		courseFilter,
+		cancelledOnly,
+	],
+	() => {
+		overviewOffset.value = 0
+		if (overviewOpen.value) loadOverview()
+	}
+)
+watch(student, () => {
+	overviewOpen.value = canPickStudent.value && !student.value
 })
 const openStudentBoard = (studentName) => {
 	overviewOpen.value = false
 	student.value = studentName
 }
-const toIso = (value) => (value ? new Date(value).toISOString() : '')
-
 const dueLabel = (card) => siteWallClockShort(card.due_at_iso || '')
 
 const progressPercent = (card) =>
@@ -643,7 +760,9 @@ const loadMore = (status) => {
 // loaded card and updates its content in place), so switching tabs can never
 // trade the board for one stale-offset page of itself.
 const refetchIfIdle = () => {
-	if (document.visibilityState === 'visible') fetchBoard({ merge: true })
+	if (document.visibilityState !== 'visible') return
+	if (overviewOpen.value) loadOverview()
+	else fetchBoard({ merge: true })
 }
 onMounted(() => {
 	window.addEventListener('focus', refetchIfIdle)
@@ -655,6 +774,7 @@ onUnmounted(() => {
 })
 
 const breadcrumbs = computed(() => [
-	{ label: __('Homework execution'), route: { name: 'HomeworkExecution' } },
+	{ label: __('Homework workspace'), route: { name: 'HomeworkExecution' } },
 ])
+usePageMeta(() => ({ title: __('Homework workspace') }))
 </script>

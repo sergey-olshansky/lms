@@ -26,6 +26,7 @@ import base64
 import html
 import mimetypes
 import re
+from urllib.parse import urlencode
 
 import frappe
 from frappe import _
@@ -35,10 +36,10 @@ from lms.lms import homework_api, homework_materials
 from lms.lms.utils import get_lms_route
 
 TYPE_LABELS = {
-	"Open Lesson": _("Lesson"),
-	"Pass Quiz": _("Quiz"),
-	"Open Assignment": _("Written assignment"),
-	"Reference": _("Material"),
+	"Open Lesson": "Lesson",
+	"Pass Quiz": "Quiz",
+	"Open Assignment": "Written assignment",
+	"Reference": "Material",
 }
 
 
@@ -75,16 +76,18 @@ def _requirement_link(row: dict) -> tuple[str, bool]:
 	return "", False
 
 
-def _material_lines(rows: list[dict]) -> list[str]:
+def _material_lines(rows: list[dict], assignment_name: str | None = None) -> list[str]:
 	"""The ordered material list as HTML rows: number, type, label, full path,
 	and a REAL link (or the explicit unavailable marker)."""
 	parts = []
 	for index, row in enumerate(rows, start=1):
-		type_label = TYPE_LABELS.get(row.get("requirement_type"), _("Material"))
+		type_label = _(TYPE_LABELS.get(row.get("requirement_type"), "Material"))
 		label = html.escape(str(row.get("label") or ""))
 		path = html.escape(str(row.get("path") or ""))
 		url, alive = _requirement_link(row)
 		if alive and url:
+			if assignment_name:
+				url += ("&" if "?" in url else "?") + urlencode({"hw": assignment_name})
 			link = f'<a class="mat" href="{html.escape(url, quote=True)}">{label}</a>'
 		else:
 			link = f'<span class="mat dead">{label}</span>'
@@ -117,7 +120,7 @@ def render_homework_pdf_html(payload: dict) -> str:
 	is_assignment = bool(payload.get("assignment_name"))
 	heading = html.escape(str(payload.get("title") or ""))
 	subtitle = (
-		_("Assigned homework") if is_assignment else _("Homework template (not assigned)")
+		_("Assigned homework document") if is_assignment else _("Homework template (not assigned)")
 	)
 
 	meta: list[str] = []
@@ -131,11 +134,15 @@ def render_homework_pdf_html(payload: dict) -> str:
 		meta.append(
 			f"{_('Due')}: {html.escape(due_clock + _zone_label(due_iso))}"
 		)
-		meta.append(f"{_('Status')}: {html.escape(str(payload.get('status') or ''))}")
+		status_labels = {"Done": "Homework accepted"}
+		status = str(payload.get("status") or "")
+		meta.append(f"{_('Status')}: {html.escape(_(status_labels.get(status, status)))}")
 	else:
 		meta.append(f"{_('Duration')}: {cint(payload.get('days') or 0)} {_('days')}")
 
-	materials = "".join(_material_lines(payload.get("requirements") or []))
+	materials = "".join(
+		_material_lines(payload.get("requirements") or [], payload.get("assignment_name"))
+	)
 	details_html = _details_block(
 		payload.get("details"), payload.get("detail_materials") or []
 	)

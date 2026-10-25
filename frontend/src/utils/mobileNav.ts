@@ -17,7 +17,7 @@ export interface NavLink {
 export const PRIMARY_LABELS: readonly string[] = [
 	'Home',
 	'Courses',
-	'Batches',
+	'Homework workspace',
 	'Programs',
 ]
 
@@ -78,7 +78,7 @@ const SECTION_MAP: Record<string, readonly string[]> = {
 		'Quizzes',
 		'Assignments',
 		'Programming Exercises',
-		'Homework Execution',
+		'Homework workspace',
 	],
 	DISCOVER: ['Jobs', 'Statistics'],
 }

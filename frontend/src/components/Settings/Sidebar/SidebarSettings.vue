@@ -51,6 +51,7 @@
 				>
 					<template #item="{ element }">
 						<div
+							v-show="element.name1 !== 'batches'"
 							class="flex items-center border-b border-outline-elevation-2 bg-surface-base last:border-b-0"
 						>
 							<div

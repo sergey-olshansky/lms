@@ -9,9 +9,15 @@
 		class="rounded-4 border border-outline-gray-2"
 		data-testid="homework-teacher-materials"
 	>
-		<div class="flex items-center justify-between gap-2 border-b border-outline-gray-2 px-4 py-2">
+		<div
+			class="flex items-center justify-between gap-2 border-b border-outline-gray-2 px-4 py-2"
+		>
 			<span class="text-ink-gray-8">{{ __('Teacher materials') }}</span>
-			<span class="text-xs text-ink-gray-5" data-testid="materials-quota">
+			<span
+				v-if="!loading"
+				class="text-xs text-ink-gray-5"
+				data-testid="materials-quota"
+			>
 				{{ __('{0} of {1} MB used').format(mbUsed, mbQuota) }}
 			</span>
 		</div>
@@ -26,9 +32,15 @@
 					class="flex items-center gap-2 px-4 py-2"
 					:data-testid="`teacher-material-${row.name}`"
 				>
-					<span class="lucide-file size-4 shrink-0 text-ink-gray-5" aria-hidden="true" />
+					<span
+						class="lucide-file size-4 shrink-0 text-ink-gray-5"
+						aria-hidden="true"
+					/>
 					<span class="min-w-0 flex-1">
-						<span class="block truncate text-sm text-ink-gray-8" :title="row.file_name">
+						<span
+							class="block truncate text-sm text-ink-gray-8"
+							:title="row.file_name"
+						>
 							{{ row.file_name }}
 						</span>
 						<span class="block text-xs text-ink-gray-5">
@@ -66,8 +78,9 @@
 			</p>
 			<p class="px-4 pb-2 text-xs text-ink-gray-5">
 				{{
-					__('Images, PDF, DOCX, ODT, TXT, XLSX, PPTX, ZIP — up to {0} MB total.')
-						.format(mbQuota)
+					__(
+						'Images, PDF, DOCX, ODT, TXT, XLSX, PPTX, ZIP — up to {0} MB total.'
+					).format(mbQuota)
 				}}
 			</p>
 			<div class="border-t border-outline-gray-2 px-4 py-3">
@@ -117,8 +130,11 @@ const props = defineProps({
 })
 
 const state = ref({ loading: true, rows: [], used: 0, quota: 0, remaining: 0 })
+const loading = computed(() => state.value.loading)
 const rows = computed(() => state.value.rows || [])
-const mbUsed = computed(() => ((state.value.used || 0) / (1024 * 1024)).toFixed(1))
+const mbUsed = computed(() =>
+	((state.value.used || 0) / (1024 * 1024)).toFixed(1)
+)
 const mbQuota = computed(() =>
 	String(Math.round((state.value.quota || 0) / (1024 * 1024)))
 )
@@ -143,7 +159,7 @@ const acceptedTypes = [
 const validateUpload = (file) => {
 	if (file.size > (state.value.remaining ?? 0)) {
 		return __('This file does not fit the remaining {0} MB.').format(
-			(((state.value.remaining || 0) / (1024 * 1024)) || 0).toFixed(1)
+			((state.value.remaining || 0) / (1024 * 1024) || 0).toFixed(1)
 		)
 	}
 	return null
@@ -172,7 +188,13 @@ const reload = () => {
 			}
 		})
 		.catch((err) => {
-			state.value = { loading: false, rows: [], used: 0, quota: 0, remaining: 0 }
+			state.value = {
+				loading: false,
+				rows: [],
+				used: 0,
+				quota: 0,
+				remaining: 0,
+			}
 			toast.error(resourceErrorMessage(err, __('Error')))
 		})
 }

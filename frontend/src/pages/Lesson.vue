@@ -163,6 +163,7 @@
 									:hasPrev="!!lesson.data.prev"
 									:hasNext="!!(lesson.data.next && canGoNext)"
 									:courseName="courseName"
+									:homeworkID="homeworkContext"
 									@switch="switchLesson"
 								/>
 							</div>
@@ -183,6 +184,7 @@
 									:hasPrev="!!lesson.data.prev"
 									:hasNext="!!(lesson.data.next && canGoNext)"
 									:courseName="courseName"
+									:homeworkID="homeworkContext"
 									@switch="switchLesson"
 								/>
 							</div>
@@ -742,6 +744,11 @@ const notes = createListResource({
 })
 
 const breadcrumbs = computed(() => {
+	if (homeworkContext.value) return [
+		{ label: __('Homework workspace'), route: { name: 'HomeworkExecution' } },
+		{ label: __('Back to homework'), route: { name: 'HomeworkDetail', params: { assignmentID: homeworkContext.value } } },
+		{ label: lesson?.data?.title, route: { name: 'Lesson', params: { courseName: props.courseName, chapterNumber: props.chapterNumber, lessonNumber: props.lessonNumber }, query: lessonQuery() } },
+	]
 	const crumbs: Crumb[] = [{ label: __('Courses'), route: { name: 'Courses' } }]
 	crumbs.push({
 		label: lesson?.data?.course_title,
@@ -1238,7 +1245,9 @@ const lessonQuery = () => {
 // B11: the banner's live progress follows the credited opening immediately.
 const homeworkBanner = ref(null)
 const recordHomeworkOpen = (lessonName?: string) => {
-	if (!lessonName || !lesson.data?.membership) return
+	// A homework grant is enough to read and complete its lesson. Enrollment
+	// in the whole source course is optional; the server checks the grant.
+	if (!lessonName || !realUser.data?.name || isStudentView.value) return
 	call('lms.lms.homework_api.record_material_opened', {
 		lesson: lessonName,
 	})

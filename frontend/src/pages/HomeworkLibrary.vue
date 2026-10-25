@@ -1,7 +1,7 @@
 <template>
 	<ListPage
 		:breadcrumbs="breadcrumbs"
-		:title="__('{0} Homework').format(String(total))"
+		:title="__('Homework templates ({0})').format(String(total))"
 		layout="list"
 		:columns="columns"
 		:rows="rows"
@@ -21,6 +21,27 @@
 				{{ __('Create homework') }}
 			</Button>
 		</template>
+		<template #after-header>
+			<HomeworkWorkspaceTabs
+				active="HomeworkLibrary"
+				:student="selectedStudent"
+			/>
+			<div class="flex flex-wrap items-start justify-between gap-4 px-5 py-4">
+				<p class="max-w-xl text-sm text-ink-gray-6">
+					{{
+						__(
+							'Collect materials from courses, then assign the homework to a student. You can reuse the same template for different students.'
+						)
+					}}
+				</p>
+				<HomeworkStudentPicker
+					v-model="selectedStudent"
+					label="Student for assignment"
+					class="w-full sm:w-80"
+					data-testid="library-student-select"
+				/>
+			</div>
+		</template>
 
 		<template #filters>
 			<FormControl
@@ -35,17 +56,40 @@
 			</FormControl>
 			<BooleanSwitch v-model="archivedOnly" size="sm" :label="__('Archived')" />
 		</template>
+		<template #empty>
+			<div class="px-5 py-10 text-center text-sm text-ink-gray-6">
+				<p>
+					{{
+						search || archivedOnly
+							? __('No homework matches these filters.')
+							: __(
+									'Create your first template: choose materials from courses, then assign the homework to a student.'
+								)
+					}}
+				</p>
+				<Button
+					v-if="!search && !archivedOnly"
+					class="mt-3"
+					variant="solid"
+					@click="openForm('new')"
+					>{{ __('Create homework') }}</Button
+				>
+			</div>
+		</template>
 
 		<template #cell="{ column, row }">
 			<div v-if="column.key == 'title'" class="min-w-0">
 				<button
 					type="button"
-					class="block max-w-full truncate text-left text-sm text-ink-gray-9 underline-offset-2 hover:underline"
+					class="block max-w-full whitespace-normal break-words text-left text-sm leading-5 text-ink-gray-9 underline-offset-2 hover:underline"
 					:title="row.title"
 					@click="openForm(row.name)"
 				>
 					{{ row.title }}
 				</button>
+				<p v-if="row.has_materials" class="mt-1 text-xs text-ink-gray-5">
+					{{ compositionLabel(row) }}
+				</p>
 				<span
 					v-if="!row.has_materials"
 					class="mt-0.5 inline-block rounded-4 bg-surface-gray-2 px-1.5 py-0.5 text-xs text-ink-gray-6"
@@ -53,17 +97,8 @@
 					{{ __('No materials') }}
 				</span>
 			</div>
-			<div
-				v-else-if="column.key == 'composition'"
-				class="text-sm text-ink-gray-7"
-			>
-				{{ compositionLabel(row) }}
-			</div>
 			<div v-else-if="column.key == 'days'" class="text-sm text-ink-gray-7">
-				{{ __('{0} days').format(String(row.days)) }}
-			</div>
-			<div v-else-if="column.key == 'modified'" class="text-sm text-ink-gray-5">
-				{{ formatDate(row.modified) }}
+				{{ __('{0} d.').format(String(row.days)) }}
 			</div>
 			<div
 				v-else-if="column.key == 'actions'"
@@ -73,7 +108,7 @@
 					variant="subtle"
 					size="sm"
 					:disabled="!row.has_materials || row.archived"
-					:label="__('Assign')"
+					:label="__('Assign to student')"
 					data-testid="assign-button"
 					@click="assignTarget = row"
 				/>
@@ -99,26 +134,34 @@
 		:open="Boolean(assignTarget)"
 		:homework="assignTarget ? assignTarget.name : ''"
 		:preset-days="assignTarget ? assignTarget.days : 7"
+		:preset-student="selectedStudent"
 		@done="onAssigned"
 		@cancel="assignTarget = null"
 	/>
 </template>
 
 <script setup>
-import { Button, Dropdown, FormControl, createResource, toast } from 'frappe-ui'
+import {
+	Button,
+	Dropdown,
+	FormControl,
+	createResource,
+	toast,
+	usePageMeta,
+} from 'frappe-ui'
 import { computed, inject, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import ListPage from '@/components/Layouts/pages/ListPage.vue'
-import HeaderButton from '@/components/HeaderButton.vue'
 import BooleanSwitch from '@/components/Controls/BooleanSwitch.vue'
 import HomeworkAssignDialog from '@/components/Modals/HomeworkAssignDialog.vue'
+import HomeworkWorkspaceTabs from '@/components/HomeworkWorkspaceTabs.vue'
+import HomeworkStudentPicker from '@/components/HomeworkStudentPicker.vue'
 import { openFormRoute } from '@/composables/useFormRoute'
 import { resourceErrorMessage } from '@/utils/resource'
 import { downloadViaAnchor } from '@/utils/download'
 
 const router = useRouter()
 const user = inject('$user')
-const dayjs = inject('$dayjs')
 
 const search = ref('')
 const archivedOnly = ref(false)
@@ -127,6 +170,7 @@ const total = ref(0)
 const offset = ref(0)
 const pageLength = ref(25)
 const assignTarget = ref(null)
+const selectedStudent = ref('')
 
 onMounted(() => {
 	// The tab itself is staff-only in the sidebar; this guards a typed URL.
@@ -135,6 +179,7 @@ onMounted(() => {
 		return
 	}
 	search.value = router.currentRoute.value.query.title || ''
+	selectedStudent.value = String(router.currentRoute.value.query.student || '')
 	reload()
 })
 
@@ -193,26 +238,20 @@ const loadMore = () => {
 const hasMore = computed(() => rows.value.length < total.value)
 
 const columns = computed(() => [
-	{ label: __('Title'), key: 'title', width: 2, icon: 'lucide-book-marked' },
 	{
-		label: __('Composition'),
-		key: 'composition',
+		label: __('Title'),
+		key: 'title',
 		width: 1,
-		icon: 'lucide-list-checks',
+		wrap: true,
+		icon: 'lucide-book-marked',
 	},
 	{
-		label: __('Due in days'),
+		label: __('Homework duration'),
 		key: 'days',
-		width: '100px',
+		width: '80px',
 		icon: 'lucide-clock',
 	},
-	{
-		label: __('Updated On'),
-		key: 'modified',
-		width: 1,
-		icon: 'lucide-history',
-	},
-	{ label: '', key: 'actions', width: '150px', align: 'right' },
+	{ label: '', key: 'actions', width: '190px', align: 'right' },
 ])
 
 const compositionLabel = (row) => {
@@ -225,14 +264,19 @@ const compositionLabel = (row) => {
 	return parts.join(' · ') || '—'
 }
 
-const formatDate = (value) => (value ? dayjs(value).format('DD MMM YYYY') : '')
-
 const openForm = (homeworkID) => {
 	openFormRoute(
 		router,
 		homeworkID === 'new'
-			? { name: 'HomeworkNew' }
-			: { name: 'HomeworkEdit', params: { homeworkID } }
+			? {
+					name: 'HomeworkNew',
+					query: { student: selectedStudent.value || undefined },
+				}
+			: {
+					name: 'HomeworkEdit',
+					params: { homeworkID },
+					query: { student: selectedStudent.value || undefined },
+				}
 	)
 }
 
@@ -322,11 +366,17 @@ const callAction = (url, params) =>
 		})
 	})
 
-const onAssigned = () => {
+const onAssigned = (result) => {
 	assignTarget.value = null
+	if (result?.name)
+		router.push({
+			name: 'HomeworkDetail',
+			params: { assignmentID: result.name },
+		})
 }
 
 const breadcrumbs = computed(() => [
-	{ label: __('Homework'), route: { name: 'HomeworkLibrary' } },
+	{ label: __('Homework workspace'), route: { name: 'HomeworkLibrary' } },
 ])
+usePageMeta(() => ({ title: __('Homework workspace') }))
 </script>

@@ -72,7 +72,11 @@ vi.mock('frappe-ui', async () => {
 		},
 		Badge: passthrough,
 		Checkbox: passthrough,
-		Dialog: { props: ['open'], template: '<div v-if="open"><slot /></div>' },
+		Dialog: {
+			props: ['open', 'actions'],
+			template:
+				'<div v-if="open"><slot /><button v-for="action in actions" @click="action.onClick()">{{ action.label }}</button></div>',
+		},
 		FormControl: passthrough,
 		ListView: passthrough,
 		LoadingIndicator: passthrough,
@@ -124,7 +128,8 @@ const installStorageShim = () => {
 		configurable: true,
 		value: {
 			getItem: (key: string) => store.get(key) ?? null,
-			setItem: (key: string, value: string) => void store.set(key, String(value)),
+			setItem: (key: string, value: string) =>
+				void store.set(key, String(value)),
 			removeItem: (key: string) => void store.delete(key),
 			clear: () => store.clear(),
 			key: (index: number) => [...store.keys()][index] ?? null,
@@ -157,6 +162,36 @@ afterEach(() => {
 // The gate came with #2426 (Enforce Quiz Completion); this branch's lesson
 // teardown unmounts the quiz. Added on feat/assessment-visual-redesign.
 describe('tearing down an inline quiz keeps the completion gate shut', () => {
+	it('refreshes the homework context after an inline quiz is submitted', async () => {
+		const refresh = vi.fn()
+		window.addEventListener('lms:homework-progress', refresh)
+		try {
+			const tool = await renderQuizBlock()
+			startButton(tool)!.click()
+			await flushPromises()
+			const choice = tool.wrapper.querySelector<HTMLInputElement>(
+				'input[type="radio"]'
+			)!
+			choice.checked = true
+			choice.dispatchEvent(new Event('change'))
+			await flushPromises()
+			const finish = Array.from(tool.wrapper.querySelectorAll('button')).find(
+				(button) => button.textContent?.trim() === 'Finish Quiz'
+			)!
+			finish.click()
+			await flushPromises()
+			Array.from(tool.wrapper.querySelectorAll('button'))
+				.find((button) => button.textContent?.trim() === 'Submit')!
+				.click()
+			await vi.advanceTimersByTimeAsync(500)
+			await flushPromises()
+			expect(submitted).toContain(SUBMIT_URL)
+			expect(refresh).toHaveBeenCalledOnce()
+		} finally {
+			window.removeEventListener('lms:homework-progress', refresh)
+		}
+	})
+
 	it('submits nothing and marks no progress when a started quiz is destroyed', async () => {
 		const tool = await renderQuizBlock()
 		startButton(tool)!.click()

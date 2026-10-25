@@ -27,6 +27,12 @@
 					String(summary.total_requirements)
 				)
 			}}
+			<span v-if="summary.status === 'Review'" class="text-ink-green-6">{{
+				__('Sent for review')
+			}}</span>
+			<span v-else-if="summary.status === 'Done'" class="text-ink-green-6">{{
+				__('Homework accepted')
+			}}</span>
 		</span>
 	</div>
 </template>
@@ -104,10 +110,12 @@ const refetchIfVisible = () => {
 	if (document.visibilityState === 'visible') refresh()
 }
 onMounted(() => {
+	window.addEventListener('lms:homework-progress', refresh)
 	window.addEventListener('focus', refetchIfVisible)
 	document.addEventListener('visibilitychange', refetchIfVisible)
 })
 onUnmounted(() => {
+	window.removeEventListener('lms:homework-progress', refresh)
 	window.removeEventListener('focus', refetchIfVisible)
 	document.removeEventListener('visibilitychange', refetchIfVisible)
 })
@@ -120,7 +128,7 @@ const progressPercent = computed(() =>
 				(summary.value.completed_requirements /
 					summary.value.total_requirements) *
 					100
-		  )
+			)
 		: 0
 )
 </script>

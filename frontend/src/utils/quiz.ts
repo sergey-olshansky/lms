@@ -64,7 +64,13 @@ export class Quiz {
 
 	renderQuiz(quiz: string): void {
 		this.quizApp = this.readOnly
-			? mountBlock(this.wrapper, QuizBlock, { quiz })
+			? mountBlock(this.wrapper, QuizBlock, {
+					quiz,
+					// EditorJS mounts a separate Vue app, so component events do
+					// not bubble to Lesson.vue's homework progress banner.
+					onSubmitted: () =>
+						window.dispatchEvent(new Event('lms:homework-progress')),
+				})
 			: mountPreview(this.wrapper, 'quiz', quiz)
 	}
 

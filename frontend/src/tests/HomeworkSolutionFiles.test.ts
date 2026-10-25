@@ -66,9 +66,11 @@ vi.mock('frappe-ui', async () => {
 if (!('format' in String.prototype)) {
 	Object.defineProperty(String.prototype, 'format', {
 		value(this: string, ...args: unknown[]) {
-			return this.replace(/\{(\d+)\}/g, (_: string, i: string) =>
-				// @ts-expect-error index access on unknown
-				args[Number(i)] ?? ''
+			return this.replace(
+				/\{(\d+)\}/g,
+				(_: string, i: string) =>
+					// @ts-expect-error index access on unknown
+					args[Number(i)] ?? ''
 			)
 		},
 	})
@@ -90,7 +92,9 @@ const render = async () => {
 const pick = async (wrapper: ReturnType<typeof mount>, size: number) => {
 	const input = wrapper.find('input[type=file]')
 	Object.defineProperty(input.element, 'files', {
-		value: [new File(['x'.repeat(size)], 'solution.txt', { type: 'text/plain' })],
+		value: [
+			new File(['x'.repeat(size)], 'solution.txt', { type: 'text/plain' }),
+		],
 		configurable: true,
 	})
 	await input.trigger('change')
@@ -102,6 +106,7 @@ describe('HomeworkSolutionFiles (round-6 contract)', () => {
 		const wrapper = await render()
 		await pick(wrapper, 10)
 		expect(state.upload).toHaveBeenCalledOnce()
+		expect(wrapper.emitted('uploading')).toEqual([[true], [false]])
 		wrapper.unmount()
 	})
 

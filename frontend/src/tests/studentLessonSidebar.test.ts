@@ -84,8 +84,9 @@ const nestedOutline = vi.hoisted(() => [
 // Which outline the sidebar's resource resolves with; per-test switchable.
 let servedOutline: unknown[] = flatOutline
 
+const routeQuery = vi.hoisted(() => ({} as Record<string, string>))
 vi.mock('vue-router', () => ({
-	useRoute: () => ({ params: {}, query: {} }),
+	useRoute: () => ({ params: {}, query: routeQuery }),
 	useRouter: () => ({ push: vi.fn() }),
 }))
 
@@ -133,6 +134,18 @@ const mountSidebar = (selectedLessonNumber = '1-2') =>
 	})
 
 describe('StudentLessonSidebar locked lesson', () => {
+	it('keeps the homework return link and student preview mode across sidebar navigation', () => {
+		routeQuery.hw = 'HW-ONE'
+		routeQuery.studentView = '1'
+		try {
+			const wrapper = mountSidebar()
+			const route = JSON.parse(wrapper.find('li li a').attributes('data-to') || '{}')
+			expect(route.query).toEqual({ hw: 'HW-ONE', studentView: 1 })
+		} finally {
+			delete routeQuery.hw
+			delete routeQuery.studentView
+		}
+	})
 	it('renders a lock for a locked lesson and no link', () => {
 		const wrapper = mountSidebar()
 		const rows = wrapper.findAll('li li')

@@ -12,7 +12,7 @@
 	>
 		<div class="flex items-center justify-between gap-2 border-b border-outline-gray-2 px-4 py-2">
 			<span class="text-ink-gray-8">{{ __('Solution files') }}</span>
-			<span class="text-xs text-ink-gray-5" data-testid="solution-quota">
+			<span v-if="!state.loading" class="text-xs text-ink-gray-5" data-testid="solution-quota">
 				{{ __('{0} of {1} MB used').format(mbUsed, mbQuota) }}
 			</span>
 		</div>
@@ -73,9 +73,9 @@
 				class="border-t border-outline-gray-2 px-4 py-2 text-xs text-ink-gray-5"
 			>
 				{{
-					__(
-						'These files are read-only while the homework is on review or accepted.'
-					)
+					detail.data?.viewer_can_teach
+						? __('Download the student solution files to review their work.')
+						: __('These files are read-only while the homework is on review or accepted.')
 				}}
 			</p>
 
@@ -104,7 +104,7 @@
 							<Button
 								variant="outline"
 								size="sm"
-								:disabled="uploading"
+								:disabled="uploading || busy"
 								data-testid="solution-upload-button"
 								@click="openFileSelector"
 							>
@@ -139,7 +139,12 @@ const props = defineProps({
 	// student may do here, never the client.
 	detail: { type: Object, required: true },
 })
-const emit = defineEmits(['state'])
+const emit = defineEmits(['state', 'uploading'])
+const busy = ref(false)
+const setBusy = (value) => {
+	busy.value = value
+	emit('uploading', value)
+}
 
 const state = ref({ loading: true, rows: [], can_upload: false, used: 0, quota: 0 })
 const rows = computed(() => state.value.rows || [])
@@ -177,12 +182,14 @@ const validateUpload = (file) => {
 			(((state.value.remaining || 0) / (1024 * 1024)) || 0).toFixed(1)
 		)
 	}
+	setBusy(true)
 	return null
 }
 
 // R04: a transport failure (network, refused upload) is surfaced, not
 // swallowed -- the file is NOT registered, so the panel stays truthful.
 const onUploadFailure = (error) => {
+	setBusy(false)
 	toast.error(
 		String(error?.message || error || __('The upload failed. Please retry.'))
 	)
@@ -232,6 +239,7 @@ const registerFile = (file) => {
 			toast.error(resourceErrorMessage(err, __('Error')))
 			reload()
 		})
+		.finally(() => setBusy(false))
 }
 
 const removeFile = (row) => {

@@ -13,10 +13,14 @@
 	</Button>
 	<Button
 		v-else
-		:route="{ name: 'CourseDetail', params: { courseName } }"
+		:route="
+			homeworkID
+				? { name: 'HomeworkDetail', params: { assignmentID: homeworkID } }
+				: { name: 'CourseDetail', params: { courseName } }
+		"
 		class="text-p-base-medium"
 	>
-		{{ __('Back to Course') }}
+		{{ homeworkID ? __('Back to homework') : __('Back to Course') }}
 	</Button>
 </template>
 <script setup lang="ts">
@@ -26,6 +30,7 @@ defineProps<{
 	hasPrev: boolean
 	hasNext: boolean
 	courseName: string
+	homeworkID?: string
 }>()
 
 const emit = defineEmits<{

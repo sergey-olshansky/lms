@@ -3,12 +3,17 @@
 		<PageHeader :breadcrumbs="breadcrumbs">
 			<template #actions>
 				<Button
-					v-if="detail.data?.viewer_is_student && !detail.data?.cancelled"
+					v-if="
+						detail.data?.viewer_is_student &&
+						!detail.data?.cancelled &&
+						detail.data?.continue_target &&
+						['To Do', 'In Progress'].includes(detail.data?.status)
+					"
 					variant="solid"
 					:disabled="!detail.data?.continue_target"
 					@click="continueWorking"
 				>
-					{{ __('Continue') }}
+					{{ __('Continue homework') }}
 				</Button>
 				<template
 					v-if="detail.data?.viewer_can_teach && !detail.data?.cancelled"
@@ -75,6 +80,10 @@
 						</span>
 					</div>
 					<p class="text-sm text-ink-gray-6">
+						<template v-if="detail.data.viewer_can_teach"
+							>{{ __('Student') }}:
+							<strong>{{ detail.data.student_name }}</strong> ·
+						</template>
 						{{
 							__('Assigned by {0} on {1}').format(
 								detail.data.teacher_name,
@@ -82,6 +91,38 @@
 							)
 						}}
 					</p>
+					<div class="flex flex-wrap gap-2">
+						<Button
+							v-if="detail.data.viewer_can_teach"
+							variant="subtle"
+							size="sm"
+							@click="copyStudentLink"
+							>{{
+								copied ? __('Link copied') : __('Copy link for student')
+							}}</Button
+						>
+						<Button
+							v-if="detail.data.viewer_can_teach"
+							variant="subtle"
+							size="sm"
+							@click="downloadAssignmentPdf"
+							>{{ __('Download PDF') }}</Button
+						>
+					</div>
+					<div
+						class="rounded-5 bg-surface-gray-1 p-3 text-sm text-ink-gray-7"
+						data-testid="homework-next-step"
+					>
+						<p class="font-medium">
+							{{
+								__('{0} of {1} items completed').format(
+									String(detail.data.completed_requirements),
+									String(detail.data.total_requirements)
+								)
+							}}
+						</p>
+						<p class="mt-1">{{ nextStepHint }}</p>
+					</div>
 					<p class="text-sm text-ink-gray-6">
 						{{ __('Due') }}:
 						<span class="text-ink-gray-9">
@@ -122,7 +163,9 @@
 						class="rounded-4 border border-outline-gray-2"
 						data-testid="homework-teacher-materials-view"
 					>
-						<div class="border-b border-outline-gray-2 px-4 py-2 text-sm text-ink-gray-8">
+						<div
+							class="border-b border-outline-gray-2 px-4 py-2 text-sm text-ink-gray-8"
+						>
 							{{ __('Teacher materials') }}
 						</div>
 						<div class="divide-y divide-outline-gray-1">
@@ -131,8 +174,14 @@
 								:key="row.name"
 								class="flex items-center gap-2 px-4 py-2"
 							>
-								<span class="lucide-file size-4 shrink-0 text-ink-gray-5" aria-hidden="true" />
-								<span class="min-w-0 flex-1 truncate text-sm text-ink-gray-8" :title="row.file_name">
+								<span
+									class="lucide-file size-4 shrink-0 text-ink-gray-5"
+									aria-hidden="true"
+								/>
+								<span
+									class="min-w-0 flex-1 truncate text-sm text-ink-gray-8"
+									:title="row.file_name"
+								>
 									{{ row.file_name }}
 								</span>
 								<a
@@ -174,7 +223,13 @@
 					data-testid="solution-submit-panel"
 				>
 					<p class="font-medium text-ink-gray-9">
-						{{ allConfirmed ? __('Ready to submit') : __('Finish the work first') }}
+						{{
+							allConfirmed
+								? hasSolutionFile
+									? __('Ready to submit')
+									: __('Attach your solution to continue')
+								: __('Finish the work first')
+						}}
 					</p>
 					<p class="mt-1 text-ink-gray-6">
 						{{
@@ -188,7 +243,7 @@
 						size="sm"
 						class="mt-2"
 						data-testid="solution-submit-button"
-						:disabled="!allConfirmed || solutionUploading"
+						:disabled="!allConfirmed || !hasSolutionFile || solutionUploading"
 						@click="submitSolution"
 					>
 						{{ __('Send for review') }}
@@ -216,7 +271,11 @@
 						size="sm"
 						class="mt-2"
 						data-testid="resubmit-button"
-						:disabled="!allConfirmed"
+						:disabled="
+							!allConfirmed ||
+							solutionUploading ||
+							(detail.data.require_solution && !hasSolutionFile)
+						"
 						@click="resubmit"
 					>
 						{{ __('Send for review again') }}
@@ -298,8 +357,7 @@
 									     existing review mechanism; never a limit reset. -->
 									<span
 										v-if="
-											detail.data.viewer_can_teach &&
-											row.attempts_exhausted
+											detail.data.viewer_can_teach && row.attempts_exhausted
 										"
 										class="shrink-0 rounded-4 bg-surface-orange-1 px-1.5 py-0.5 text-xs text-ink-orange-5"
 										:data-testid="`attempts-exhausted-${row.quiz}`"
@@ -434,7 +492,12 @@
 				<!-- Task #35 (E03): the student's optional solution files. Purely
 				     additive: attaching nothing changes no requirement, no
 				     status and no review decision. -->
-				<HomeworkSolutionFiles :detail="detail" ref="solutionFiles" @state="onSolutionState" />
+				<HomeworkSolutionFiles
+					:detail="detail"
+					ref="solutionFiles"
+					@state="onSolutionState"
+					@uploading="solutionUploading = $event"
+				/>
 
 				<!-- History (spec 5.3.5) -->
 				<section class="space-y-2">
@@ -477,8 +540,8 @@
 				commentDialog === 'return'
 					? __('Return for rework')
 					: commentDialog === 'reopen'
-					? __('Reopen homework')
-					: __('Change deadline')
+						? __('Reopen homework')
+						: __('Change deadline')
 			"
 			size="md"
 			@update:open="(value) => (value ? null : (commentDialog = ''))"
@@ -557,11 +620,13 @@ import {
 import { computed, inject, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/Layouts/pages/PageHeader.vue'
+import { usePageMeta } from 'frappe-ui'
 import HomeworkSolutionFiles from '@/components/HomeworkSolutionFiles.vue'
 import { lessonRouteParams } from '@/utils/homeworkSelection'
 import { resourceErrorMessage } from '@/utils/resource'
 import { formatDueAt, siteWallClock } from '@/utils/dueDate'
 import { downloadViaAnchor } from '@/utils/download'
+import { copyText } from '@/utils/clipboard'
 import { safeUrl } from '@/utils/safeUrl'
 
 import { redirectToLogin } from '@/utils/loginReturn'
@@ -578,14 +643,50 @@ const STATUS_LABELS = {
 	'To Do': 'To Do',
 	'In Progress': 'In Progress',
 	Review: 'Review',
-	Done: 'Done',
+	Done: 'Homework accepted',
 }
 const statusLabel = (status) => __(STATUS_LABELS[status] || status || '')
+const nextStepHint = computed(() => {
+	const data = detail.data
+	if (!data) return ''
+	if (data.cancelled) return __('This homework was recalled by the teacher.')
+	if (data.status === 'Done') return __('Accepted by the teacher.')
+	if (data.status === 'Review')
+		return data.viewer_can_teach
+			? __(
+					'Check the completed work and solution files, then accept it or return it with a comment.'
+				)
+			: __('Your work has been sent to the teacher. Wait for their review.')
+	if (data.needs_revision)
+		return data.viewer_can_teach
+			? __(
+					'The work was returned to the student. Wait for them to send the corrected solution for review.'
+				)
+			: __(
+					'Read the teacher comment, fix the work and send it for review again.'
+				)
+	if (data.viewer_can_teach)
+		return data.status === 'To Do'
+			? __(
+					'The homework is assigned and visible on the student board. You can also send them its link or PDF.'
+				)
+			: __(
+					'The student is working. Progress updates automatically; completed work will move to Review for your decision.'
+				)
+	return data.require_solution
+		? __(
+				'Complete the checklist, attach your solution files below and press Send for review. All solution files together may use up to 20 MB.'
+			)
+		: __(
+				'Open each material and pass the required tests. When every item is complete, the work is sent to the teacher automatically.'
+			)
+})
 
 const EVENT_LABELS = {
 	assigned: 'Assigned',
 	started: 'Started',
 	submitted_for_review: 'Sent for review',
+	solution_submitted: 'Sent for review',
 	accepted: 'Accepted',
 	returned_for_revision: 'Returned for rework',
 	resubmitted: 'Sent again',
@@ -695,12 +796,15 @@ const isRichDetails = computed(() =>
 // its private download URL.
 const materialRows = computed(() => {
 	const rows = detail.data?.materials || []
-	return rows.filter((row) => row.role === 'Material' || row.role === 'Detail Image')
+	return rows.filter(
+		(row) => row.role === 'Material' || row.role === 'Detail Image'
+	)
 })
 
 // E06: the student's current solution files -- the explicit Send waits for
 // both the requirements and a file to exist.
 const solutionRows = ref([])
+const solutionUploading = ref(false)
 const hasSolutionFile = computed(() => solutionRows.value.length > 0)
 const onSolutionState = (payload) => {
 	solutionRows.value = payload?.rows || []
@@ -710,8 +814,8 @@ const allConfirmed = computed(() => {
 	const data = detail.data
 	return Boolean(
 		data &&
-			data.total_requirements > 0 &&
-			data.completed_requirements >= data.total_requirements
+		data.total_requirements > 0 &&
+		data.completed_requirements >= data.total_requirements
 	)
 })
 const stateClass = (row) => {
@@ -751,7 +855,7 @@ onUnmounted(() => {
 })
 
 const breadcrumbs = computed(() => [
-	{ label: __('Homework execution'), route: { name: 'HomeworkExecution' } },
+	{ label: __('Homework workspace'), route: { name: 'HomeworkExecution' } },
 	{
 		label: detail.data?.title || '…',
 		route: {
@@ -899,7 +1003,7 @@ const copied = ref(false)
 
 async function copyStudentLink() {
 	try {
-		await navigator.clipboard.writeText(studentLink.value)
+		await copyText(studentLink.value)
 		copied.value = true
 		setTimeout(() => (copied.value = false), 2000)
 	} catch {
@@ -1004,4 +1108,5 @@ const revoke = async () => {
 	)
 	router.push({ name: 'HomeworkExecution' })
 }
+usePageMeta(() => ({ title: __('Homework workspace') }))
 </script>

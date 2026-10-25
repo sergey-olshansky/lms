@@ -29,46 +29,12 @@
 					<!-- F01: the count includes the chosen lessons' mandatory
 					     embedded quizzes -- say so when no quiz was picked
 					     standalone, so the number is never a surprise. -->
-					<p
-						v-if="includesEmbedded"
-						class="mt-0.5 text-xs text-ink-gray-5"
-					>
-						{{
-							__('Choosing a lesson includes its mandatory quizzes.')
-						}}
+					<p v-if="includesEmbedded" class="mt-0.5 text-xs text-ink-gray-5">
+						{{ __('Choosing a lesson includes its mandatory quizzes.') }}
 					</p>
 				</div>
 
-				<div>
-					<p class="mb-1 text-sm text-ink-gray-7">{{ __('Student') }}</p>
-					<FormControl
-						v-if="students.data && students.data.length > 8"
-						type="text"
-						v-model="studentSearch"
-						:placeholder="__('Search students')"
-						:aria-label="__('Search students')"
-					/>
-					<RadioGroup
-						class="mt-1 max-h-44 overflow-y-auto rounded-4 border border-outline-gray-2"
-						:model-value="student"
-						@update:model-value="(value) => (student = value)"
-					>
-						<Radio
-							v-for="candidate in filteredStudents"
-							:key="candidate.name"
-							:value="candidate.name"
-							:label="candidate.full_name"
-							size="sm"
-							class="px-3 py-1.5"
-						/>
-					</RadioGroup>
-					<p
-						v-if="!filteredStudents.length"
-						class="mt-1 rounded-4 border border-outline-gray-2 px-3 py-3 text-sm text-ink-gray-5"
-					>
-						{{ __('No students found') }}
-					</p>
-				</div>
+				<HomeworkStudentPicker v-model="student" />
 
 				<FormControl
 					type="number"
@@ -165,7 +131,7 @@
 				<Button
 					v-else
 					variant="solid"
-					:disabled="!student || blocked"
+					:disabled="!student || blocked || precheck.loading"
 					:loading="assigning"
 					@click="assign(false)"
 					data-testid="assign-confirm"
@@ -182,16 +148,9 @@
 // number of days with the computed due date/time in the site timezone, the
 // blocking reasons when access or locks refuse the composition (A10), and the
 // already-active flow that ends in a deliberate second issue (A11).
-import {
-	Button,
-	Dialog,
-	FormControl,
-	Radio,
-	RadioGroup,
-	createResource,
-	toast,
-} from 'frappe-ui'
+import { Button, Dialog, FormControl, createResource, toast } from 'frappe-ui'
 import { computed, ref, watch } from 'vue'
+import HomeworkStudentPicker from '@/components/HomeworkStudentPicker.vue'
 import { resourceErrorMessage } from '@/utils/resource'
 import { siteWallClock, siteZoneLabel } from '@/utils/dueDate'
 
@@ -199,18 +158,15 @@ const props = defineProps({
 	open: { type: Boolean, default: false },
 	homework: { type: String, default: '' },
 	presetDays: { type: Number, default: 7 },
+	presetStudent: { type: String, default: '' },
 })
 const emit = defineEmits(['done', 'cancel'])
 
 const student = ref('')
-const studentSearch = ref('')
 const days = ref(props.presetDays || 7)
 const confirmExtra = ref(false)
 const assigning = ref(false)
 
-const students = createResource({
-	url: 'lms.lms.homework_api.get_homework_students',
-})
 const homeworkDoc = createResource({
 	url: 'lms.lms.homework_api.get_homework',
 	makeParams: () => ({ name: props.homework }),
@@ -228,21 +184,10 @@ const composition = computed(() => ({
 // The hint a teacher needs when the quiz count is not what the picker seemed
 // to say: choosing a lesson includes its mandatory activities.
 const includesEmbedded = computed(
-	() => (composition.value.quizzes || 0) > 0 && (homeworkDoc.data?.items || []).every(
-		(item) => item.source_type !== 'Quiz'
-	)
+	() =>
+		(composition.value.quizzes || 0) > 0 &&
+		(homeworkDoc.data?.items || []).every((item) => item.source_type !== 'Quiz')
 )
-
-const filteredStudents = computed(() => {
-	const rows = students.data || []
-	if (!studentSearch.value.trim()) return rows
-	const needle = studentSearch.value.trim().toLowerCase()
-	return rows.filter(
-		(candidate) =>
-			candidate.full_name.toLowerCase().includes(needle) ||
-			candidate.name.toLowerCase().includes(needle)
-	)
-})
 
 const precheck = createResource({
 	url: 'lms.lms.homework_api.precheck_assignment',
@@ -263,20 +208,15 @@ const blocked = computed(
 // The deadline renders in the site's timezone with its offset named (spec 4.1,
 // U01): the shared dueDate helper reads both straight from the server's
 // offset-bearing ISO -- never from the browser's zone.
-const dueLabel = computed(() =>
-	siteWallClock(precheck.data?.due_at || '')
-)
+const dueLabel = computed(() => siteWallClock(precheck.data?.due_at || ''))
 
-const dueZone = computed(() =>
-	siteZoneLabel(precheck.data?.due_at || '')
-)
+const dueZone = computed(() => siteZoneLabel(precheck.data?.due_at || ''))
 
 watch(
 	() => props.open,
 	(isOpen) => {
 		if (!isOpen) return
-		student.value = ''
-		studentSearch.value = ''
+		student.value = props.presetStudent || ''
 		days.value = props.presetDays || 7
 		confirmExtra.value = false
 		precheck.data = null
@@ -287,7 +227,6 @@ watch(
 		// an uncertain (timed-out) request therefore reuses it and the server
 		// returns the same card instead of issuing a second one.
 		operationKey.value = mintKey()
-		students.reload()
 		if (props.homework) homeworkDoc.reload()
 	}
 )

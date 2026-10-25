@@ -6,6 +6,13 @@
 		@update:open="(value) => (value ? null : emit('cancel'))"
 	>
 		<template #default>
+			<p class="mb-3 text-sm text-ink-gray-6">
+				{{
+					__(
+						'Choose a course and tick the sections, lessons or tests to include. You can select materials from several courses.'
+					)
+				}}
+			</p>
 			<div
 				v-if="open"
 				class="flex h-[65vh] flex-col gap-4 md:flex-row"
@@ -22,6 +29,9 @@
 					<div
 						class="flex-1 overflow-y-auto rounded-4 border border-outline-gray-2"
 					>
+						<p v-if="coursesLoading" class="px-3 py-4 text-sm text-ink-gray-5">
+							{{ __('Loading courses…') }}
+						</p>
 						<button
 							v-for="course in filteredCourses"
 							:key="course.name"
@@ -33,6 +43,7 @@
 									: 'text-ink-gray-7 hover:bg-surface-gray-1'
 							"
 							:aria-current="course.name === activeCourse"
+							:title="course.title"
 							@click="selectCourse(course.name)"
 						>
 							<span class="min-w-0 flex-1 truncate">{{ course.title }}</span>
@@ -47,7 +58,7 @@
 							</span>
 						</button>
 						<p
-							v-if="!filteredCourses.length"
+							v-if="!coursesLoading && !filteredCourses.length"
 							class="px-3 py-4 text-sm text-ink-gray-5"
 						>
 							{{ __('No courses found') }}
@@ -86,6 +97,9 @@
 						<div v-if="treeLoading" class="p-4 text-sm text-ink-gray-5">
 							{{ __('Loading…') }}
 						</div>
+						<p v-else-if="!activeCourse" class="p-4 text-sm text-ink-gray-5">
+							{{ __('Choose a course on the left to see its materials.') }}
+						</p>
 						<template v-else-if="materialSearch.trim()">
 							<button
 								v-for="hit in searchHits"
@@ -163,7 +177,7 @@
 						{{
 							selected.size
 								? __('Add selected ({0})').format(String(selected.size))
-								: __('Save empty selection')
+								: __('Save selection')
 						}}
 					</Button>
 				</div>
@@ -196,6 +210,7 @@ import {
 const props = defineProps({
 	open: { type: Boolean, default: false },
 	courses: { type: Array, default: () => [] },
+	coursesLoading: { type: Boolean, default: false },
 	// Already attached items, pre-checked: switching chapters off and on keeps
 	// the earlier choice (A06/A07).
 	initialItems: { type: Array, default: () => [] },

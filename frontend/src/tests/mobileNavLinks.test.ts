@@ -137,8 +137,6 @@ describe('loadMobileNavLinks', () => {
 			'Quizzes',
 			'Assignments',
 			'Programming Exercises',
-			// Task #35: the teacher's homework library rides the You page too.
-			'Homework',
 			'Notifications',
 			'Profile',
 			'Log out',

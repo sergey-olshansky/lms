@@ -523,6 +523,7 @@ def get_homework_students(search: str = "") -> list[dict]:
 	-- issuing a draft fragment must not require enrolling the student into the
 	source course first; an existing assignment IS a "my student" relation). No
 	global user list: another teacher's students stay invisible."""
+	_require_homework_teacher()
 	courses = homework_sources.get_assignable_courses()
 	names = [course["name"] for course in courses]
 	filters: list = []
@@ -568,6 +569,32 @@ def get_homework_students(search: str = "") -> list[dict]:
 
 
 # --- Assignment flow (spec 4) ---------------------------------------------------
+
+
+@frappe.whitelist()
+def find_homework_student(email: str) -> dict:
+	"""Resolve one known email for issuing homework; never expose a global roster.
+
+	The first assignment establishes the existing teacher/student relation used
+	by get_homework_students. This lookup creates neither accounts nor access.
+	"""
+	_require_homework_teacher()
+	address = str(email or "").strip().lower()
+	student = frappe.db.get_value(
+		"User", {"name": address, "enabled": 1}, ["name", "full_name"], as_dict=True
+	)
+	if (
+		not student
+		or student.name in {"Administrator", "Guest", frappe.session.user}
+		or "LMS Student" not in frappe.get_roles(student.name)
+	):
+		frappe.throw(_("No active student with this email. Ask the student to register on this site first."))
+	return dict(student)
+
+
+def _require_homework_teacher() -> None:
+	if not _is_privileged() and not {"Course Creator", "Batch Evaluator"}.intersection(frappe.get_roles()):
+		frappe.throw(_("Only teachers can select students for homework."), frappe.PermissionError)
 
 
 @frappe.whitelist()
