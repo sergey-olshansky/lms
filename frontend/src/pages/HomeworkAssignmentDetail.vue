@@ -507,7 +507,7 @@
 					<ol class="space-y-2">
 						<li
 							v-for="event in detail.data.history"
-							:key="event.creation"
+							:key="event.name"
 							class="rounded-4 border border-outline-gray-2 px-3 py-2 text-sm"
 						>
 							<p class="text-ink-gray-8">

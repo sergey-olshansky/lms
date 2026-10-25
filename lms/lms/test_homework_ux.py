@@ -1,5 +1,7 @@
 """The teacher can issue a first homework to a registered student by exact email."""
 
+from unittest.mock import patch
+
 import frappe
 
 from lms.lms import homework_api
@@ -54,3 +56,45 @@ class TestHomeworkStudentSelection(BaseTestUtils):
 		assigned = "".join(_material_lines([row], "HW-ASN-UX"))
 		self.assertIn("/lms/courses/ux/learn/1-1?hw=HW-ASN-UX", assigned)
 		self.assertNotIn("?hw=", "".join(_material_lines([row])))
+
+	def test_direct_assignment_and_precheck_reject_ineligible_recipients(self):
+		course = self._create_course(title="UX recipient gate", instructor=self.teacher.name)
+		chapter = self._create_chapter("Practice", course.name)
+		self._create_chapter_reference(course.name, chapter.name)
+		lesson = self._create_lesson("Read", chapter.name, course.name)
+		self._create_lesson_reference(chapter.name, lesson.name)
+		template = homework_api.save_homework(title="Recipient gate", days=3, items=[{"source_type": "Lesson", "name": lesson.name}])["name"]
+		self.assertTrue(homework_api.precheck_assignment(template, self.student.name)["ok"])
+		frappe.set_user("Administrator")
+		other = self._create_user("ux35-nonstudent@example.com", "UX", "Staff", ["Course Creator"])
+		frappe.db.delete("Has Role", {"parent": other.name, "role": "LMS Student"})
+		frappe.clear_cache(user=other.name)
+		self.assertNotIn("LMS Student", frappe.get_roles(other.name))
+		frappe.db.set_value("User", self.student.name, "enabled", 0)
+		frappe.set_user(self.teacher.name)
+		for recipient in (self.student.name, other.name, self.teacher.name, "Guest", "Administrator", "ux35-missing@example.com"):
+			for operation in (homework_api.precheck_assignment, homework_api.assign_homework):
+				with self.subTest(recipient=recipient, operation=operation.__name__):
+					with self.assertRaises(frappe.ValidationError):
+						operation(homework=template, student=recipient)
+		self.assertFalse(frappe.db.exists("LMS Homework Assignment", {"homework": template}))
+
+	def test_history_keeps_each_action_time_and_stable_identity(self):
+		from frappe.utils import add_to_date, get_datetime, now_datetime
+
+		course = self._create_course(title="UX history clock", instructor=self.teacher.name)
+		chapter = self._create_chapter("Practice", course.name)
+		self._create_chapter_reference(course.name, chapter.name)
+		lesson = self._create_lesson("Read", chapter.name, course.name)
+		self._create_lesson_reference(chapter.name, lesson.name)
+		template = homework_api.save_homework(title="History clock", days=3, items=[{"source_type": "Lesson", "name": lesson.name}])["name"]
+		assignment = homework_api.assign_homework(homework=template, student=self.student.name)["name"]
+		later = add_to_date(now_datetime(), minutes=30, as_datetime=True)
+		frappe.set_user(self.student.name)
+		with patch("lms.lms.homework_service.now_datetime", return_value=later):
+			homework_api.open_homework(assignment)
+		dto = homework_api.get_homework_assignment(assignment)
+		events = {row["event"]: row for row in dto["history"]}
+		self.assertEqual(get_datetime(events["started"]["creation"]), later)
+		self.assertNotEqual(events["assigned"]["creation"], events["started"]["creation"])
+		self.assertEqual(len({row["name"] for row in dto["history"]}), len(dto["history"]))

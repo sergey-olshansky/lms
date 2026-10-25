@@ -580,16 +580,7 @@ def find_homework_student(email: str) -> dict:
 	"""
 	_require_homework_teacher()
 	address = str(email or "").strip().lower()
-	student = frappe.db.get_value(
-		"User", {"name": address, "enabled": 1}, ["name", "full_name"], as_dict=True
-	)
-	if (
-		not student
-		or student.name in {"Administrator", "Guest", frappe.session.user}
-		or "LMS Student" not in frappe.get_roles(student.name)
-	):
-		frappe.throw(_("No active student with this email. Ask the student to register on this site first."))
-	return dict(student)
+	return homework_service.validate_assignment_student(address)
 
 
 def _require_homework_teacher() -> None:
@@ -605,6 +596,7 @@ def precheck_assignment(homework: str, student: str, days: int | None = None) ->
 	if doc.owner != frappe.session.user and not _is_privileged():
 		frappe.throw(_("You can only assign your own homework."), frappe.PermissionError)
 
+	homework_service.validate_assignment_student(student)
 	check_days = homework_service.validate_days_raw(days if days is not None else doc.days)
 	reasons = (
 		homework_sources.validate_sources_for_student(doc.items, student)
@@ -1008,6 +1000,7 @@ def get_homework_assignment(name: str) -> dict:
 		"solution_submitted_at": doc.solution_submitted_at,
 		"history": [
 			{
+				"name": row.name,
 				"actor": row.actor,
 				"actor_name": row.actor_name,
 				"event": row.event,

@@ -78,6 +78,22 @@ def validate_days_raw(days) -> int:
 # --- Issuing (spec 4, 8.2) ------------------------------------------------------
 
 
+def validate_assignment_student(student: str) -> dict:
+	"""Apply recipient eligibility at the mutation boundary, not only in a picker."""
+	user = None
+	if student:
+		user = frappe.db.get_value(
+			"User", {"name": student, "enabled": 1}, ["name", "full_name"], as_dict=True
+		)
+	if (
+		not user
+		or user.name in {"Guest", "Administrator", frappe.session.user}
+		or "LMS Student" not in frappe.get_roles(user.name)
+	):
+		frappe.throw(_("Please choose an active student account."))
+	return dict(user)
+
+
 def create_assignment(
 	homework_name: str,
 	student: str,
@@ -98,8 +114,7 @@ def create_assignment(
 		frappe.throw(_("You can only assign your own homework."), frappe.PermissionError)
 	if homework.archived:
 		frappe.throw(_("This homework is archived and cannot be assigned."))
-	if not student or not frappe.db.exists("User", student):
-		frappe.throw(_("Please choose a valid student."))
+	validate_assignment_student(student)
 
 	if idempotency_key:
 		existing = frappe.db.get_value(
@@ -1218,6 +1233,8 @@ def _add_history(
 	assignment.append(
 		"history",
 		{
+			# Frappe otherwise gives new child rows the parent's creation time.
+			"creation": now_datetime(),
 			"actor": frappe.session.user,
 			"actor_name": frappe.utils.get_fullname(frappe.session.user),
 			"event": event,
