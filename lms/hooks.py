@@ -120,6 +120,10 @@ permission_query_conditions = {
 	"LMS Quiz Submission": "lms.lms.permissions.quiz_submission_query_conditions",
 	"LMS Assignment Submission": "lms.lms.permissions.assignment_submission_query_conditions",
 	"LMS Programming Exercise Submission": "lms.lms.permissions.programming_exercise_submission_query_conditions",
+	"LMS Homework Group": "lms.lms.permissions.homework_group_query_conditions",
+	"LMS Homework": "lms.lms.permissions.homework_query_conditions",
+	"LMS Homework Assignment": "lms.lms.permissions.homework_assignment_query_conditions",
+	"LMS Homework Attachment": "lms.lms.permissions.homework_attachment_query_conditions",
 }
 
 has_permission = {
@@ -144,6 +148,10 @@ has_permission = {
 	"LMS Quiz Submission": "lms.lms.permissions.assessment_submission_has_permission",
 	"LMS Assignment Submission": "lms.lms.permissions.assessment_submission_has_permission",
 	"LMS Programming Exercise Submission": "lms.lms.permissions.assessment_submission_has_permission",
+	"LMS Homework Group": "lms.lms.permissions.homework_group_has_permission",
+	"LMS Homework": "lms.lms.permissions.homework_has_permission",
+	"LMS Homework Assignment": "lms.lms.permissions.homework_assignment_has_permission",
+	"LMS Homework Attachment": "lms.lms.permissions.homework_attachment_has_permission",
 }
 
 # DocType Class
@@ -187,6 +195,15 @@ doc_events = {
 	"LMS Quiz": {"validate": CHILD_ROW_MOVE_GATE},
 	"LMS Programming Exercise": {"validate": CHILD_ROW_MOVE_GATE},
 	"LMS Assignment": {"validate": CHILD_ROW_MOVE_GATE},
+	# Task #35: every saved quiz submission (first attempt or a re-graded open
+	# answer) and every annulled one recomputes the affected homework requirements,
+	# targeted by member and quiz -- never a scan of all assignments. The delete
+	# half rides after_delete: on_trash fires before the row leaves the database,
+	# so the recalculation would still see the passing proof it must lose.
+	"LMS Quiz Submission": {
+		"on_update": "lms.lms.homework_service.on_quiz_submission_update",
+		"after_delete": "lms.lms.homework_service.on_quiz_submission_delete",
+	},
 	"LMS Question": {"validate": CHILD_ROW_MOVE_GATE},
 	"LMS Quiz Question": {"validate": CHILD_ROW_MOVE_GATE},
 	"LMS Test Case": {"validate": CHILD_ROW_MOVE_GATE},
@@ -392,4 +409,6 @@ standard_sidebar_items = [
 	{"name1": "quizzes", "is_standard": 1, "item_type": "Built-in"},
 	{"name1": "assignments", "is_standard": 1, "item_type": "Built-in"},
 	{"name1": "programming_exercises", "is_standard": 1, "item_type": "Built-in"},
+	{"name1": "homework", "is_standard": 1, "item_type": "Built-in"},
+	{"name1": "homework_execution", "is_standard": 1, "item_type": "Built-in"},
 ]

@@ -100,6 +100,7 @@ import ListPage from '@/components/Layouts/pages/ListPage.vue'
 import StudentPrograms from '@/pages/Programs/StudentPrograms.vue'
 import { openFormRoute } from '@/composables/useFormRoute'
 
+import { redirectToLogin } from '@/utils/loginReturn'
 const { brand } = sessionStore()
 const user = inject('$user')
 const router = useRouter()
@@ -110,7 +111,7 @@ const filters = ref({})
 
 onMounted(() => {
 	if (!user.data) {
-		window.location.href = '/login'
+		redirectToLogin()
 	}
 	if (user.data?.is_moderator || user.data?.is_instructor) {
 		setFiltersFromQuery()

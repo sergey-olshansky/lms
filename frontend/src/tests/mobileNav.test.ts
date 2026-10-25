@@ -21,7 +21,7 @@ const sidebarLinks = [
 	link('Home'),
 	link('Programs'),
 	link('Courses'),
-	link('Batches'),
+	link('Homework workspace'),
 	link('Jobs'),
 	link('Statistics'),
 	link('Certifications'),
@@ -42,14 +42,14 @@ describe('pickPrimaryTabs', () => {
 		expect(tabs.map((t) => t.label)).toEqual([
 			'Home',
 			'Courses',
-			'Batches',
+			'Homework workspace',
 			'Programs',
 			'You',
 		])
 	})
 
 	it('drops a primary the admin has disabled', () => {
-		const withoutBatches = sidebarLinks.filter((l) => l.label !== 'Batches')
+		const withoutBatches = sidebarLinks.filter((l) => l.label !== 'Homework workspace')
 		expect(pickPrimaryTabs(withoutBatches, true).map((t) => t.label)).toEqual([
 			'Home',
 			'Courses',
@@ -234,7 +234,7 @@ describe('overflowLinks', () => {
 	it('keeps everything that did not fit on the bar, in arrival order', () => {
 		expect(labels()).toEqual([
 			'Programs',
-			'Batches',
+			'Homework workspace',
 			'Jobs',
 			'Statistics',
 			'Quizzes',

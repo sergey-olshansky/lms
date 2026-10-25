@@ -565,6 +565,18 @@ const getSidebarItems = (forMobile = false) => {
 					},
 				},
 				{
+					// One workspace: teachers create/issue work and inspect progress
+					// through its internal tabs; students go straight to their board.
+					label: 'Homework workspace',
+					icon: 'KanbanSquare',
+					to: userResource?.data?.is_instructor || userResource?.data?.is_moderator
+						? 'HomeworkLibrary' : 'HomeworkExecution',
+					activeFor: ['HomeworkLibrary', 'HomeworkNew', 'HomeworkEdit', 'HomeworkExecution', 'HomeworkDetail'],
+					condition: () => {
+						return userResource?.data
+					},
+				},
+				{
 					label: 'Jobs',
 					icon: 'Briefcase',
 					to: 'Jobs',

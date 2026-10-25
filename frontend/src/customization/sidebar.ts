@@ -1,6 +1,7 @@
 // Tutor-specific navigation preferences. Features and routes stay available;
 // only their entry points are hidden from the sidebar and mobile navigation.
 export const HIDDEN_SIDEBAR_ITEMS: readonly string[] = [
+	'Batches',
 	'Certifications',
 	'Jobs',
 	'Programming Exercises',

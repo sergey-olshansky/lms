@@ -9,6 +9,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import { call } from 'frappe-ui'
 
 const pushMock = vi.hoisted(() => vi.fn())
 const replaceMock = vi.hoisted(() => vi.fn())
@@ -205,6 +206,13 @@ afterEach(() => {
 })
 
 describe('Lesson.vue Next affordance follows canGoNext', () => {
+	it('records a granted homework lesson opening without enrollment in the whole course', async () => {
+		wrapper = await mountLesson()
+		vi.mocked(call).mockClear()
+		findResource('lms.lms.utils.get_lesson').data = { ...baseLesson, membership: null }
+		await flushPromises()
+		expect(call).toHaveBeenCalledWith('lms.lms.homework_api.record_material_opened', { lesson: 'L1' })
+	})
 	it('hides the Next button when the following lesson is locked', async () => {
 		wrapper = await mountLesson()
 		findResource('lms.lms.utils.get_course_outline').data = [

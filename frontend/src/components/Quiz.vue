@@ -576,15 +576,8 @@
 								}}
 							</p>
 						</div>
-						<p
-							v-if="hasPendingReview"
-							class="ps-6 text-p-base text-ink-gray-6"
-						>
-							{{
-								__(
-									'Open-ended answers are pending instructor review.'
-								)
-							}}
+						<p v-if="hasPendingReview" class="ps-6 text-p-base text-ink-gray-6">
+							{{ __('Open-ended answers are pending instructor review.') }}
 						</p>
 					</div>
 					<!-- No automatic per-question report on the result screen
@@ -602,18 +595,18 @@
 						<Button v-if="inVideo" @click="props.backToVideo()">
 							{{ __('Resume Video') }}
 						</Button>
-					<!-- The retake action (#32): available only while the configured
+						<!-- The retake action (#32): available only while the configured
 					     attempt count has room. The next pool contains uncredited
 					     questions; earlier correct answers keep their credit. -->
-					<Button
-						v-if="
-							!quiz.data.max_attempts ||
-							(attempts.data?.length ?? 0) < quiz.data.max_attempts
-						"
-						@click="resetQuiz()"
-					>
-						{{ __('Retake') }}
-					</Button>
+						<Button
+							v-if="
+								!quiz.data.max_attempts ||
+								(attempts.data?.length ?? 0) < quiz.data.max_attempts
+							"
+							@click="resetQuiz()"
+						>
+							{{ __('Retake') }}
+						</Button>
 					</div>
 				</div>
 			</div>
@@ -778,9 +771,7 @@
 						variant="subtle"
 						size="sm"
 						data-testid="attempt-report-button"
-						:aria-label="
-							__('Report for attempt {0}').format(row.idx)
-						"
+						:aria-label="__('Report for attempt {0}').format(row.idx)"
 						@click="openAttemptReport(row)"
 					>
 						{{ __('Report') }}
@@ -880,6 +871,7 @@ import {
 	Badge,
 	Button,
 	Checkbox,
+	call,
 	createResource,
 	Dialog,
 	FormControl,
@@ -973,13 +965,23 @@ const props = withDefaults(
 		preview?: boolean
 		inVideo?: boolean
 		backToVideo?: () => void
+		// B11: open this specific attempt's report on arrival -- the homework
+		// checklist's proof link names the very submission that earned the
+		// pass, which may not be the newest attempt. Fetched through the
+		// member-filtered list, so only the viewer's own attempt can open.
+		reportSubmission?: string
 	}>(),
 	{
 		preview: false,
 		inVideo: false,
 		backToVideo: () => {},
+		reportSubmission: '',
 	}
 )
+
+// Parents (the quiz page's homework banner) refresh live progress the moment
+// an attempt lands (B11).
+const emit = defineEmits<{ submitted: [] }>()
 
 onMounted(() => {
 	window.addEventListener('pagehide', handlePageHide)
@@ -1028,7 +1030,10 @@ const handlePageHide = (): void => {
 		// The offered pool rides along here too (#32): the beacon is a submit
 		// like any other, and its denominator must not default to the strict
 		// whole-quiz reading for want of a declaration.
-		params.set('question_pool', JSON.stringify(questions.value.map((row) => row.question)))
+		params.set(
+			'question_pool',
+			JSON.stringify(questions.value.map((row) => row.question))
+		)
 		// Beacons go out as a query string, so only spend the URL budget on the
 		// log when there is one.
 		if (violationLog.value.length) {
@@ -1113,6 +1118,15 @@ const populateQuestions = () => {
 	} else {
 		questions.value = offered
 	}
+	// F03 / round 7: while an attempt is being sat, its composition is the
+	// offered pool. After a pass the pool empties and the saved rows of the
+	// newest submission (the watch above) take over -- never the quiz total,
+	// which would misdescribe a series of partial retakes.
+	if (questions.value.length) {
+		lastAttemptTypes.value = questions.value.map(
+			(row: QuizQuestionRow) => questionsByName.value[row.question]?.type
+		)
+	}
 }
 
 const setupTimer = () => {
@@ -1186,19 +1200,35 @@ const attemptsLeft = computed(() => {
 	return Math.max(quiz.data.max_attempts - (attempts.data?.length ?? 0), 0)
 })
 
-const quizSubtitle = computed(() =>
-	formatQuizSubtitle(
+const quizSubtitle = computed(() => {
+	// F03: while a finished attempt's result is on screen, the header
+	// describes THAT attempt -- the composition the attempt covered -- never
+	// the retake pool, which drops every credited question and would read as
+	// "0 questions" right after a 100% pass or on a reload of a fully
+	// credited quiz.
+	if (
+		(quizSubmission.data || !questions.value.length) &&
+		lastAttemptTypes.value.length
+	) {
+		return formatQuizSubtitle(lastAttemptTypes.value, quiz.data?.passing_percentage)
+	}
+	return formatQuizSubtitle(
 		questions.value.map((row) => questionsByName.value[row.question]?.type),
 		quiz.data?.passing_percentage
 	)
-)
+})
+
 
 const introTips = computed(() => {
 	if (!quiz.data) return []
 	const proctored = quiz.data.enable_proctoring
 	const tips: string[] = []
 	if (props.inVideo) tips.push(__('Complete the quiz to continue the video.'))
-	if (!props.preview && creditedQuestionNames.value.size && questions.value.length) {
+	if (
+		!props.preview &&
+		creditedQuestionNames.value.size &&
+		questions.value.length
+	) {
 		// What a retake is (#32): the credited answers of earlier attempts
 		// already count, and only the rest is asked now.
 		tips.push(
@@ -1323,89 +1353,151 @@ const shuffleArray = <T>(array: T[]): T[] => {
 	return array
 }
 
-	const attempts = createResource<QuizAttempt[]>({
-		url: 'frappe.client.get_list',
-		makeParams() {
-			return {
-				doctype: 'LMS Quiz Submission',
-				filters: {
-					member: user.data?.name,
-					quiz: quiz.data?.name,
-				},
-				fields: [
-					'name',
-					'creation',
-					'score',
-					'score_out_of',
-					'percentage',
-					'passing_percentage',
-				],
-				order_by: 'creation desc',
-			}
-		},
-		transform(data: QuizAttempt[]) {
-			data.forEach((submission, index) => {
-				submission.creation = timeAgo(submission.creation)
-				submission.idx = index + 1
-			})
-		},
-	})
-
-	// --- Retake credit (#32) ----------------------------------------------------
-	// The questions this learner has already credited on this quiz, across
-	// earlier attempts. A retake offers only what was never credited; the
-	// credited answers ride into the new attempt's score on the server, which
-	// remains the arbiter even if this list is stale. An author preview renders
-	// the quiz as shipped and ignores the author's own credits.
-	const creditedQuestions = createResource<string[]>({
-		url: 'lms.lms.doctype.lms_quiz.lms_quiz.get_quiz_credited_questions',
-		makeParams() {
-			return { quiz: props.quizName }
-		},
-		auto: true,
-	})
-
-	const creditedQuestionNames = computed<Set<string>>(
-		() => new Set(creditedQuestions.data || [])
-	)
-
-	// Every current question already credited: the retake has nothing to ask.
-	// Distinct from an empty quiz, which keeps its own "no questions" wording.
-	const allQuestionsCredited = computed(() => {
-		if (props.preview) return false
-		const rawCount = Array.isArray(quiz.data?.questions)
-			? quiz.data!.questions!.length
-			: 0
-		return (
-			rawCount > 0 &&
-			creditedQuestionNames.value.size > 0 &&
-			questions.value.length === 0
-		)
-	})
-
-	// Credits land after the quiz (two requests): rebuild the offered pool
-	// around them, and drop a restored draft's answers for questions this
-	// retake no longer asks. Mid-attempt the attempt stands as drawn — the
-	// server's merge still protects the score — so the shuffle the learner is
-	// sitting is not rewritten under them.
-	watch(
-		() => creditedQuestions.data,
-		() => {
-			if (!quiz.data) return
-			if (activeQuestion.value > 0 && !quizSubmission.data) return
-			populateQuestions()
-			const valid = new Set(questions.value.map((row) => row.question))
-			savedAnswers.value = savedAnswers.value.filter((answer) =>
-				valid.has(answer.question_name)
-			)
-			attemptedQuestions.value = questions.value.flatMap((q, index) =>
-				savedAnswers.value.some((answer) => answer.question_name === q.question)
-					? [index + 1]
-					: []
-			)
+const attempts = createResource<QuizAttempt[]>({
+	url: 'frappe.client.get_list',
+	makeParams() {
+		return {
+			doctype: 'LMS Quiz Submission',
+			filters: {
+				member: user.data?.name,
+				quiz: quiz.data?.name,
+			},
+			fields: [
+				'name',
+				'creation',
+				'score',
+				'score_out_of',
+				'percentage',
+				'passing_percentage',
+			],
+			order_by: 'creation desc',
 		}
-	)
+	},
+	transform(data: QuizAttempt[]) {
+		data.forEach((submission, index) => {
+			submission.creation = timeAgo(submission.creation)
+			submission.idx = index + 1
+		})
+	},
+})
 
+// --- Retake credit (#32) ----------------------------------------------------
+// The questions this learner has already credited on this quiz, across
+// earlier attempts. A retake offers only what was never credited; the
+// credited answers ride into the new attempt's score on the server, which
+// remains the arbiter even if this list is stale. An author preview renders
+// the quiz as shipped and ignores the author's own credits.
+const creditedQuestions = createResource<string[]>({
+	url: 'lms.lms.doctype.lms_quiz.lms_quiz.get_quiz_credited_questions',
+	makeParams() {
+		return { quiz: props.quizName }
+	},
+	auto: true,
+})
+
+const creditedQuestionNames = computed<Set<string>>(
+	() => new Set(creditedQuestions.data || [])
+)
+
+// --- F03 / round 7: the last attempt's saved composition ---------------------
+// On a reload of a fully credited quiz the retake pool is empty; the header
+// must describe the LAST attempt as it was actually sat (a series of partial
+// retakes covers fewer questions each round), not the quiz total. The
+// snapshot comes from the newest submission's saved result rows.
+const lastAttemptTypes = ref<string[]>([])
+
+const resolveLastAttemptTypes = async () => {
+	if (!quiz.data?.name || !user.data?.name || lastAttemptTypes.value.length) return
+	try {
+		// Independent of the attempts resource: that one loads only for
+		// attempt-LIMITED quizzes, and the reload scenario is exactly an
+		// unlimited quiz that was fully credited.
+		//
+		// The OFFERED POOL of the newest attempt is the header's truth
+		// (round 8): its saved result rows also carry the credited answers
+		// of earlier attempts, so the rows alone would describe the whole
+		// cumulative coverage instead of the last retake as it was sat.
+		const submissions = await call('frappe.client.get_list', {
+			doctype: 'LMS Quiz Submission',
+			filters: { member: user.data.name, quiz: quiz.data.name },
+			fields: ['name', 'question_pool'],
+			order_by: 'creation desc',
+			limit_page_length: 1,
+		})
+		const newest = submissions?.[0]
+		const pool = newest?.question_pool
+		if (typeof pool === 'string' && pool.trim()) {
+			const names = JSON.parse(pool)
+			const types = (Array.isArray(names) ? names : [])
+				.map((name) => questionsByName.value[name]?.type)
+				.filter(Boolean)
+			if (types.length) {
+				lastAttemptTypes.value = types
+				return
+			}
+		}
+		// Pre-pool submissions (or pool-less clients): the result rows are
+		// the best surviving witness of the attempt's coverage.
+		if (!newest?.name) return
+		const rows = await call('frappe.client.get_list', {
+			doctype: 'LMS Quiz Result',
+			filters: { parenttype: 'LMS Quiz Submission', parent: newest.name },
+			fields: ['question_type'],
+			limit_page_length: 0,
+		})
+		if (Array.isArray(rows) && rows.length) {
+			lastAttemptTypes.value = rows.map((row) => row.question_type).filter(Boolean)
+		}
+	} catch {
+		// A failed lookup falls back to the offered-pool wording.
+	}
+}
+
+watch(
+	() => [quiz.data?.name, creditedQuestionNames.value.size, questions.value.length] as const,
+	([name, credits, pool]) => {
+		if (name && credits > 0 && pool === 0) void resolveLastAttemptTypes()
+	},
+	{ immediate: true }
+)
+
+
+// Every current question already credited: the retake has nothing to ask.
+// Distinct from an empty quiz, which keeps its own "no questions" wording.
+const allQuestionsCredited = computed(() => {
+	if (props.preview) return false
+	const rawCount = Array.isArray(quiz.data?.questions)
+		? quiz.data!.questions!.length
+		: 0
+	return (
+		rawCount > 0 &&
+		creditedQuestionNames.value.size > 0 &&
+		questions.value.length === 0
+	)
+})
+
+// Credits land after the quiz (two requests): rebuild the offered pool
+// around them, and drop a restored draft's answers for questions this
+// retake no longer asks. Mid-attempt the attempt stands as drawn — the
+// server's merge still protects the score — so the shuffle the learner is
+// sitting is not rewritten under them.
+watch(
+	() => creditedQuestions.data,
+	() => {
+		if (!quiz.data) return
+		if (activeQuestion.value > 0 && !quizSubmission.data) return
+		populateQuestions()
+		const valid = new Set(questions.value.map((row) => row.question))
+		savedAnswers.value = savedAnswers.value.filter((answer) =>
+			valid.has(answer.question_name)
+		)
+		attemptedQuestions.value = questions.value.flatMap((q, index) =>
+			savedAnswers.value.some((answer) => answer.question_name === q.question)
+				? [index + 1]
+				: []
+		)
+	}
+)
 
 // --- Per-attempt report from the history table (#27) -----------------------
 // The table lists the current user's own submissions only (member filter),
@@ -1415,6 +1507,43 @@ const reportAttempt = ref<QuizAttempt | null>(null)
 const openAttemptReport = (attempt: QuizAttempt): void => {
 	reportAttempt.value = attempt
 }
+
+// B11/C05: the addressed attempt (the homework checklist's proof link). The
+// lookup is by name only -- read permissions are the server's business, and a
+// teacher following the link must find the STUDENT's submission, which a
+// current-user member filter would always hide. When nothing readable comes
+// back, the modal still mounts on a minimal stub so its own permission-checked
+// document load shows the standard error/retry UI instead of silently landing
+// on the plain quiz page.
+watch(
+	() => props.reportSubmission,
+	(submission) => {
+		if (!submission) return
+		call<QuizAttempt[]>('frappe.client.get_list', {
+			doctype: 'LMS Quiz Submission',
+			filters: {
+				name: submission,
+			},
+			fields: [
+				'name',
+				'creation',
+				'score',
+				'score_out_of',
+				'percentage',
+				'passing_percentage',
+			],
+		})
+			.then((rows) => {
+				reportAttempt.value = rows?.length
+					? rows[0]
+					: ({ name: submission } as QuizAttempt)
+			})
+			.catch(() => {
+				reportAttempt.value = { name: submission } as QuizAttempt
+			})
+	},
+	{ immediate: true }
+)
 
 // Correct answers in the report (owner decision #1088): staff always; the
 // attempt owner — which every listed row is — only when the quiz's «Show
@@ -2006,6 +2135,9 @@ const createSubmission = (reason: SubmissionReason = 'manual'): void => {
 				// retake offered from here asks only what remains (#32).
 				if (!props.preview) creditedQuestions.reload()
 				stopTimer()
+				// B11: the homework banner refreshes its live progress the moment
+				// the attempt is in. Preview submissions fire nothing.
+				if (!props.preview) emit('submitted')
 			},
 			onError(err: FrappeResourceError) {
 				const errorTitle = err?.message || ''

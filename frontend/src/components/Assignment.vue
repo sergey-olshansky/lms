@@ -289,7 +289,7 @@ import {
 } from 'frappe-ui'
 import type { FrappeResourceError } from 'frappe-ui'
 import { InputLabel } from 'frappe-ui/experimental'
-import { computed, inject, ref, shallowRef, useId, watch } from 'vue'
+import { computed, inject, nextTick, ref, shallowRef, useId, watch } from 'vue'
 import AssessmentCard from '@/components/Assessment/AssessmentCard.vue'
 import AssessmentCardHeader from '@/components/Assessment/AssessmentCardHeader.vue'
 import AssignmentUploadPrompt from '@/components/Assessment/AssignmentUploadPrompt.vue'
@@ -377,6 +377,12 @@ useKeyboardShortcuts({
 	],
 })
 
+// Fires once the assignment's own content is loaded AND rendered (B10): the
+// parent uses it to record a confirmed opening for homework purposes -- an
+// opening before this moment would credit a page whose material may never have
+// appeared (load error, 403, instant navigation away).
+const emit = defineEmits<{ displayed: [] }>()
+
 const assignment = createResource<AssignmentDetails>({
 	url: 'lms.lms.utils.get_assignment',
 	params: {
@@ -384,6 +390,7 @@ const assignment = createResource<AssignmentDetails>({
 	},
 	auto: true,
 	onSuccess() {
+		nextTick(() => emit('displayed'))
 		if (currentSubmission.value != 'new') {
 			submissionResource.value?.reload()
 		}

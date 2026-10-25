@@ -65,9 +65,12 @@ const emit = defineEmits(['select-lesson'])
 // Keep ?studentView=1 across lesson hops, or a moderator previewing the course
 // silently reverts to their own identity on the first sidebar click.
 const route = useRoute()
-const studentViewQuery = computed(() =>
-	route.query.studentView === '1' ? { studentView: 1 } : undefined
-)
+const studentViewQuery = computed(() => {
+	const query = {}
+	if (route.query.studentView === '1') query.studentView = 1
+	if (typeof route.query.hw === 'string') query.hw = route.query.hw
+	return Object.keys(query).length ? query : undefined
+})
 
 const outline = createResource({
 	url: 'lms.lms.utils.get_course_outline',

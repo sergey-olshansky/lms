@@ -22,6 +22,7 @@ const resourceState = vi.hoisted(() => ({
 	// Question names the learner has already credited (#32); the retake pool
 	// is the quiz's questions minus these.
 	creditedQuestions: [] as string[],
+	callHandler: null as ((args: unknown[]) => unknown) | null,
 	// Submission docs keyed by name for frappe.client.get, the shape
 	// frappe.client.get returns: the graded rows ride in `result`.
 	submissionDocs: {} as Record<string, any>,
@@ -141,7 +142,7 @@ vi.mock('frappe-ui', async () => {
 
 	return {
 		createResource,
-		call: vi.fn(),
+		call: vi.fn((...args: unknown[]) => resourceState.callHandler?.(args)),
 		toast: { warning: vi.fn(), error: vi.fn() },
 		Button: {
 			props: { disabled: { type: Boolean, default: false } },
@@ -297,6 +298,7 @@ beforeEach(() => {
 	resourceState.attempts = []
 	resourceState.correctAnswers = {}
 	resourceState.creditedQuestions = []
+	resourceState.callHandler = null
 	resourceState.submissionDocs = {}
 	resourceState.submitResponse = null
 	resourceState.submitError = null
@@ -304,6 +306,45 @@ beforeEach(() => {
 })
 
 describe('Quiz remount', () => {
+	// Round 7 / F03: on a reload of a fully credited quiz the retake pool is
+	// empty; the header must describe the LAST attempt as it was sat (its
+	// saved result rows), never "0 questions" and never the quiz total --
+	// a series of partial retakes covers fewer questions each round.
+	it('describes the last saved attempt after a reload of a fully credited quiz', async () => {
+		resourceState.creditedQuestions = ['Q1', 'DELETED']
+		resourceState.attempts = [
+			{ name: 'SUBM-9', creation: '2026-10-22 10:00:00', score: 1, score_out_of: 1, percentage: 100, passing_percentage: 70 },
+		]
+		// The REAL retake shape (round 8): the newest submission was OFFERED
+		// one question, but its saved result rows carry the credited answers
+		// of earlier attempts -- two rows. The header must follow the pool.
+		resourceState.callHandler = (args) => {
+			const [method, params] = args as [
+				string,
+				{ doctype: string; filters?: { parent?: string } },
+			]
+			if (method !== 'frappe.client.get_list') return undefined
+			if (params?.doctype === 'LMS Quiz Submission') {
+				return [{ name: 'SUBM-9', question_pool: JSON.stringify(['Q1']) }]
+			}
+			if (
+				params?.doctype === 'LMS Quiz Result' &&
+				params?.filters?.parent === 'SUBM-9'
+			) {
+				return [{ question_type: 'Choices' }, { question_type: 'Open Ended' }]
+			}
+			return undefined
+		}
+		const wrapper = mountQuiz()
+		await flushPromises()
+		await flushPromises()
+		await flushPromises()
+		expect(wrapper.text()).toContain('1 question')
+		expect(wrapper.text()).not.toContain('0 questions')
+		expect(wrapper.text()).not.toContain('2 questions')
+		wrapper.unmount()
+	})
+
 	it('restores valid questions without extra requests after remounting the same quiz', async () => {
 		const first = mountQuiz()
 		await flushPromises()

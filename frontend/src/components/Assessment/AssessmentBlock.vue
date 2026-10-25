@@ -19,6 +19,7 @@ import type { Component } from 'vue'
 import { Button } from 'frappe-ui'
 import { provideStudentView } from '@/composables/useStudentView'
 import type { UserResource } from '@/composables/useStudentView'
+import { redirectToLogin } from '@/utils/loginReturn'
 
 // Not named `props`: the template's `props` is the prop of that name.
 const blockProps = withDefaults(
@@ -35,7 +36,4 @@ const { mockedUser: user } = provideStudentView(
 	() => blockProps.studentView
 )
 
-const redirectToLogin = (): void => {
-	window.location.href = '/login'
-}
 </script>

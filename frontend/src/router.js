@@ -54,7 +54,17 @@ export async function guardNavigation(to, from, next) {
 
 		await settings.promise
 		if (!settings.data.allow_guest_access) {
-			window.location.href = '/login'
+			// E01: the FULL current address -- base path, route, query and hash
+			// -- rides along as `redirect-to`, so a deep link (a homework
+			// card, a nested lesson, a quiz report) opens again exactly as it
+			// was after the login instead of stranding the user on the home
+			// page. Frappe's login page sanitizes the value server-side (same
+			// host or a plain path only), so this can never become an open
+			// redirect; `to.fullPath` is router-relative, so the app's base
+			// path is re-attached here rather than read from the URL bar.
+			const basePath = getLmsBasePath()
+			const fullPath = `${basePath ? `/${basePath}` : ''}${to.fullPath}`
+			window.location.href = `/login?redirect-to=${encodeURIComponent(fullPath)}`
 			return
 		}
 	}

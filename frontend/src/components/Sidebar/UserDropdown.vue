@@ -23,6 +23,7 @@ import FrappeCloudIcon from '@/components/Icons/FrappeCloudIcon.vue'
 import SettingsModal from '@/components/Settings/Settings.vue'
 import { openExternal } from '@/utils/openExternal'
 import { pushSettingsHash } from '@/composables/useSettingsHash'
+import { redirectToLogin } from '@/utils/loginReturn'
 
 const router = useRouter()
 const { logout, branding } = sessionStore()
@@ -193,7 +194,7 @@ const userDropdownOptions = computed(() => {
 					icon: 'lucide-log-in',
 					label: __('Log in'),
 					onClick: () => {
-						window.location.href = '/login'
+						redirectToLogin()
 					},
 					condition: () => {
 						return !isLoggedIn

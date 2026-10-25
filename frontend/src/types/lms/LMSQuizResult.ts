@@ -21,4 +21,6 @@ export interface LMSQuizResult {
 	marks?: number
 	/**	Marks out of : Int	*/
 	marks_out_of?: number
+	/**	Graded : Check	*/
+	graded?: 0 | 1
 }

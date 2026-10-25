@@ -30,9 +30,9 @@ from lms.lms.permissions import (
 from lms.lms.utils import (
 	get_course_progress,
 	get_editorjs_blocks,
+	get_ordered_lesson_rows,
 	guest_access_allowed,
 	is_demo_course,
-	get_ordered_lesson_rows,
 	moderators_among,
 	recalculate_course_progress,
 	sanitize_editorjs,
@@ -123,6 +123,96 @@ def cleanup_lesson_backreferences(lesson: str):
 	frappe.db.set_value("LMS Quiz", {"lesson": lesson}, "lesson", None)
 	frappe.db.set_value("LMS Enrollment", {"current_lesson": lesson}, "current_lesson", None)
 	frappe.db.set_value("LMS Assignment Submission", {"lesson": lesson}, "lesson", None)
+
+	# Homework snapshots are frozen history (task #35 spec 8.2): the row stays,
+	# readable by its label and path, and reads Unavailable once its material is
+	# gone -- the machine link is cleared so the deletion is not blocked, the
+	# same stance the graded-work rows above take. Only the rows whose material
+	# IS the lesson flip to Unavailable: an embedded quiz row's material is its
+	# quiz, which survives the lesson. Counters follow in the same breath so no
+	# card keeps a stale "done" over a deleted lesson.
+	# Template compositions are editable by design: a source whose material is
+	# gone simply leaves the template (the teacher re-picks); only the issued
+	# snapshots keep their frozen rows.
+	for source_row in frappe.get_all(
+		"LMS Homework Source",
+		{"parenttype": "LMS Homework", "lesson": lesson},
+		pluck="name",
+	):
+		frappe.delete_doc("LMS Homework Source", source_row, ignore_permissions=True)
+	# A RECALLED assignment is doubly frozen (D04): its progress, proofs and
+	# counters are history no later course event may rewrite, so only the live
+	# Link is lifted off its rows -- the immutable lesson_snapshot set first
+	# keeps the original identity -- and nothing else about them changes.
+	# Active assignments read the deletion: their Open Lesson rows go
+	# Unavailable and the counters follow in the same breath, so no live card
+	# keeps a stale "done" over a deleted lesson.
+	snapshot_rows = frappe.get_all(
+		"LMS Homework Requirement",
+		{
+			"parenttype": "LMS Homework Assignment",
+			"lesson": lesson,
+		},
+		["name", "parent", "requirement_type"],
+	)
+	if snapshot_rows:
+		row_names = [row.name for row in snapshot_rows]
+		# The frozen identity first (D04), for every row regardless of its
+		# parent's fate: rows issued before the snapshot column carry it set
+		# right here, and clearing the live link below never loses it.
+		frappe.db.set_value(
+			"LMS Homework Requirement",
+			{"name": ("in", row_names)},
+			"lesson_snapshot",
+			lesson,
+			update_modified=False,
+		)
+		cancelled_parents = set(
+			frappe.get_all(
+				"LMS Homework Assignment",
+				{"name": ("in", {row.parent for row in snapshot_rows}), "cancelled": 1},
+				pluck="name",
+			)
+		)
+		for row in snapshot_rows:
+			frappe.db.set_value("LMS Homework Requirement", row.name, "lesson", None)
+			if row.parent in cancelled_parents:
+				continue
+			if row.requirement_type == "Open Lesson":
+				frappe.db.set_value(
+					"LMS Homework Requirement",
+					row.name,
+					{
+						"status": "Unavailable",
+						"completed_at": None,
+						"proof_type": None,
+						"proof_name": None,
+					},
+				)
+		checkable = ("Open Lesson", "Pass Quiz", "Open Assignment")
+		completed = ("Completed", "Completed Earlier")
+		for name in {row.parent for row in snapshot_rows if row.parent not in cancelled_parents}:
+			rows = frappe.get_all(
+				"LMS Homework Requirement",
+				filters={"parent": name, "parenttype": "LMS Homework Assignment"},
+				fields=["requirement_type", "status"],
+			)
+			rows = [row for row in rows if row.requirement_type in checkable]
+			frappe.db.set_value(
+				"LMS Homework Assignment",
+				name,
+				{
+					"total_requirements": len(rows),
+					"completed_requirements": sum(1 for row in rows if row.status in completed),
+					"lessons_total": sum(1 for row in rows if row.requirement_type == "Open Lesson"),
+					"quizzes_total": sum(1 for row in rows if row.requirement_type == "Pass Quiz"),
+					"quizzes_completed": sum(
+						1
+						for row in rows
+						if row.requirement_type == "Pass Quiz" and row.status in completed
+					),
+				},
+			)
 
 
 def has_permission(doc, ptype="read", user=None):

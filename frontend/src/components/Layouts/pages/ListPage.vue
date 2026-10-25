@@ -4,6 +4,7 @@
 			<slot name="actions" />
 		</template>
 	</PageHeader>
+	<slot name="after-header" />
 
 	<PageBody :title="title" :selecting="selecting">
 		<template v-if="$slots.name" #name>
@@ -68,7 +69,7 @@
 			</template>
 		</ResponsiveListView>
 		<div v-else class="flex-1">
-			<EmptyStateLayout :name="emptyName" :icon="emptyIcon" />
+			<slot name="empty"><EmptyStateLayout :name="emptyName" :icon="emptyIcon" /></slot>
 		</div>
 
 		<template #footer>

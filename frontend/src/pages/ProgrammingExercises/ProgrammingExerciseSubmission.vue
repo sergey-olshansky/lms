@@ -104,6 +104,7 @@ import type { ExerciseLanguage } from '@/types'
 // @ts-expect-error utils/dialogs.js has no type declarations yet
 import { createDialog } from '@/utils/dialogs'
 
+import { redirectToLogin } from '@/utils/loginReturn'
 type Exercise = {
 	name: string
 	title: string
@@ -369,7 +370,7 @@ const checkIfUserIsPermitted = (doc: any = null) => {
 		const redirectPath = getLmsRoute(
 			`programming-exercise-submission/${props.exerciseID}/${props.submissionID}`
 		)
-		window.location.href = `/login?redirect-to=${redirectPath}`
+		redirectToLogin()
 	}
 
 	if (!doc) return

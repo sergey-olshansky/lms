@@ -17,7 +17,7 @@ export interface NavLink {
 export const PRIMARY_LABELS: readonly string[] = [
 	'Home',
 	'Courses',
-	'Batches',
+	'Homework workspace',
 	'Programs',
 ]
 
@@ -78,6 +78,7 @@ const SECTION_MAP: Record<string, readonly string[]> = {
 		'Quizzes',
 		'Assignments',
 		'Programming Exercises',
+		'Homework workspace',
 	],
 	DISCOVER: ['Jobs', 'Statistics'],
 }
@@ -178,11 +179,12 @@ export function pickPrimaryTabs(
 		// survives, because it leaves the SPA for Frappe's own /login and is the
 		// one thing such a visitor can still do.
 		if (isGuestAccessRevoked(visibility))
-		return GUEST_TABS.filter((tab) => !tab.to && !isSidebarItemHidden(tab.label))
+			return GUEST_TABS.filter(
+				(tab) => !tab.to && !isSidebarItemHidden(tab.label)
+			)
 		return GUEST_TABS.filter(
 			(tab) =>
-				!isSidebarItemHidden(tab.label) &&
-				isLinkEnabled(tab.label, visibility)
+				!isSidebarItemHidden(tab.label) && isLinkEnabled(tab.label, visibility)
 		)
 	}
 

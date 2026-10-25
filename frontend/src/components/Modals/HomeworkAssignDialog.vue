@@ -1,0 +1,288 @@
+<template>
+	<Dialog
+		:open="open"
+		:title="__('Assign homework')"
+		size="lg"
+		@update:open="(value) => (value ? null : emit('cancel'))"
+	>
+		<template #default>
+			<div
+				v-if="open"
+				class="space-y-4 text-base"
+				data-testid="homework-assign-dialog"
+			>
+				<div
+					v-if="homeworkDoc.data"
+					class="rounded-4 bg-surface-gray-1 p-3 text-sm"
+				>
+					<p class="font-medium text-ink-gray-9">
+						{{ homeworkDoc.data.title }}
+					</p>
+					<p class="mt-1 text-ink-gray-6" data-testid="assign-composition">
+						{{
+							__('{0} lessons · {1} quizzes').format(
+								String(composition.lessons),
+								String(composition.quizzes)
+							)
+						}}
+					</p>
+					<!-- F01: the count includes the chosen lessons' mandatory
+					     embedded quizzes -- say so when no quiz was picked
+					     standalone, so the number is never a surprise. -->
+					<p v-if="includesEmbedded" class="mt-0.5 text-xs text-ink-gray-5">
+						{{ __('Choosing a lesson includes its mandatory quizzes.') }}
+					</p>
+				</div>
+
+				<HomeworkStudentPicker v-model="student" />
+
+				<FormControl
+					type="number"
+					v-model="days"
+					:min="1"
+					:label="__('For how many days')"
+					:required="true"
+				/>
+
+				<p v-if="dueLabel" class="text-sm text-ink-gray-6">
+					{{ __('Due') }}:
+					<span class="text-ink-gray-9">{{ dueLabel }}</span>
+					<span v-if="dueZone" class="text-xs">({{ dueZone }})</span>
+				</p>
+
+				<div
+					v-if="
+						precheck.data &&
+						precheck.data.reasons &&
+						precheck.data.reasons.length
+					"
+					class="space-y-1 rounded-4 border border-outline-red-2 bg-surface-red-1 p-3 text-sm text-ink-red-5"
+					data-testid="assign-block-reasons"
+				>
+					<p v-for="(reason, index) in precheck.data.reasons" :key="index">
+						{{ reason }}
+					</p>
+					<p class="text-xs">
+						{{
+							__(
+								'Grant the student access to the course first, or change the composition.'
+							)
+						}}
+					</p>
+					<!-- Spec 4: the block comes with a way into the app's own access
+					management, not just the reason in prose. -->
+					<p
+						v-if="
+							precheck.data.missing_courses &&
+							precheck.data.missing_courses.length
+						"
+						class="flex flex-wrap gap-2 text-xs"
+					>
+						<router-link
+							v-for="courseName in precheck.data.missing_courses"
+							:key="courseName"
+							:to="{ name: 'CourseDetail', params: { courseName } }"
+							class="underline"
+							data-testid="assign-missing-course-link"
+						>
+							{{ courseName }}
+						</router-link>
+					</p>
+				</div>
+
+				<div
+					v-if="precheck.data && precheck.data.already_active"
+					class="space-y-1 rounded-4 border border-outline-gray-2 bg-surface-gray-1 p-3 text-sm"
+					data-testid="assign-already-active"
+				>
+					<p>
+						{{
+							__(
+								'This student already has an active assignment of this homework.'
+							)
+						}}
+					</p>
+					<router-link
+						:to="{
+							name: 'HomeworkDetail',
+							params: { assignmentID: precheck.data.already_active },
+						}"
+						class="underline"
+					>
+						{{ __('Open it') }}
+					</router-link>
+				</div>
+			</div>
+		</template>
+		<template #actions>
+			<div class="flex items-center justify-end gap-2">
+				<Button variant="subtle" @click="emit('cancel')">{{
+					__('Cancel')
+				}}</Button>
+				<Button
+					v-if="confirmExtra"
+					variant="solid"
+					:loading="assigning"
+					@click="assign(true)"
+					data-testid="assign-confirm-extra"
+				>
+					{{ __('Assign anyway') }}
+				</Button>
+				<Button
+					v-else
+					variant="solid"
+					:disabled="!student || blocked || precheck.loading"
+					:loading="assigning"
+					@click="assign(false)"
+					data-testid="assign-confirm"
+				>
+					{{ __('Assign to student') }}
+				</Button>
+			</div>
+		</template>
+	</Dialog>
+</template>
+
+<script setup>
+// The assign dialog (spec 4): composition summary, student search, an editable
+// number of days with the computed due date/time in the site timezone, the
+// blocking reasons when access or locks refuse the composition (A10), and the
+// already-active flow that ends in a deliberate second issue (A11).
+import { Button, Dialog, FormControl, createResource, toast } from 'frappe-ui'
+import { computed, ref, watch } from 'vue'
+import HomeworkStudentPicker from '@/components/HomeworkStudentPicker.vue'
+import { resourceErrorMessage } from '@/utils/resource'
+import { siteWallClock, siteZoneLabel } from '@/utils/dueDate'
+
+const props = defineProps({
+	open: { type: Boolean, default: false },
+	homework: { type: String, default: '' },
+	presetDays: { type: Number, default: 7 },
+	presetStudent: { type: String, default: '' },
+})
+const emit = defineEmits(['done', 'cancel'])
+
+const student = ref('')
+const days = ref(props.presetDays || 7)
+const confirmExtra = ref(false)
+const assigning = ref(false)
+
+const homeworkDoc = createResource({
+	url: 'lms.lms.homework_api.get_homework',
+	makeParams: () => ({ name: props.homework }),
+})
+
+// F01: the CANONICAL server summary -- the same numbers the library shows
+// and the issue snapshot expands. A chosen lesson carries its mandatory
+// embedded quizzes, so the dialog must never count bare quiz picks only.
+const composition = computed(() => ({
+	lessons: homeworkDoc.data?.counts?.lessons ?? 0,
+	quizzes: homeworkDoc.data?.counts?.quizzes ?? 0,
+	assignments: homeworkDoc.data?.counts?.assignments ?? 0,
+}))
+
+// The hint a teacher needs when the quiz count is not what the picker seemed
+// to say: choosing a lesson includes its mandatory activities.
+const includesEmbedded = computed(
+	() =>
+		(composition.value.quizzes || 0) > 0 &&
+		(homeworkDoc.data?.items || []).every((item) => item.source_type !== 'Quiz')
+)
+
+const precheck = createResource({
+	url: 'lms.lms.homework_api.precheck_assignment',
+	makeParams: () => ({
+		homework: props.homework,
+		student: student.value,
+		days: Number(days.value),
+	}),
+})
+
+const blocked = computed(
+	() =>
+		Boolean(
+			precheck.data && precheck.data.reasons && precheck.data.reasons.length
+		) || Boolean(precheck.data?.archived)
+)
+
+// The deadline renders in the site's timezone with its offset named (spec 4.1,
+// U01): the shared dueDate helper reads both straight from the server's
+// offset-bearing ISO -- never from the browser's zone.
+const dueLabel = computed(() => siteWallClock(precheck.data?.due_at || ''))
+
+const dueZone = computed(() => siteZoneLabel(precheck.data?.due_at || ''))
+
+watch(
+	() => props.open,
+	(isOpen) => {
+		if (!isOpen) return
+		student.value = props.presetStudent || ''
+		days.value = props.presetDays || 7
+		confirmExtra.value = false
+		precheck.data = null
+		// B05: ONE key per logical operation, minted when the dialog opens and
+		// pinned until the dialog closes -- for the base issue AND for the
+		// confirmed extra issue alike. The base call in the already-active
+		// flow creates nothing, so it never consumes the key; every retry of
+		// an uncertain (timed-out) request therefore reuses it and the server
+		// returns the same card instead of issuing a second one.
+		operationKey.value = mintKey()
+		if (props.homework) homeworkDoc.reload()
+	}
+)
+
+const mintKey = () =>
+	crypto.randomUUID ? crypto.randomUUID() : `hw-${Date.now()}-${Math.random()}`
+
+const operationKey = ref('')
+
+watch([student, days], () => {
+	if (props.open && student.value) precheck.reload()
+})
+
+const assign = async (force) => {
+	if (assigning.value) return
+	assigning.value = true
+	// B05: the pinned operation key. `force` is not a new operation -- it is the
+	// confirmation step of this same dialog's issue, so it reuses the key; a
+	// retry after a timeout reuses it too. The server verifies the key's
+	// parameters and refuses loudly if the request no longer matches.
+	const key = operationKey.value || (operationKey.value = mintKey())
+	try {
+		const result = await assignCall(force, key)
+		if (result && result.already_active && !force) {
+			confirmExtra.value = true
+			toast.info(
+				__(
+					'This student already has this homework. Confirm to assign an extra copy.'
+				)
+			)
+			assigning.value = false
+			return
+		}
+		toast.success(__('Homework assigned'))
+		emit('done', result)
+	} catch (err) {
+		toast.error(resourceErrorMessage(err, __('Error')))
+		console.error(err)
+	}
+	assigning.value = false
+}
+
+const assignCall = (force, key) =>
+	new Promise((resolve, reject) => {
+		createResource({
+			url: 'lms.lms.homework_api.assign_homework',
+			params: {
+				homework: props.homework,
+				student: student.value,
+				days: Number(days.value),
+				idempotency_key: key,
+				force,
+			},
+			auto: true,
+			onSuccess: resolve,
+			onError: reject,
+		})
+	})
+</script>

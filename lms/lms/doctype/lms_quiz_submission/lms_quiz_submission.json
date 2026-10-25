@@ -20,7 +20,8 @@
   "section_break_6",
   "result",
   "violation_count",
-  "submission_reason"
+  "submission_reason",
+  "question_pool"
  ],
  "fields": [
   {
@@ -125,6 +126,13 @@
    "fieldname": "submission_reason",
    "fieldtype": "Data",
    "label": "Submission Reason"
+  },
+  {
+   "fieldname": "question_pool",
+   "fieldtype": "JSON",
+   "label": "Question Pool",
+   "read_only": 1,
+   "description": "The question names this attempt was OFFERED (task #35 F03): excludes carried credited answers, so the finished attempt's header describes the attempt as it was sat."
   }
  ],
  "grid_page_length": 50,

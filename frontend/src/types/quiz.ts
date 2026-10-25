@@ -73,7 +73,9 @@ export interface QuizSubmissionResult {
 /** A child row of a submission's result table, the shape `frappe.client.get`
  * returns it in. `is_correct` is binary: 1 marks a fully correct answer;
  * `answer` is the learner's own response ("" once the server normalised a
- * skipped question), never a correct answer or key. */
+ * skipped question), never a correct answer or key. `graded` records a final
+ * verdict on an open answer (task #35): without it, a pending mark and a
+ * deliberate zero are numerically identical in the database. */
 export interface QuizResultRow {
 	name: string
 	parent: string
@@ -84,6 +86,7 @@ export interface QuizResultRow {
 	answer?: string | null
 	marks?: number
 	marks_out_of?: number
+	graded?: 0 | 1
 }
 
 /** The verdict of one graded row of an attempt (#27), as the per-attempt

@@ -119,6 +119,7 @@ import {
 } from '@/utils'
 import { formatTimezone, nextOccurrence } from '@/utils/timezone'
 import VideoPreview from '@/components/VideoPreview.vue'
+import { redirectToLogin } from '@/utils/loginReturn'
 
 const user = inject('$user')
 const readOnlyMode = window.read_only_mode
@@ -141,7 +142,7 @@ const enroll = createResource({
 
 const enrollInBatch = () => {
 	if (!user.data) {
-		window.location.href = `/login?redirect-to=/batches/${props.batch.data.name}`
+		redirectToLogin()
 		return
 	}
 	enroll.submit(

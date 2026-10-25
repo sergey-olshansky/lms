@@ -13,6 +13,7 @@
   "column_break_flus",
   "marks",
   "marks_out_of",
+  "graded",
   "is_correct"
  ],
  "fields": [
@@ -69,6 +70,13 @@
    "in_list_view": 1,
    "label": "Marks out of",
    "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "A verdict exists for this answer. Open-ended rows start ungraded: their Int marks already read 0 before grading (task #35, C01), so this flag is what tells a final zero from an answer nobody judged.",
+   "fieldname": "graded",
+   "fieldtype": "Check",
+   "label": "Graded"
   }
  ],
  "index_web_pages_for_search": 1,
