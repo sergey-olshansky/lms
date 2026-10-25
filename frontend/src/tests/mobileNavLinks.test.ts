@@ -5,19 +5,15 @@
  * test at all; it moved to a module-level store when the You page needed the
  * same links. What is pinned here is the part that is order-dependent and easy
  * to break silently: the admin's visibility flags are applied *last*, to
- * everything that ends up in either list, the moderator extras and session
- * actions land in `otherLinks` rather than on the bar, and a learner costs one
- * `get_programs` call while a moderator costs none.
+ * everything that ends up in either list, and moderator extras plus session
+ * actions land in `otherLinks` rather than on the bar.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { call, getSidebarLinks, settings } = vi.hoisted(() => ({
-	call: vi.fn(),
+const { getSidebarLinks, settings } = vi.hoisted(() => ({
 	getSidebarLinks: vi.fn(),
 	settings: { data: undefined as unknown },
 }))
-
-vi.mock('frappe-ui', () => ({ call }))
 
 vi.mock('@/utils', () => ({ getSidebarLinks }))
 
@@ -64,7 +60,6 @@ beforeEach(() => {
 	otherLinks.value = []
 	settings.data = {}
 	getSidebarLinks.mockReturnValue(structuredClone(SIDEBAR))
-	call.mockResolvedValue({ enrolled: [], published: [] })
 })
 
 describe('loadMobileNavLinks', () => {
@@ -88,45 +83,7 @@ describe('loadMobileNavLinks', () => {
 		expect(labels(otherLinks)).toEqual([])
 	})
 
-	it('adds Programs next to Courses for a moderator, without asking', async () => {
-		await loadMobileNavLinks(MODERATOR)
-		expect(labels(sidebarLinks)).toEqual([
-			'Home',
-			'Programs',
-			'Courses',
-			'Batches',
-			'Jobs',
-		])
-		expect(call).not.toHaveBeenCalled()
-	})
-
-	it('asks once whether a learner can reach a program', async () => {
-		await loadMobileNavLinks(LEARNER)
-		expect(call).toHaveBeenCalledTimes(1)
-		expect(call).toHaveBeenCalledWith('lms.lms.utils.get_programs')
-		expect(labels(sidebarLinks)).not.toContain('Programs')
-	})
-
-	it('adds Programs for a learner who is enrolled in one', async () => {
-		call.mockResolvedValue({ enrolled: [{ name: 'p1' }], published: [] })
-		await loadMobileNavLinks(LEARNER)
-		expect(labels(sidebarLinks)).toContain('Programs')
-	})
-
-	it('does not offer Programs to a signed-out visitor', async () => {
-		await loadMobileNavLinks(GUEST)
-		expect(labels(sidebarLinks)).not.toContain('Programs')
-		expect(call).not.toHaveBeenCalled()
-	})
-
-	it('drops Programs when the admin has switched it off', async () => {
-		// The filter runs after everything is in the lists, so a spliced-in link
-		// is subject to it too. It used to run first, which let `addPrograms` put
-		// the link straight back and left a phone showing a destination the
-		// desktop sidebar had already dropped. `get_sidebar_settings` sends no
-		// `programs` flag today, so this is the ordering under test, not a
-		// setting anyone can reach.
-		settings.data = { programs: 0 }
+	it('does not add Programs to the mobile navigation', async () => {
 		await loadMobileNavLinks(MODERATOR)
 		expect(labels(sidebarLinks)).not.toContain('Programs')
 	})
@@ -135,7 +92,6 @@ describe('loadMobileNavLinks', () => {
 		await loadMobileNavLinks(MODERATOR)
 		expect(labels(otherLinks)).toEqual([
 			'Quizzes',
-			'Assignments',
 			'Programming Exercises',
 			'Notifications',
 			'Profile',
@@ -171,6 +127,6 @@ describe('loadMobileNavLinks', () => {
 		await loadMobileNavLinks(MODERATOR)
 		await loadMobileNavLinks(MODERATOR)
 		expect(labels(otherLinks).filter((l) => l === 'Quizzes')).toHaveLength(1)
-		expect(labels(sidebarLinks).filter((l) => l === 'Programs')).toHaveLength(1)
+		expect(labels(sidebarLinks).filter((l) => l === 'Courses')).toHaveLength(1)
 	})
 })

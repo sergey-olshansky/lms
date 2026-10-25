@@ -476,15 +476,29 @@ class TestRound5NewFeatures(B, IntegrationTestCase):
 		self.assertEqual(file_row.is_private, 1)
 		self.assertEqual(file_row.attached_to_doctype, "LMS Homework Attachment")
 
-	def test_E03_wrong_extension_refused_and_cleaned(self):
+	def test_E03_supported_types_accepted_renamed_container_refused(self):
+		# Common document and image types are accepted. A KNOWN container that
+		# does not match its bytes is refused and cleaned (R09).
 		file_doc = self._upload_private_file(self.student.name)
-		frappe.db.set_value("File", file_doc.name, "file_name", "payload.html")
+		frappe.db.set_value("File", file_doc.name, "file_name", "notes.txt")
 		frappe.set_user(self.student.name)
+		result = homework_attachments.attach_file(
+			assignment=self.assignment, file_name=file_doc.name
+		)
+		self.assertTrue(result["name"])
+		self.assertTrue(
+			(frappe.db.get_value("File", file_doc.name, "file_url") or "").startswith(
+				"/private/files/"
+			)
+		)
+
+		renamed = self._upload_private_file(self.student.name)
+		frappe.db.set_value("File", renamed.name, "file_name", "fake.png")
 		with self.assertRaises(frappe.ValidationError):
 			homework_attachments.attach_file(
-				assignment=self.assignment, file_name=file_doc.name
+				assignment=self.assignment, file_name=renamed.name
 			)
-		self.assertFalse(frappe.db.exists("File", file_doc.name))
+		self.assertFalse(frappe.db.exists("File", renamed.name))
 
 	def test_E03_teacher_reads_student_cannot_mutate(self):
 		file_doc = self._upload_private_file(self.student.name)

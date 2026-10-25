@@ -498,7 +498,7 @@ const getSidebarItems = (forMobile = false) => {
 
 	return [
 		{
-			label: 'General',
+			label: 'Main',
 			hideLabel: true,
 			items: [
 				{
@@ -511,58 +511,10 @@ const getSidebarItems = (forMobile = false) => {
 					},
 				},
 				{
-					label: 'Search',
-					icon: 'Search',
-					action: 'commandPalette',
-					shortcut: 'Mod+K',
-					condition: () => {
-						return !forMobile && userResource?.data
-					},
-				},
-				{
-					label: 'Notifications',
-					icon: 'Bell',
-					panel: 'notifications',
-					condition: () => {
-						return !forMobile && userResource?.data
-					},
-				},
-			],
-		},
-		{
-			label: 'Learning',
-			hideLabel: true,
-			items: [
-				{
 					label: 'Courses',
 					icon: 'BookOpen',
 					to: 'Courses',
 					activeFor: ['Courses', 'CourseDetail', 'Lesson'],
-				},
-				{
-					label: 'Programs',
-					icon: 'Route',
-					to: 'Programs',
-					activeFor: ['Programs', 'ProgramDetail'],
-					await: true,
-					condition: () => {
-						return checkIfCanAddProgram(forMobile)
-					},
-				},
-				{
-					label: 'Batches',
-					icon: 'Users',
-					to: 'Batches',
-					activeFor: ['Batches', 'BatchDetail', 'Batch', 'BatchForm'],
-				},
-				{
-					label: 'Certifications',
-					icon: 'GraduationCap',
-					to: 'CertifiedParticipants',
-					activeFor: ['CertifiedParticipants'],
-					condition: () => {
-						return userResource?.data
-					},
 				},
 				{
 					// One workspace: teachers create/issue work and inspect progress
@@ -575,6 +527,38 @@ const getSidebarItems = (forMobile = false) => {
 					condition: () => {
 						return userResource?.data
 					},
+				},
+			],
+		},
+		{
+			label: 'More',
+			hideLabel: true,
+			items: [
+				{
+					label: 'Search',
+					icon: 'Search',
+					action: 'commandPalette',
+					shortcut: 'Mod+K',
+					condition: () => !forMobile && userResource?.data,
+				},
+				{
+					label: 'Notifications',
+					icon: 'Bell',
+					panel: 'notifications',
+					condition: () => !forMobile && userResource?.data,
+				},
+				{
+					label: 'Batches',
+					icon: 'Users',
+					to: 'Batches',
+					activeFor: ['Batches', 'BatchDetail', 'Batch', 'BatchForm'],
+				},
+				{
+					label: 'Certifications',
+					icon: 'GraduationCap',
+					to: 'CertifiedParticipants',
+					activeFor: ['CertifiedParticipants'],
+					condition: () => userResource?.data,
 				},
 				{
 					label: 'Jobs',
@@ -603,12 +587,6 @@ const getSidebarItems = (forMobile = false) => {
 						)
 					},
 				},
-			],
-		},
-		{
-			label: 'Assessments',
-			hideLabel: true,
-			items: [
 				{
 					label: 'Quizzes',
 					icon: 'CircleHelp',
@@ -627,25 +605,10 @@ const getSidebarItems = (forMobile = false) => {
 					],
 				},
 				{
-					label: 'Assignments',
-					icon: 'Pencil',
-					to: 'Assignments',
-					condition: () => {
-						return !forMobile && isAdmin()
-					},
-					activeFor: [
-						'Assignments',
-						'AssignmentSubmissions',
-						'AssignmentSubmission',
-					],
-				},
-				{
 					label: 'Programming Exercises',
 					icon: 'Code',
 					to: 'ProgrammingExercises',
-					condition: () => {
-						return !forMobile && isAdmin()
-					},
+					condition: () => !forMobile && isAdmin(),
 					activeFor: [
 						'ProgrammingExercises',
 						'ProgrammingExerciseSubmissions',
@@ -663,20 +626,6 @@ const isAdmin = () => {
 		userResource?.data?.is_instructor ||
 		userResource?.data?.is_moderator ||
 		userResource.data?.is_evaluator
-	)
-}
-
-const checkIfCanAddProgram = (forMobile = false) => {
-	const { userResource } = usersStore()
-	const { programs } = useSettings()
-	if (!userResource.data) return false
-	if (forMobile) return false
-	if (userResource?.data?.is_moderator || userResource?.data?.is_instructor) {
-		return true
-	}
-	return (
-		programs.data?.enrolled.length > 0 ||
-		programs.data?.published.length > 0
 	)
 }
 

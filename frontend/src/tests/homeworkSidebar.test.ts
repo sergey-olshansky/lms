@@ -17,10 +17,9 @@ const { userResource, settingsStore } = vi.hoisted(() => ({
 	userResource: {
 		data: { name: 'user@example.com', is_instructor: 0, is_moderator: 0 },
 	},
-	// The app destructures both `settings` and `programs` out of this store.
+	// The app reads settings and sidebar visibility from this store.
 	settingsStore: {
 		settings: { data: {} },
-		programs: { data: { enrolled: [], published: [] } },
 		sidebarSettings: { data: null },
 		loadSidebarSettings: async () => {
 			settingsStore.sidebarSettings.data = { sidebar_rows: [] }
@@ -32,9 +31,7 @@ vi.mock('@/stores/user', () => ({
 	usersStore: () => ({ userResource }),
 }))
 vi.mock('@/stores/settings', () => ({ useSettings: () => settingsStore }))
-// mobileNavLinks asks the server about Programs for non-staff viewers; without
-// this the student run rejects and the phone lists keep the previous viewer's
-// rows -- exactly the staleness the store's memo guards against.
+// The shared utils module imports call and toast from frappe-ui.
 vi.mock('frappe-ui', () => ({
 	call: async () => ({ enrolled: [], published: [] }),
 }))

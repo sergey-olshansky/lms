@@ -18,7 +18,6 @@ export const PRIMARY_LABELS: readonly string[] = [
 	'Home',
 	'Courses',
 	'Homework workspace',
-	'Programs',
 ]
 
 // Hardcoded rather than matched against `sidebarLinks`, which arrive
@@ -66,17 +65,13 @@ const YOU_TAB: NavLink = {
 	avatar: true,
 }
 
-// Five slots: the four PRIMARY_LABELS plus YOU_TAB. A ceiling on the whole bar,
-// and YOU_TAB is pushed last, so a fifth primary would cost the You tab its
-// place — widen this and the column widths together, or not at all.
+// Keep a ceiling on the whole bar, and always push YOU_TAB last.
 const MAX_PRIMARY_TABS = 5
 
 const SECTION_MAP: Record<string, readonly string[]> = {
 	LEARN: [
-		'Programs',
 		'Batches',
 		'Quizzes',
-		'Assignments',
 		'Programming Exercises',
 		'Homework workspace',
 	],
@@ -200,10 +195,8 @@ export function pickPrimaryTabs(
 
 // Everything that did not make the bottom bar, in the order it arrived.
 //
-// `sidebarLinks` and `otherLinks` overlap. Programs is spliced into the
-// sidebar list while the moderator extras are appended to the other list, and
-// a re-entrant reload can leave the same label in both. Dedupe by label so a
-// destination is never offered twice.
+// `sidebarLinks` and `otherLinks` may overlap after a re-entrant reload.
+// Dedupe by label so a destination is never offered twice.
 export function overflowLinks(
 	sidebarLinks: readonly NavLink[],
 	otherLinks: readonly NavLink[],

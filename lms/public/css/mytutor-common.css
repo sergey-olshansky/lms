@@ -111,7 +111,7 @@
 @property --lms-saturation {
 	syntax: "<percentage>";
 	inherits: false;
-	initial-value: 115%;
+	initial-value: 132.25%;
 }
 @property --lms-breath {
 	syntax: "<number>";
@@ -192,7 +192,7 @@
 	inset: 0 0 -100% auto;
 	width: calc(var(--lms-stream-width) * (1 + var(--lms-success-converge) * .4 + var(--lms-result-pop) * .16) * (1 + var(--lms-sunset) * 2.2));
 	opacity: clamp(0, calc(max(var(--lms-presence), var(--lms-success-converge)) * var(--lms-density) * 0.72 * var(--lms-flash-intensity)), 1);
-	filter: brightness(calc(var(--lms-ink) * var(--lms-breath) * (1 + var(--lms-success-converge) * .12))) saturate(var(--lms-saturation)) saturate(calc(1 + var(--lms-success-converge) * .32)) blur(calc(var(--lms-sunset) * 1.8px));
+	filter: brightness(calc(1.15 * var(--lms-ink) * var(--lms-breath) * (1 + var(--lms-success-converge) * .12))) saturate(var(--lms-saturation)) saturate(calc(1 + var(--lms-success-converge) * .32)) blur(calc(var(--lms-sunset) * 1.8px));
 	background-color: #49aeb8;
 	/* A faint procedural grain scatters light like fine sand, without blur.
 	   Three simultaneous colour blooms in each travelling stream. Each bloom
@@ -332,13 +332,13 @@
 		--lms-stream-width: 20px;
 		--lms-density: 1;
 		--lms-ink: 1.16;
-		--lms-saturation: 115%;
+		--lms-saturation: 132.25%;
 	}
 	50% {
 		--lms-stream-width: 25px;
 		--lms-density: 0.65;
 		--lms-ink: 1;
-		--lms-saturation: 65%;
+		--lms-saturation: 74.75%;
 	}
 }
 
@@ -357,7 +357,7 @@
    first pair alternates. Registered properties let random changes melt in. */
 :is(.lms-tutor-theme, body[data-path="login"]) .lms-ai-stream-third {
 	width: calc(var(--lms-third-width) * (1 + var(--lms-success-converge) * .4 + var(--lms-result-pop) * .16) * (1 + var(--lms-sunset) * 2.2));
-	filter: brightness(calc(1.04 * var(--lms-breath) * (1 + var(--lms-success-converge) * .12))) saturate(90%) saturate(calc(1 + var(--lms-success-converge) * .32)) blur(calc(var(--lms-sunset) * 1.8px));
+	filter: brightness(calc(1.2 * var(--lms-breath) * (1 + var(--lms-success-converge) * .12))) saturate(103.5%) saturate(calc(1 + var(--lms-success-converge) * .32)) blur(calc(var(--lms-sunset) * 1.8px));
 	opacity: clamp(0, calc(var(--lms-third-gain) * 0.6 * var(--lms-flash-intensity)), 1);
 	background-color: rgb(89 146 175 / 0.35);
 	background-image: linear-gradient(180deg,
