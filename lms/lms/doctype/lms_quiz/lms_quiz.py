@@ -1167,6 +1167,11 @@ def check_input_answers(question: str, answer: str):
 	question_details = frappe.db.get_value("LMS Question", question, QUESTION_POSSIBILITY_FIELDS, as_dict=1)
 	for field in QUESTION_POSSIBILITY_FIELDS:
 		possibility = question_details[field]
+		if possibility and re.fullmatch(r"[0-9]+", str(possibility).strip()):
+			# A near match can accept a transposed digit in a required sequence.
+			if str(possibility).strip() == re.sub(r"\s+", "", str(answer)):
+				return 1
+			continue
 		if possibility and fuzz.token_sort_ratio(possibility, answer) > 85:
 			return 1
 	return 0

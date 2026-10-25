@@ -36,7 +36,7 @@
 				<template #prefix>
 					<span class="lucide-file-up size-4" />
 				</template>
-				{{ __('Import Chemedge PDF Trainer') }}
+				{{ __('Import PDF Trainer') }}
 			</Button>
 			<Button v-if="!readOnlyMode" variant="solid" @click="createQuiz">
 				<template #prefix>

@@ -173,7 +173,7 @@ const props = defineProps({
 	revealErrors: { type: Boolean, default: false },
 })
 
-const gradingHint = __('Auto-graded by fuzzy match > 85% · up to 10')
+const gradingHint = __('Digit sequences require an exact match; text allows minor typos · up to 10 accepted answers')
 
 // Native radios group by name, so two open cards would share one selection.
 const correctAnswerGroup = useId()

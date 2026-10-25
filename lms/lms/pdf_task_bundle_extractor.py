@@ -334,8 +334,45 @@ def source_metadata(
 	}
 
 
+SHARED_CONTEXT_RE = re.compile(r"Для\s+выполнения\s+задани[йя]\s+([\d\s,–—\-№и]+)", re.IGNORECASE)
+
+
+def find_shared_contexts(pdf: Any, heading_finder: Any) -> list[dict[str, Any]]:
+	"""Locate numbered groups' common instructions, including their tables/formulas."""
+	contexts = []
+	for page_index, page in enumerate(pdf.pages):
+		starts = heading_finder(page)
+		for line in extract_lines(page):
+			match = SHARED_CONTEXT_RE.search(str(line["text"]))
+			if not match:
+				continue
+			members = set()
+			for number in re.finditer(r"(\d+)(?:\s*[–—-]\s*(\d+))?", match.group(1)):
+				first, last = int(number.group(1)), int(number.group(2) or number.group(1))
+				if first <= last <= first + 300:
+					members.update(range(first, last + 1))
+			following = [start for start in starts if start["top"] > line["top"]]
+			if not members or not following:
+				continue
+			bottom = float(following[0]["top"]) - 6
+			items = [
+				item for item in [*page.chars, *page.images]
+				if float(line["top"]) - 1 <= float(item["top"]) < bottom
+			]
+			if not items:
+				continue
+			bbox = pad_bbox(union_bbox(items), float(page.width), float(page.height), 8, 4)
+			contexts.append({
+				"members": members, "page_index": page_index, "page_number": page_index + 1,
+				"page_width": float(page.width), "page_height": float(page.height),
+				"bbox": bbox, "text": page.crop(bbox).extract_text() or "",
+			})
+	return contexts
+
+
 def find_tasks(pdf: Any, heading_finder: Any = find_task_headings) -> list[dict[str, Any]]:
 	tasks: list[dict[str, Any]] = []
+	contexts = find_shared_contexts(pdf, heading_finder)
 	for page_index, page in enumerate(pdf.pages):
 		starts = heading_finder(page)
 		if not starts:
@@ -368,8 +405,16 @@ def find_tasks(pdf: Any, heading_finder: Any = find_task_headings) -> list[dict[
 				and (next_top is None or float(char["top"]) < next_top)
 			]
 			boundary_top = next_top
+			shared_tops = [
+				context["bbox"][1] for context in contexts
+				if context["page_index"] == page_index
+				and context["bbox"][1] > start_top
+				and (next_top is None or context["bbox"][1] < next_top)
+			]
+			if shared_tops:
+				boundary_top = min(shared_tops)
 			if red_section_tops:
-				boundary_top = min(red_section_tops)
+				boundary_top = min([*red_section_tops, *([boundary_top] if boundary_top else [])])
 			region_chars = [
 				char
 				for char in page.chars
@@ -416,10 +461,20 @@ def find_tasks(pdf: Any, heading_finder: Any = find_task_headings) -> list[dict[
 					"page_width": page_width,
 					"page_height": page_height,
 					"bbox": bbox,
+					"text": page.crop(bbox).extract_text() or "",
+					"context_regions": [],
 				}
 			)
 
 	tasks.sort(key=lambda item: (item["page_index"], item["bbox"][1]))
+	for context in contexts:
+		for task in tasks:
+			if (task["page_index"], task["bbox"][1]) < (context["page_index"], context["bbox"][3]):
+				continue
+			if not min(context["members"]) <= task["number"] <= max(context["members"]):
+				break
+			if task["number"] in context["members"]:
+				task["context_regions"].append({key: value for key, value in context.items() if key != "members"})
 	for sequence, task in enumerate(tasks, start=1):
 		# A source document can repeat both a printed number (legacy section)
 		# and a FIPI ID.  The extractor still needs a stable, unique key for
@@ -698,6 +753,48 @@ def validate_stepenin_format(pdf: Any, header: str) -> tuple:
 						3.0,
 					),
 				}
+	# EGE variants can mix keyed multiple-choice tasks with open-response
+	# tasks whose worked solutions follow the answer grid (for example, "№29").
+	# Keep the complete solution as the answer reference and crop it for feedback.
+	for page_index in range(answer_page_start, len(pdf.pages)):
+		page = pdf.pages[page_index]
+		lines = extract_lines(page)
+		starts = [
+			(index, int(match.group(1)))
+			for index, line in enumerate(lines)
+			if (match := re.match(r"^№\s*(\d+)\s*$", str(line["text"]).strip()))
+		]
+		for position, (line_index, number) in enumerate(starts):
+			if number in numbered_answers:
+				continue
+			end_index = starts[position + 1][0] if position + 1 < len(starts) else len(lines)
+			content_lines = lines[line_index:end_index]
+			content_lines = [
+				line for line in content_lines
+				if not re.search(r"@chem|stepenin\.ru/tasks", str(line["text"]), re.IGNORECASE)
+			]
+			if not content_lines:
+				continue
+			text = "\n".join(str(line["text"]).strip() for line in content_lines).strip()
+			if not text:
+				continue
+			content_bbox = (
+				min(float(line["x0"]) for line in content_lines),
+				min(float(line["top"]) for line in content_lines),
+				max(float(line["x1"]) for line in content_lines),
+				max(float(line["bottom"]) for line in content_lines),
+			)
+			if number in numbered_answers:
+				raise FormatError(f"Duplicate answer number: {number}")
+			numbered_answers[number] = {
+				"number": number,
+				"text": text,
+				"page_index": page_index,
+				"page_number": page_index + 1,
+				"page_width": float(page.width),
+				"page_height": float(page.height),
+				"bbox": pad_bbox(content_bbox, float(page.width), float(page.height), 3.0, 3.0),
+			}
 	missing = sorted(set(numbers) - set(numbered_answers))
 	extra = sorted(set(numbered_answers) - set(numbers))
 	if missing or extra:
@@ -719,7 +816,6 @@ def validate_format(
 	if len(pdf.pages) < 2:
 		raise FormatError("The PDF must contain task pages and at least one answer page")
 
-	first_page_text = pdf.pages[0].extract_text() or ""
 	stepenin_header = next(
 		(
 			line["text"].strip()
@@ -728,8 +824,22 @@ def validate_format(
 		),
 		None,
 	)
-	if stepenin_header and "stepenin.ru/tasks/" in first_page_text:
-		return validate_stepenin_format(pdf, stepenin_header)
+	# Stepenin trainers use bracketed task numbers and a tabular answer key
+	# across both OGE and EGE materials. Branding and title placement varies, so
+	# recognize this format by its task/answer structure.
+	answer_pages = find_answer_page_starts(pdf)
+	if answer_pages and any(
+		find_stepenin_task_headings(page) for page in pdf.pages[: answer_pages[0]]
+	):
+		title = stepenin_header or next(
+			(
+				line["text"].strip()
+				for line in extract_lines(pdf.pages[0])
+				if re.match(r"^Вариант\s+№\s*\d+", line["text"].strip(), re.IGNORECASE)
+			),
+			"Тренажёр Степенина",
+		)
+		return validate_stepenin_format(pdf, title)
 
 	header, header_lines = extract_red_header(pdf.pages[0])
 	if not header_lines:
@@ -929,6 +1039,25 @@ def crop_image(
 	return page_image.crop(pixel_bbox)
 
 
+def compose_source_regions(regions: list[dict[str, Any]], get_page: Any) -> Image.Image:
+	"""Stack common context and the question, keeping their original PDF formatting."""
+	left = min(region["bbox"][0] / region["page_width"] for region in regions)
+	right = max(region["bbox"][2] / region["page_width"] for region in regions)
+	crops = []
+	for region in regions:
+		width, height = region["page_width"], region["page_height"]
+		_, top, _, bottom = region["bbox"]
+		crops.append(crop_image(get_page(region["page_number"]), (left * width, top, right * width, bottom), width, height).convert("RGB"))
+	gap = 16
+	canvas = Image.new("RGB", (max(crop.width for crop in crops), sum(crop.height for crop in crops) + gap * (len(crops) - 1)), "white")
+	y = 0
+	for crop in crops:
+		canvas.paste(crop, (0, y))
+		y += crop.height + gap
+		crop.close()
+	return canvas
+
+
 def save_png(image: Image.Image, path: Path) -> dict[str, Any]:
 	image.convert("RGB").save(path, format="PNG", optimize=True)
 	return {
@@ -984,12 +1113,7 @@ def build_bundle(
 			for sequence, task in enumerate(tasks, start=1):
 				number = task["number"]
 				page_image = get_page(task["page_number"])
-				task_crop = crop_image(
-					page_image,
-					task["bbox"],
-					task["page_width"],
-					task["page_height"],
-				)
+				task_crop = compose_source_regions([*task.get("context_regions", []), task], get_page)
 				task_image_path = images_dir / f"task-{sequence:04d}.png"
 				task_image_meta = save_png(task_crop, task_image_path)
 
@@ -1008,6 +1132,7 @@ def build_bundle(
 					{
 						"id": task["id"],
 						"number": number,
+						"context_sources": [source_metadata(region["page_number"], region["bbox"], region["page_width"], region["page_height"]) for region in task.get("context_regions", [])],
 						**task_image_meta,
 						"source": source_metadata(
 							task["page_number"],
