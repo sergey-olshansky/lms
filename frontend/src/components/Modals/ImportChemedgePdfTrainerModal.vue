@@ -531,6 +531,7 @@ async function waitForImport(jobId: string): Promise<ImportResult> {
 			await new Promise((resolve) => setTimeout(resolve, 2000))
 			continue
 		}
+		if (detached) throw new Error('Import monitoring paused')
 		progressText.value = state.message || ''
 		if (state.status === 'done' && state.result) return state.result
 		if (state.status === 'error') throw new Error(state.error || 'AI review failed')

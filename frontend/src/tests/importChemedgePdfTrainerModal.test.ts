@@ -13,8 +13,10 @@ import ImportChemedgePdfTrainerModal from '@/components/Modals/ImportChemedgePdf
 
 // frappe-ui cannot load under vitest; hoisted spies are shared between the
 // mock factory and the tests.
-const { submitMock, toastMock, closeMock, pushMock } = vi.hoisted(() => ({
+const { submitMock, statusMock, cancelMock, toastMock, closeMock, pushMock } = vi.hoisted(() => ({
 	submitMock: vi.fn(),
+	statusMock: vi.fn(),
+	cancelMock: vi.fn(),
 	toastMock: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
 	closeMock: vi.fn(),
 	pushMock: vi.fn(),
@@ -44,7 +46,12 @@ vi.mock('frappe-ui', () => ({
 			</label>
 		`,
 	},
-	createResource: () => ({ submit: submitMock }),
+	createResource: ({ url }: { url: string }) => {
+		if (url.endsWith('get_import_session')) return { fetch: async () => ({ csrf_token: 'test-token' }) }
+		if (url.endsWith('get_status')) return { submit: statusMock }
+		if (url.endsWith('cancel_import')) return { submit: cancelMock }
+		return { submit: submitMock }
+	},
 	Dialog: {
 		// Mirrors Dialog: v-model:open, title/actions props, default slot.
 		props: ['open', 'title', 'actions', 'size'],
@@ -78,7 +85,45 @@ vi.mock('vue-router', () => ({ useRouter: () => ({ push: pushMock }) }))
 const mountModal = () =>
 	mount(ImportChemedgePdfTrainerModal, {
 		props: { modelValue: true },
+		global: { mocks: { __: (text: string) => text }, provide: { $user: { data: { name: 'test-user' } } } },
 	})
+
+describe('PDF import lifecycle', () => {
+	it('resumes the existing background job after closing and recreating the screen', async () => {
+		let finishOldPoll!: (state: unknown) => void
+		statusMock.mockImplementationOnce(() => new Promise((resolve) => { finishOldPoll = resolve }))
+		const first = mountModal()
+		await addFile(first)
+		await importAll(first)
+		expect(submitMock).toHaveBeenCalledTimes(1)
+		first.unmount()
+		const restored = mountModal()
+		await flushPromises()
+		expect(statusMock).toHaveBeenLastCalledWith({ job_id: 'job-1' })
+		expect(submitMock).toHaveBeenCalledTimes(1)
+		expect(restored.text()).toContain('1 imported')
+		finishOldPoll({ status: 'cancelled' })
+		await flushPromises()
+		expect(restored.text()).toContain('1 imported')
+		restored.unmount()
+	})
+
+	it('requests cancellation and shows the confirmed cancelled state', async () => {
+		let finishPoll!: (state: unknown) => void
+		statusMock.mockImplementationOnce(() => new Promise((resolve) => { finishPoll = resolve }))
+		const wrapper = mountModal()
+		await addFile(wrapper)
+		await importAll(wrapper)
+		await wrapper.get('[data-testid="action-Cancel import"]').trigger('click')
+		await flushPromises()
+		expect(cancelMock).toHaveBeenCalledWith({ job_id: 'job-1' })
+		finishPoll({ status: 'cancelled' })
+		await flushPromises()
+		expect(wrapper.text()).toContain('Cancelled')
+		expect(wrapper.text()).toContain('0 imported')
+		wrapper.unmount()
+	})
+})
 
 // Push one PDF through the real hidden-input change handler with a mocked
 // FileUploadHandler so the file lands in the import list.
@@ -106,12 +151,17 @@ function rangeInputs(wrapper: ReturnType<typeof mountModal>, id = 1) {
 }
 
 beforeEach(() => {
+	localStorage.clear()
 	submitMock.mockReset()
-	submitMock.mockResolvedValue({
+	submitMock.mockResolvedValue({ job_id: 'job-1' })
+	statusMock.mockReset()
+	cancelMock.mockReset()
+	cancelMock.mockResolvedValue({ status: 'cancelling' })
+	statusMock.mockResolvedValue({ status: 'done', result: {
 		quiz: 'quiz-1',
 		title: 'T',
 		question_count: 3,
-	})
+	} })
 	toastMock.success.mockReset()
 	toastMock.error.mockReset()
 	toastMock.warning.mockReset()
@@ -134,11 +184,11 @@ describe('ImportChemedgePdfTrainerModal: task number range', () => {
 		await addFile(wrapper)
 		await importAll(wrapper)
 		expect(submitMock).toHaveBeenCalledTimes(1)
-		expect(submitMock).toHaveBeenCalledWith({
+		expect(submitMock).toHaveBeenCalledWith(expect.objectContaining({
 			pdf_file: 'uploaded-trainer.pdf',
 			source_folder: '',
 			show_answers: 0,
-		})
+		}))
 		wrapper.unmount()
 	})
 
@@ -150,13 +200,13 @@ describe('ImportChemedgePdfTrainerModal: task number range', () => {
 		await last.setValue('30')
 		await importAll(wrapper)
 		expect(submitMock).toHaveBeenCalledTimes(1)
-		expect(submitMock).toHaveBeenCalledWith({
+		expect(submitMock).toHaveBeenCalledWith(expect.objectContaining({
 			pdf_file: 'uploaded-trainer.pdf',
 			source_folder: '',
 			show_answers: 0,
 			first_task_number: '1',
 			last_task_number: '30',
-		})
+		}))
 		wrapper.unmount()
 	})
 
@@ -234,20 +284,20 @@ describe('ImportChemedgePdfTrainerModal: task number range', () => {
 		await b.last.setValue('60')
 		await importAll(wrapper)
 		expect(submitMock).toHaveBeenCalledTimes(2)
-		expect(submitMock).toHaveBeenNthCalledWith(1, {
+		expect(submitMock).toHaveBeenNthCalledWith(1, expect.objectContaining({
 			pdf_file: 'uploaded-a.pdf',
 			source_folder: '',
 			show_answers: 0,
 			first_task_number: '1',
 			last_task_number: '30',
-		})
-		expect(submitMock).toHaveBeenNthCalledWith(2, {
+		}))
+		expect(submitMock).toHaveBeenNthCalledWith(2, expect.objectContaining({
 			pdf_file: 'uploaded-b.pdf',
 			source_folder: '',
 			show_answers: 0,
 			first_task_number: '31',
 			last_task_number: '60',
-		})
+		}))
 		wrapper.unmount()
 	})
 })
@@ -268,16 +318,16 @@ describe('ImportChemedgePdfTrainerModal: show answers option', () => {
 		await wrapper.get('input[type="checkbox"]').setValue(true)
 		await importAll(wrapper)
 		expect(submitMock).toHaveBeenCalledTimes(2)
-		expect(submitMock).toHaveBeenNthCalledWith(1, {
+		expect(submitMock).toHaveBeenNthCalledWith(1, expect.objectContaining({
 			pdf_file: 'uploaded-a.pdf',
 			source_folder: '',
 			show_answers: 1,
-		})
-		expect(submitMock).toHaveBeenNthCalledWith(2, {
+		}))
+		expect(submitMock).toHaveBeenNthCalledWith(2, expect.objectContaining({
 			pdf_file: 'uploaded-b.pdf',
 			source_folder: '',
 			show_answers: 1,
-		})
+		}))
 		wrapper.unmount()
 	})
 
@@ -287,11 +337,11 @@ describe('ImportChemedgePdfTrainerModal: show answers option', () => {
 		await wrapper.get('input[type="checkbox"]').setValue(true)
 		await wrapper.get('input[type="checkbox"]').setValue(false)
 		await importAll(wrapper)
-		expect(submitMock).toHaveBeenCalledWith({
+		expect(submitMock).toHaveBeenCalledWith(expect.objectContaining({
 			pdf_file: 'uploaded-trainer.pdf',
 			source_folder: '',
 			show_answers: 0,
-		})
+		}))
 		wrapper.unmount()
 	})
 })
