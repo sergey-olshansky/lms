@@ -378,12 +378,23 @@ function onUpload(file: UploadedFile, source_folder: string) {
 	files.value.push({
 		...file,
 		id: nextFileId++,
-		request_id: crypto.randomUUID(),
+		request_id: newImportRequestId(),
 		status: 'uploaded',
 		source_folder,
 		first_task_number: '',
 		last_task_number: '',
 	})
+}
+
+let fallbackImportRequestId = 0
+
+function newImportRequestId() {
+	// randomUUID is only available in secure contexts. Preprod can be opened over
+	// plain HTTP, so use a unique non-cryptographic key for idempotency there.
+	return (
+		globalThis.crypto?.randomUUID?.() ??
+		`pdf-${Date.now()}-${++fallbackImportRequestId}`
+	)
 }
 
 function onUploadFailure(error: { messages?: string[]; message?: string }) {
