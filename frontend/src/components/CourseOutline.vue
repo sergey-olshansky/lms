@@ -52,7 +52,7 @@
 					pull: canTransferRoot,
 					put: canTransferRoot,
 				}"
-				:draggable="'.chapter-item'"
+				:draggable="'.chapter-item, .outline-section-row'"
 				:handle="'.outline-drag-handle-level-1'"
 				:filter="'.outline-section-row, .outline-lesson-row, .scorm-section-row, .outline-actions, .outline-disclosure-toggle, input, textarea'"
 				:preventOnFilter="false"

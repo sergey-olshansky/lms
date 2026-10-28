@@ -3,7 +3,7 @@
 		v-model:open="show"
 		title="Import PDF Trainer"
 		size="lg"
-		:actions="showSummary ? successActions : importActions"
+		:actions="dialogActions"
 	>
 		<div v-if="showSummary" class="space-y-4 text-base">
 			<div class="space-y-1">
@@ -187,13 +187,14 @@ import {
 	FileUploadHandler,
 	toast,
 } from 'frappe-ui'
-import { computed, ref } from 'vue'
+import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import type { SessionUser } from '@/types'
 
 type UploadedFile = { name: string; file_name: string }
 type ImportResult = { quiz: string; title: string; question_count: number; used_ai?: boolean; warning?: string }
-type ImportJobStatus = { status: 'queued' | 'processing' | 'done' | 'error'; message?: string; result?: ImportResult; error?: string }
-type ImportStatus = 'uploaded' | 'processing' | 'success' | 'error'
+type ImportJobStatus = { status: 'queued' | 'processing' | 'cancelling' | 'cancelled' | 'done' | 'error'; message?: string; result?: ImportResult; error?: string }
+type ImportStatus = 'uploaded' | 'processing' | 'success' | 'error' | 'cancelled'
 type ImportFile = UploadedFile & {
 	id: number
 	request_id: string
@@ -204,6 +205,7 @@ type ImportFile = UploadedFile & {
 	last_task_number: string | number
 	result?: ImportResult
 	error?: string
+	job_id?: string
 }
 
 const show = defineModel<boolean>()
@@ -219,6 +221,13 @@ const uploading = ref(false)
 const uploadProgress = ref(0)
 const aiInstruction = ref('')
 let nextFileId = 1
+const cancelRequested = ref(false)
+const cancelling = ref(false)
+const pollingJobs = new Set<string>()
+const sessionUser = inject<SessionUser>('$user')
+const storageKey = `lms-pdf-trainer-import:${sessionUser?.data?.name || 'guest'}`
+let detached = false
+onBeforeUnmount(() => { detached = true })
 
 const importer = createResource({
 	url: 'lms.lms.pdf_trainer_jobs.start_import',
@@ -231,6 +240,26 @@ const importSession = createResource({
 	url: 'lms.lms.pdf_trainer_jobs.get_import_session',
 	method: 'GET',
 })
+const cancelJob = createResource({ url: 'lms.lms.pdf_trainer_jobs.cancel_import' })
+
+function persistState() {
+	try { localStorage.setItem(storageKey, JSON.stringify({ files: files.value, showAnswers: showAnswers.value, aiInstruction: aiInstruction.value, nextFileId })) } catch { /* Storage can be disabled by browser policy. */ }
+}
+
+function restoreState() {
+	try {
+		const saved = JSON.parse(localStorage.getItem(storageKey) || 'null')
+		if (!saved || !Array.isArray(saved.files)) return
+		files.value = saved.files.filter((file: ImportFile) => file && typeof file.name === 'string' && typeof file.file_name === 'string')
+		showAnswers.value = !!saved.showAnswers
+		aiInstruction.value = typeof saved.aiInstruction === 'string' ? saved.aiInstruction : ''
+		nextFileId = Math.max(Number(saved.nextFileId) || 1, ...files.value.map((file) => file.id + 1), 1)
+	} catch { localStorage.removeItem(storageKey) }
+}
+
+restoreState()
+watch([files, showAnswers, aiInstruction], persistState, { deep: true })
+watch(show, (open) => { if (open) resumePendingImports() }, { immediate: true })
 
 async function refreshImportSession() {
 	const session = (await importSession.fetch()) as { csrf_token: string }
@@ -248,6 +277,10 @@ const importActions = computed(() => [
 	},
 ])
 
+const dialogActions = computed(() => isProcessing.value ? [
+	{ label: cancelling.value ? 'Cancelling…' : 'Cancel import', variant: 'outline', disabled: cancelling.value, onClick: cancelCurrentImport },
+] : showSummary.value ? successActions.value : importActions.value)
+
 const successActions = computed(() => [
 	{
 		label: 'Close',
@@ -264,7 +297,8 @@ const hasCompletedImports = computed(() =>
 	files.value.some(
 		(file) =>
 			file.status === 'success' ||
-			file.status === 'error'
+			file.status === 'error' ||
+			file.status === 'cancelled'
 	)
 )
 const showSummary = computed(
@@ -278,7 +312,8 @@ const processedCount = computed(
 		files.value.filter(
 			(file) =>
 				file.status === 'success' ||
-					file.status === 'error'
+					file.status === 'error' ||
+					file.status === 'cancelled'
 		).length
 )
 
@@ -295,6 +330,7 @@ function resetImports() {
 	uploadError.value = ''
 	uploadProgress.value = 0
 	nextFileId = 1
+	localStorage.removeItem(storageKey)
 }
 
 function closeAndReset({ close }: { close: () => void }) {
@@ -378,7 +414,7 @@ function onUpload(file: UploadedFile, source_folder: string) {
 	files.value.push({
 		...file,
 		id: nextFileId++,
-		request_id: crypto.randomUUID(),
+		request_id: newRequestId(),
 		status: 'uploaded',
 		source_folder,
 		first_task_number: '',
@@ -393,9 +429,13 @@ function onUploadFailure(error: { messages?: string[]; message?: string }) {
 }
 
 async function importPdfs() {
+	if (isProcessing.value) return
 	isProcessing.value = true
+	cancelRequested.value = false
+	cancelling.value = false
 	uploadError.value = ''
 	for (const file of files.value) {
+		if (cancelRequested.value) break
 		if (file.status !== 'uploaded') continue
 		const rangeError = validateTaskRange(file)
 		if (rangeError) {
@@ -416,23 +456,72 @@ async function importPdfs() {
 				ai_instruction: aiInstruction.value,
 				...taskRangeParams(file),
 			})) as { job_id: string }
-			file.result = await waitForImport(job.job_id)
+			file.job_id = job.job_id
+			persistState()
+			if (cancelRequested.value) await cancelJob.submit({ job_id: job.job_id })
+			file.result = await trackJob(file)
 			file.status = 'success'
 			if (file.result.warning) toast.warning(file.result.warning)
 		} catch (error) {
-			file.status = 'error'
-			file.error = getErrorMessage(error, 'PDF import failed')
-			toast.error(`${file.file_name}: ${file.error}`)
+			if (detached) return
+			if (cancelRequested.value || getErrorMessage(error, '').includes('cancelled')) {
+				file.status = 'cancelled'
+				file.error = 'Import cancelled'
+			} else {
+				file.status = 'error'
+				file.error = getErrorMessage(error, 'PDF import failed')
+				toast.error(`${file.file_name}: ${file.error}`)
+			}
+		}
+	}
+	isProcessing.value = false
+	cancelling.value = false
+	progressText.value = ''
+}
+
+async function trackJob(file: ImportFile) {
+	if (!file.job_id) throw new Error('Missing import job ID')
+	if (pollingJobs.has(file.job_id)) throw new Error('This import is already being monitored')
+	pollingJobs.add(file.job_id)
+	try { return await waitForImport(file.job_id) } finally { pollingJobs.delete(file.job_id) }
+}
+
+async function resumePendingImports() {
+	const pending = files.value.filter((file) => file.status === 'processing' && file.job_id && !pollingJobs.has(file.job_id))
+	if (!pending.length || isProcessing.value) return
+	isProcessing.value = true
+	for (const file of pending) {
+		try {
+			file.result = await trackJob(file)
+			file.status = 'success'
+		} catch (error) {
+			if (detached) return
+			if (getErrorMessage(error, '').includes('cancelled')) file.status = 'cancelled'
+			else { file.status = 'error'; file.error = getErrorMessage(error, 'PDF import failed') }
 		}
 	}
 	isProcessing.value = false
 	progressText.value = ''
 }
 
+async function cancelCurrentImport() {
+	if (cancelling.value) return
+	cancelRequested.value = true
+	cancelling.value = true
+	const active = files.value.find((file) => file.status === 'processing' && file.job_id)
+	if (active?.job_id) {
+		try { await cancelJob.submit({ job_id: active.job_id }) }
+		catch (error) { toast.error(getErrorMessage(error, 'Could not cancel import')); cancelRequested.value = false; cancelling.value = false; return }
+	} else {
+		files.value.filter((file) => file.status === 'uploaded').forEach((file) => { file.status = 'cancelled'; file.error = 'Import cancelled' })
+	}
+}
+
 async function waitForImport(jobId: string): Promise<ImportResult> {
 	const deadline = Date.now() + 22 * 60 * 1000
 	let failures = 0
 	while (Date.now() < deadline) {
+		if (detached) throw new Error('Import monitoring paused')
 		let state: ImportJobStatus
 		try {
 			state = (await importStatus.submit({ job_id: jobId })) as ImportJobStatus
@@ -445,6 +534,7 @@ async function waitForImport(jobId: string): Promise<ImportResult> {
 		progressText.value = state.message || ''
 		if (state.status === 'done' && state.result) return state.result
 		if (state.status === 'error') throw new Error(state.error || 'AI review failed')
+		if (state.status === 'cancelled') throw new Error('Import cancelled')
 		await new Promise((resolve) => setTimeout(resolve, 2000))
 	}
 	throw new Error('AI review is taking longer than expected. Retry to check the same import job.')
@@ -504,6 +594,7 @@ function statusLabel(status: ImportStatus) {
 		processing: 'Processing…',
 		success: 'Done',
 		error: 'Error',
+		cancelled: 'Cancelled',
 	}[status]
 }
 
@@ -513,7 +604,13 @@ function statusIconClass(status: ImportStatus) {
 		processing: 'lucide-loader-circle animate-spin text-ink-blue-5',
 		success: 'lucide-circle-check text-ink-green-5',
 		error: 'lucide-circle-x text-ink-red-5',
+		cancelled: 'lucide-circle-x text-ink-gray-5',
 	}[status]
+}
+
+let requestFallbackCounter = 0
+function newRequestId() {
+	return globalThis.crypto?.randomUUID?.() || `pdf-${Date.now()}-${++requestFallbackCounter}`
 }
 
 function getErrorMessage(error: unknown, fallback: string) {

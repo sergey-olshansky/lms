@@ -127,7 +127,6 @@
 				</OutlineActionButton>
 			</div>
 			</div>
-		</div>
 		<DisclosurePanel
 			v-if="!section.is_scorm_package"
 			class="ms-4 border-s border-outline-gray-2"
@@ -142,7 +141,7 @@
 					pull: canTransferChild,
 					put: canTransferChild,
 				}"
-				:draggable="'.outline-section-row, .outline-lesson-row'"
+				:draggable="'.chapter-item, .outline-section-row, .outline-lesson-row'"
 				:handle="`.outline-drag-handle[data-sortable-level='${
 					currentLevel + 1
 				}']`"
@@ -292,6 +291,7 @@
 				<span class="text-sm text-ink-gray-5">{{ __('Empty section') }}</span>
 			</div>
 		</DisclosurePanel>
+		</div>
 	</Disclosure>
 </template>
 

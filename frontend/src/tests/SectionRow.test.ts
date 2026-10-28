@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import SectionRow from '@/components/SectionRow.vue'
 import type { OutlineChapter } from '@/types'
+import { createCourseOutlineDrag, courseOutlineDragKey } from '@/composables/courseOutlineDrag'
 import {
 	courseOutlineExpansionKey,
 	rememberSectionExpansion,
@@ -75,7 +76,8 @@ const section: OutlineChapter = {
 const mountRow = (
 	sectionOverride: OutlineChapter = section,
 	allowEdit = true,
-	extraProps: Record<string, unknown> = {}
+	extraProps: Record<string, unknown> = {},
+	extraProvide: Record<symbol, unknown> = {}
 ) =>
 	mount(SectionRow, {
 		props: {
@@ -86,7 +88,7 @@ const mountRow = (
 		},
 		global: {
 			mocks: { __: (s: string) => s },
-			provide: { $user: { data: { name: 'admin@example.com' } } },
+			provide: { $user: { data: { name: 'admin@example.com' } }, ...extraProvide },
 			stubs: {
 				'router-link': { template: '<a><slot /></a>' },
 			},
@@ -97,6 +99,32 @@ beforeEach(() => {
 	localStorage.clear()
 	pushMock.mockReset()
 	focusMock.mockReset()
+})
+
+describe('SectionRow nested drop area', () => {
+	it('accepts a section released over the lessons inside an expanded section', async () => {
+		rememberSectionExpansion(expansionKey, section.name, true)
+		const onDrop = vi.fn()
+		const source = { ...section, name: 'SOURCE', lessons: [] }
+		const drag = createCourseOutlineDrag({
+			getOutline: () => [source, section],
+			onDrop,
+			onCancel: vi.fn(),
+		})
+		const wrapper = mountRow(section, true, {}, { [courseOutlineDragKey]: drag })
+		drag.start({ item: { __draggable_context: { element: source } } }, null)
+		const lesson = wrapper.get('.outline-lesson-row')
+		await lesson.trigger('dragover')
+		expect(drag.state.hoveredTarget).toBe(section.name)
+		await lesson.trigger('drop')
+		expect(onDrop).toHaveBeenCalledWith({
+			item: { kind: 'section', node: source },
+			sourceParent: null,
+			targetParent: section.name,
+			idx: 1,
+		})
+		wrapper.unmount()
+	})
 })
 
 describe('SectionRow inline rename', () => {
