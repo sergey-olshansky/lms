@@ -590,9 +590,11 @@ def _resolve_source_region(pdf, region: dict) -> dict:
 		frappe.throw(_("AI selected a fragment spanning unrelated PDF tasks."), frappe.ValidationError)
 	bottom = end[1] + 5
 	# Include diagrams after the text, without crossing the next task boundary.
-	graphics = [item for item in [*page.images, *page.rects, *page.curves] if start[0] <= float(item["top"]) < limit and float(item["bottom"]) < limit]
-	if graphics:
-		bottom = max(bottom, max(float(item["bottom"]) for item in graphics) + 4)
+	graphics = []
+	for item in sorted([*page.images, *page.rects, *page.curves], key=lambda item: float(item["top"])):
+		if start[0] <= float(item["top"]) <= bottom + 36 and float(item["bottom"]) < limit:
+			graphics.append(item)
+			bottom = max(bottom, float(item["bottom"]) + 4)
 	top, bottom = max(0, start[0] - 3), min(limit, bottom)
 	items = [item for item in [*page.chars, *page.images, *graphics] if top <= float(item["top"]) < bottom]
 	if not items:
