@@ -28,7 +28,7 @@ SOURCE_PDF_FIELD = "chemedge_source_pdf"
 TASK_IMAGE_FIELD = "chemedge_task_image"
 TASK_NUMBER_MIN = 1
 TASK_NUMBER_MAX = 9999
-AI_MAX_PDF_PAGES = 30
+AI_MAX_PDF_PAGES = 100
 
 
 class AIUnavailable(frappe.ValidationError):
