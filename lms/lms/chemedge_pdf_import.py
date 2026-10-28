@@ -39,6 +39,10 @@ class AIReviewIncomplete(AIUnavailable):
 	"""The model did not provide a valid verdict for every proposed question."""
 
 
+class AIExtractionInvalid(AIUnavailable):
+	"""Model output could not be bound safely to the selected source pages."""
+
+
 def _validated_review_verdicts(audit, expected):
 	verdicts = audit.get("tasks")
 	if not isinstance(verdicts, list):
@@ -70,11 +74,12 @@ def _prepare_trainer(pdf_path, work_dir, task_range, user_instruction, candidate
 			{"title": candidate.get("title"), "tasks": [{"number": task["number"]} for task in candidate["tasks"]]},
 			pdf_path, candidate, require_review=False,
 		)
-		warning = (
-			_("AI returned an incomplete review. The PDF was imported using the standard parser without a complete AI review. Check the questions before use.")
-			if isinstance(exc, AIReviewIncomplete)
-			else _("AI is unavailable. The PDF was imported using the standard parser without AI review. Check the questions before use.")
-		)
+		if isinstance(exc, AIExtractionInvalid):
+			warning = _("AI extraction could not be validated. The PDF was imported using the standard parser. Check the questions before use.")
+		elif isinstance(exc, AIReviewIncomplete):
+			warning = _("AI returned an incomplete review. The PDF was imported using the standard parser without a complete AI review. Check the questions before use.")
+		else:
+			warning = _("AI is unavailable. The PDF was imported using the standard parser without AI review. Check the questions before use.")
 		from lms.lms.pdf_trainer_jobs import report_progress
 		report_progress(warning)
 		return title, tasks, False, warning
@@ -242,7 +247,9 @@ def _extract_trainer_with_ai(pdf_path: Path, work_dir: Path, task_range=None, us
 		result = _ai_json(
 			"Extract ONLY task with stable import number " + str(number) + " (printed source number " + str(source_number) + ") from these selected PDF pages. Keep the stable number in the result. "
 			'Return {"tasks":[{"number":' + str(number) + ',"reviewed":true,"question":"complete stem","answer":"provided answer",'
-			'"options":[],"correct_options":[],"source_regions":[{"page":1,"start":"exact first words","end":"exact last words","kind":"context or task"}]}]}. '
+			'"options":[],"correct_options":[],"source_regions":[{"page":' + str(entry["question_pages"][0]) + ',"start":"exact first words","end":"exact last words","kind":"context or task"}]}]}. '
+			"Use ORIGINAL source PDF page numbers from the --- PDF page N --- headers, never renumber this selected subset. "
+			"Allowed source page numbers: " + json.dumps(sorted(allowed)) + ". "
 			"Copy the printed answer; do NOT solve or assess answer correctness. If an existing parser answer is supplied, retain it and map choices from it. If no answer exists, leave answer empty. "
 			"Include ALL shared conditions and lists in source_regions before task regions. "
 			"Use exact source anchors of 3 to 8 words, at most 100 characters. Do not copy whole paragraphs into start/end. Use kind exactly context or task; page must be an integer. Preserve formula/diagram areas through source crops. "
@@ -260,10 +267,34 @@ def _extract_trainer_with_ai(pdf_path: Path, work_dir: Path, task_range=None, us
 		validated_title, extracted = _validate_ai_tasks(result, pdf_path, {"tasks": [{"number": number, "source_number": source_number, "region_refs": []}], "regions": {}})
 		if len(extracted) != 1 or extracted[0]["number"] != number:
 			frappe.throw(_("AI returned the wrong task."), frappe.ValidationError)
-		if any(region.get("page_number", region.get("page")) not in allowed for region in extracted[0]["source_regions"]):
-			frappe.throw(_("AI used a page outside the extraction plan."), frappe.ValidationError)
+		extracted[0]["source_regions"] = _bind_regions_to_page_plan(extracted[0]["source_regions"], pages, allowed)
 		accepted[number] = extracted[0]
 	return str(plan.get("title") or candidate.get("title") or pdf_path.stem)[:140], [accepted[n] for n in sorted(accepted)]
+
+
+def _bind_regions_to_page_plan(regions, pages, allowed):
+	"""Repair a model's local page numbering only with unique exact source anchors.
+
+	The subsequent crop resolver still validates the PDF coordinates. Never map
+	by subset position, search unplanned pages, or accept an ambiguous match.
+	"""
+	bound = []
+	for region in regions:
+		if region["page_number"] in allowed:
+			bound.append(region)
+			continue
+		anchors = [str(region.get(key) or "").split() for key in ("start", "end")]
+		matches = []
+		if all(len(words) >= 3 for words in anchors):
+			patterns = [re.compile(r"\s+".join(re.escape(word) for word in words), re.IGNORECASE) for words in anchors]
+			for number in sorted(allowed):
+				starts, ends = [list(pattern.finditer(pages[number - 1])) for pattern in patterns]
+				if len(starts) == len(ends) == 1 and ends[0].start() >= starts[0].start():
+					matches.append(number)
+		if len(matches) != 1:
+			raise AIExtractionInvalid(_("AI used a page outside the extraction plan and its source fragment could not be located unambiguously."))
+		bound.append({**region, "page_number": matches[0]})
+	return bound
 
 
 def _validate_page_plan(plan, page_count, task_range=None):
@@ -559,9 +590,11 @@ def _resolve_source_region(pdf, region: dict) -> dict:
 		frappe.throw(_("AI selected a fragment spanning unrelated PDF tasks."), frappe.ValidationError)
 	bottom = end[1] + 5
 	# Include diagrams after the text, without crossing the next task boundary.
-	graphics = [item for item in [*page.images, *page.rects, *page.curves] if start[0] <= float(item["top"]) < limit and float(item["bottom"]) < limit]
-	if graphics:
-		bottom = max(bottom, max(float(item["bottom"]) for item in graphics) + 4)
+	graphics = []
+	for item in sorted([*page.images, *page.rects, *page.curves], key=lambda item: float(item["top"])):
+		if start[0] <= float(item["top"]) <= bottom + 36 and float(item["bottom"]) < limit:
+			graphics.append(item)
+			bottom = max(bottom, float(item["bottom"]) + 4)
 	top, bottom = max(0, start[0] - 3), min(limit, bottom)
 	items = [item for item in [*page.chars, *page.images, *graphics] if top <= float(item["top"]) < bottom]
 	if not items:

@@ -1,6 +1,12 @@
 <template>
 	<Disclosure v-slot="{ open }" :key="section.name" :defaultOpen="defaultOpen">
-		<div class="w-full rounded-4 py-1">
+		<div
+			class="w-full rounded-4 py-1"
+			:data-section-drop="allowEdit ? section.name : undefined"
+			@dragover.capture="outlineDrag?.over($event, section)"
+			@dragleave.self="outlineDrag?.leave(section)"
+			@drop.capture="outlineDrag?.drop($event, section)"
+		>
 			<div
 				class="outline-row outline-section-header flex w-full min-w-0 items-start gap-2 rounded-4 px-2 py-2 transition-colors hover:bg-surface-gray-1"
 				:class="[
@@ -12,10 +18,6 @@
 						: '',
 				]"
 				:data-sortable-level="currentLevel"
-				:data-section-drop="allowEdit ? section.name : undefined"
-				@dragover="outlineDrag?.over($event, section)"
-				@dragleave="outlineDrag && (outlineDrag.state.hoveredTarget = null)"
-				@drop="outlineDrag?.drop($event, section)"
 			>
 				<OutlineActionButton
 					v-if="allowEdit && !section.is_scorm_package"
@@ -125,13 +127,13 @@
 				</OutlineActionButton>
 			</div>
 			</div>
-		</div>
 		<DisclosurePanel
 			v-if="!section.is_scorm_package"
 			class="ms-4 border-s border-outline-gray-2"
 			data-testid="section-branch"
 		>
 			<Draggable
+				:data-outline-list="section.name"
 				:list="mergedChildren"
 				:disabled="!allowEdit || dragDisabled"
 				item-key="key"
@@ -140,7 +142,7 @@
 					pull: canTransferChild,
 					put: canTransferChild,
 				}"
-				:draggable="'.outline-section-row, .outline-lesson-row'"
+				:draggable="'.chapter-item, .outline-section-row, .outline-lesson-row'"
 				:handle="`.outline-drag-handle[data-sortable-level='${
 					currentLevel + 1
 				}']`"
@@ -155,6 +157,8 @@
 					<div
 						v-if="element.kind === 'section'"
 						class="outline-section-row"
+						:data-outline-key="element.key"
+						:style="outlineDrag?.state.hoveredTarget === section.name && outlineDrag?.state.hoveredBefore === element.key ? { boxShadow: 'inset 0 2px 0 var(--outline-blue-2, #2490ef)' } : undefined"
 						:class="[
 							childIndentClass,
 							element.node!.is_scorm_package ? 'scorm-section-row' : '',
@@ -187,6 +191,8 @@
 					</div>
 					<div
 						v-else
+						:data-outline-key="element.key"
+						:style="outlineDrag?.state.hoveredTarget === section.name && outlineDrag?.state.hoveredBefore === element.key ? { boxShadow: 'inset 0 2px 0 var(--outline-blue-2, #2490ef)' } : undefined"
 					class="outline-row outline-lesson-row flex w-full min-w-0 items-start gap-2 rounded-4 px-2 py-2 text-ink-gray-9 transition-colors hover:bg-surface-gray-1"
 					:class="[
 						childIndentClass,
@@ -290,6 +296,7 @@
 				<span class="text-sm text-ink-gray-5">{{ __('Empty section') }}</span>
 			</div>
 		</DisclosurePanel>
+		</div>
 	</Disclosure>
 </template>
 
@@ -562,9 +569,14 @@ function canTransferChild(
 	_from: unknown,
 	element: HTMLElement
 ): boolean {
+	// Root-level sections are wrapped as `.chapter-item`; nested sections and
+	// lessons use their own row classes. Accept root rows here too so the shared
+	// Sortable group can reach the guarded title drop target inside a section.
 	return (
-		element.classList.contains('outline-lesson-row') ||
-		element.classList.contains('outline-section-row')
+		!element.classList.contains('scorm-section-row') &&
+		(element.classList.contains('chapter-item') ||
+			element.classList.contains('outline-section-row') ||
+			element.classList.contains('outline-lesson-row'))
 	)
 }
 

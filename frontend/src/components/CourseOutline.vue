@@ -44,6 +44,7 @@
 			}"
 		>
 			<Draggable
+				data-outline-list=""
 				:list="outline.data"
 				:disabled="!allowEdit || chapterRenaming"
 				item-key="name"
@@ -52,7 +53,7 @@
 					pull: canTransferRoot,
 					put: canTransferRoot,
 				}"
-				:draggable="'.chapter-item'"
+				:draggable="'.chapter-item, .outline-section-row'"
 				:handle="'.outline-drag-handle-level-1'"
 				:filter="'.outline-section-row, .outline-lesson-row, .scorm-section-row, .outline-actions, .outline-disclosure-toggle, input, textarea'"
 				:preventOnFilter="false"
@@ -63,6 +64,8 @@
 				<template #item="{ element: chapter }">
 					<div
 						class="chapter-item"
+						:data-outline-key="`section-${chapter.name}`"
+						:style="outlineDrag.state.hoveredTarget === null && outlineDrag.state.hoveredBefore === `section-${chapter.name}` ? { boxShadow: 'inset 0 2px 0 var(--outline-blue-2, #2490ef)' } : undefined"
 						:class="chapter.is_scorm_package ? 'scorm-section-row' : ''"
 					>
 						<SectionRow

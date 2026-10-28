@@ -28,7 +28,84 @@ const start = (element: unknown) => ({
 	item: { __draggable_context: { element } },
 })
 
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => { vi.restoreAllMocks(); document.body.replaceChildren() })
+
+describe('outline insertion position', () => {
+	function listFixture(parent = 'TARGET') {
+		const wrapper = document.createElement('div')
+		wrapper.dataset.sectionDrop = parent
+		const list = document.createElement('div')
+		list.dataset.outlineList = parent
+		wrapper.append(list)
+		document.body.append(wrapper)
+		const rows = ['lesson-A', 'section-B', 'lesson-C'].map((key, index) => {
+			const row = document.createElement('div')
+			row.dataset.outlineKey = key
+			vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({ top: 100 + index * 100, height: 60 } as DOMRect)
+			list.append(row)
+			return row
+		})
+		return { wrapper, list, rows }
+	}
+
+	it('inserts before the hovered lesson instead of appending', () => {
+		const target = { ...section('TARGET'), lessons: [lesson, { ...lesson, name: 'C' }], sections: [section('B', 2)] }
+		const { rows } = listFixture()
+		Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: vi.fn(() => rows[1]) })
+		const onDrop = vi.fn()
+		const drag = createCourseOutlineDrag({ getOutline: () => [target], onDrop, onCancel: vi.fn() })
+		drag.start(start(section('SOURCE')), null)
+		drag.drop(new MouseEvent('drop', { clientX: 50, clientY: 201 }), target)
+		expect(onDrop).toHaveBeenCalledWith(expect.objectContaining({ targetParent: 'TARGET', idx: 1 }))
+	})
+
+	it('uses release coordinates when dragend.target still points to the source', () => {
+		const target = section('TARGET')
+		const { rows } = listFixture()
+		Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: vi.fn(() => rows[1]) })
+		const source = document.createElement('div')
+		source.dataset.sectionDrop = 'SOURCE'
+		const onDrop = vi.fn()
+		const drag = createCourseOutlineDrag({ getOutline: () => [target], onDrop, onCancel: vi.fn() })
+		drag.start(start(section('SOURCE')), null)
+		source.addEventListener('dragend', (originalEvent) => drag.finish({ originalEvent }))
+		source.dispatchEvent(new MouseEvent('dragend', { clientX: 50, clientY: 201 }))
+		expect(onDrop).toHaveBeenCalledWith(expect.objectContaining({ targetParent: 'TARGET', idx: 1 }))
+	})
+
+	it('calculates same-parent slots after removing the dragged item', () => {
+		const target = section('TARGET')
+		const { rows } = listFixture()
+		Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: vi.fn(() => rows[2]) })
+		const onDrop = vi.fn()
+		const drag = createCourseOutlineDrag({ getOutline: () => [target], onDrop, onCancel: vi.fn() })
+		drag.start(start({ kind: 'lesson', lesson: { ...lesson, name: 'A' } }), 'TARGET')
+		drag.drop(new MouseEvent('drop', { clientX: 50, clientY: 301 }), target)
+		expect(onDrop).toHaveBeenCalledWith(expect.objectContaining({ targetParent: 'TARGET', idx: 1 }))
+	})
+
+	it('treats the top edge of a section header as a sibling insertion', () => {
+		const target = section('TARGET')
+		const root = document.createElement('div')
+		root.dataset.outlineRootDrop = ''
+		const list = document.createElement('div')
+		list.dataset.outlineList = ''
+		const row = document.createElement('div')
+		row.dataset.outlineKey = 'section-TARGET'
+		const header = document.createElement('div')
+		header.className = 'outline-section-header'
+		header.dataset.sectionDrop = 'TARGET'
+		row.append(header); list.append(row); root.append(list); document.body.append(root)
+		vi.spyOn(header, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 160, height: 60 } as DOMRect)
+		vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 160, height: 60 } as DOMRect)
+		Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: vi.fn(() => header) })
+		const onDrop = vi.fn()
+		const drag = createCourseOutlineDrag({ getOutline: () => [target], onDrop, onCancel: vi.fn() })
+		drag.start(start(section('SOURCE')), null)
+		drag.finish({ originalEvent: new MouseEvent('mouseup', { clientX: 50, clientY: 102 }) })
+		expect(onDrop).toHaveBeenCalledWith(expect.objectContaining({ targetParent: null, idx: 0 }))
+	})
+})
 
 describe('dropping outline items into section titles', () => {
 	it('keeps a title target stationary so sibling sorting cannot replace it before drop', () => {

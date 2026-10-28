@@ -23,8 +23,14 @@ def report_progress(message, completed=0, total=0):
 		return
 	key = _key(job["user"], job["job_id"])
 	state = frappe.cache.get_value(key) or {}
+	if state.get("cancel_requested"):
+		raise ImportCancelled()
 	state.update(status="processing", message=message, completed=completed, total=total)
 	frappe.cache.set_value(key, state, expires_in_sec=TTL)
+
+
+class ImportCancelled(Exception):
+	"""Raised between import stages after a user requests cancellation."""
 
 
 @frappe.whitelist(methods=["GET"])
@@ -76,7 +82,7 @@ def start_import(
 			return {"job_id": job_id}
 		job_id = frappe.generate_hash(length=24)
 		key = _key(user, job_id)
-		frappe.cache.set_value(key, {"status": "queued", "message": _("Waiting for AI review")}, expires_in_sec=TTL)
+		frappe.cache.set_value(key, {"status": "queued", "message": _("Waiting for AI review"), "source_file": pdf_file}, expires_in_sec=TTL)
 		try:
 			frappe.enqueue("lms.lms.pdf_trainer_jobs.run_import", queue=os.environ.get("LMS_PDF_IMPORT_QUEUE") or frappe.conf.get("pdf_import_queue") or "long",
 				timeout=1200, job_id=f"pdf-trainer-{job_id}", deduplicate=True,
@@ -93,11 +99,30 @@ def get_status(job_id: str):
 	from lms.lms.chemedge_pdf_import import _require_import_permission
 
 	_require_import_permission()
+	frappe.local.response_headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
 	if not isinstance(job_id, str) or not re.fullmatch(r"[A-Za-z0-9]{24}", job_id):
 		frappe.throw(_("Invalid PDF import job ID."), frappe.ValidationError)
 	state = frappe.cache.get_value(_key(frappe.session.user, job_id))
 	if not state:
 		frappe.throw(_("PDF import job was not found or has expired."), frappe.DoesNotExistError)
+	return state
+
+
+@frappe.whitelist(methods=["POST"])
+def cancel_import(job_id: str):
+	from lms.lms.chemedge_pdf_import import _require_import_permission
+
+	_require_import_permission()
+	if not isinstance(job_id, str) or not re.fullmatch(r"[A-Za-z0-9]{24}", job_id):
+		frappe.throw(_("Invalid PDF import job ID."), frappe.ValidationError)
+	key = _key(frappe.session.user, job_id)
+	state = frappe.cache.get_value(key)
+	if not state:
+		frappe.throw(_("PDF import job was not found or has expired."), frappe.DoesNotExistError)
+	if state.get("status") in {"done", "error", "cancelled"}:
+		return state
+	state.update(cancel_requested=True, status="cancelling", message=_("Cancellation requested; stopping after the current step."))
+	frappe.cache.set_value(key, state, expires_in_sec=TTL)
 	return state
 
 
@@ -108,10 +133,16 @@ def run_import(owner, import_job_id, params):
 	frappe.flags.pdf_trainer_job = {"user": owner, "job_id": import_job_id}
 	key = _key(owner, import_job_id)
 	try:
+		state = frappe.cache.get_value(key) or {}
+		if state.get("cancel_requested"):
+			raise ImportCancelled()
 		report_progress(_("Reading PDF structure"))
 		result = import_pdf_trainer(**params)
 		frappe.db.commit()
 		frappe.cache.set_value(key, {"status": "done", "result": result}, expires_in_sec=TTL)
+	except ImportCancelled:
+		frappe.db.rollback()
+		frappe.cache.set_value(key, {"status": "cancelled", "message": _("Import cancelled.")}, expires_in_sec=TTL)
 	except Exception as exc:
 		frappe.db.rollback()
 		message = str(exc) if isinstance(exc, frappe.ValidationError) else _("PDF import failed. Your private PDF is kept; retry the import.")

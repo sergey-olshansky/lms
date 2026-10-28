@@ -20,19 +20,14 @@ export interface OutlineDrop {
 	idx: number
 }
 
-export function canDropIntoSection(
-	item: OutlineDragItem,
-	target: OutlineChapter
-): boolean {
+type DropLocation = { parent: OutlineChapter | null; idx: number; before: string | null }
+
+export function canDropIntoSection(item: OutlineDragItem, target: OutlineChapter): boolean {
 	if (target.is_scorm_package) return false
 	if (item.kind === 'lesson') return true
 	if (item.node.is_scorm_package) return false
-	if (
-		flattenSections([item.node]).some((section) => section.name === target.name)
-	)
-		return false
-	const height = (node: OutlineChapter): number =>
-		1 + Math.max(0, ...(node.sections ?? []).map(height))
+	if (flattenSections([item.node]).some((section) => section.name === target.name)) return false
+	const height = (node: OutlineChapter): number => 1 + Math.max(0, ...(node.sections ?? []).map(height))
 	return (target.level ?? 1) + height(item.node) <= MAX_SECTION_DEPTH
 }
 
@@ -45,170 +40,162 @@ export function createCourseOutlineDrag(options: {
 		item: null as OutlineDragItem | null,
 		sourceParent: null as string | null,
 		hoveredTarget: null as string | null,
+		hoveredBefore: null as string | null,
 		handled: false,
 	})
 
 	function start(event: OutlineDragEvent, parent: string | null) {
-		const child = event.item.__draggable_context.element as
-			| OutlineDragItem
-			| OutlineChapter
+		const child = event.item.__draggable_context.element as OutlineDragItem | OutlineChapter
 		state.item = 'kind' in child ? child : { kind: 'section', node: child }
 		state.sourceParent = parent
-		state.hoveredTarget = null
 		state.handled = false
+		clearHover()
+	}
+
+	function pointer(event?: Event) {
+		const original = event as (MouseEvent & Partial<TouchEvent>) | undefined
+		return original?.touches?.[0] ?? original?.changedTouches?.[0] ?? original
+	}
+
+	function hitAtPoint(event?: Event): Element | null {
+		const point = pointer(event)
+		if (point && Number.isFinite(point.clientX)) {
+			const hit = document.elementFromPoint?.(point.clientX, point.clientY)
+			if (hit) return hit
+		}
+		return event?.target instanceof Element ? event.target : null
+	}
+
+	function insertionSlot(event: Event | undefined, parent: OutlineChapter | null, hit: Element | null) {
+		const fallback = parent
+			? (parent.lessons?.length ?? 0) + (parent.sections?.length ?? 0)
+			: options.getOutline()?.length ?? 0
+		const point = pointer(event)
+		const lists = Array.from(document.querySelectorAll<HTMLElement>('[data-outline-list]'))
+			.filter((element) => element.dataset.outlineList === (parent?.name ?? ''))
+		const list = lists.find((element) => hit && element.contains(hit)) ?? lists[0]
+		if (!list || !point || !Number.isFinite(point.clientY)) return { idx: fallback, before: null }
+		const sourceKey = state.item?.kind === 'section'
+			? `section-${state.item.node.name}`
+			: state.item?.kind === 'lesson' ? `lesson-${state.item.lesson.name}` : null
+		// Indexes refer to the destination after removing the dragged row.
+		const rows = Array.from(list.children).filter((element): element is HTMLElement =>
+			element instanceof HTMLElement && !!element.dataset.outlineKey && element.dataset.outlineKey !== sourceKey)
+		const idx = rows.findIndex((row) => {
+			const bounds = (row.querySelector<HTMLElement>('.outline-section-header') ?? row).getBoundingClientRect()
+			return point.clientY < bounds.top + bounds.height / 2
+		})
+		return idx < 0 ? { idx: rows.length, before: null } : { idx, before: rows[idx].dataset.outlineKey! }
+	}
+
+	function location(event?: Event, fallbackTarget?: OutlineChapter): DropLocation | undefined {
+		const hit = hitAtPoint(event)
+		const sections = flattenSections(options.getOutline())
+		const targetName = hit?.closest<HTMLElement>('[data-section-drop]')?.dataset.sectionDrop
+		let parent = sections.find((section) => section.name === targetName) ?? fallbackTarget
+		const point = pointer(event)
+		const header = hit?.closest<HTMLElement>('.outline-section-header')
+		const row = header?.closest<HTMLElement>('[data-outline-key]')
+		const list = row?.parentElement
+		if (header && list?.hasAttribute('data-outline-list') && point && Number.isFinite(point.clientY)) {
+			const bounds = header.getBoundingClientRect()
+			const edge = Math.min(12, bounds.height / 4)
+			// The header edges insert beside the section; its centre nests inside.
+			if (edge > 0 && (point.clientY < bounds.top + edge || point.clientY > bounds.bottom - edge)) {
+				parent = sections.find((section) => section.name === list.dataset.outlineList)
+				if (!list.dataset.outlineList) return { parent: null, ...insertionSlot(event, null, hit) }
+			}
+		}
+		if (parent) return { parent, ...insertionSlot(event, parent, hit) }
+		if (hit?.closest('[data-outline-root-drop]')) return { parent: null, ...insertionSlot(event, null, hit) }
+	}
+
+	function allowed(target: DropLocation) {
+		if (!state.item) return false
+		return target.parent ? canDropIntoSection(state.item, target.parent)
+			: state.item.kind === 'section' && !state.item.node.is_scorm_package
+	}
+
+	function clearHover() {
+		state.hoveredTarget = null
+		state.hoveredBefore = null
+	}
+
+	function hover(event: DragEvent, target: DropLocation | undefined) {
+		if (!target || !allowed(target)) return
+		event.preventDefault()
+		if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+		state.hoveredTarget = target.parent?.name ?? null
+		state.hoveredBefore = target.before
 	}
 
 	function over(event: DragEvent, target: OutlineChapter) {
-		if (!state.item || !canDropIntoSection(state.item, target)) return
-		event.preventDefault()
-		if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
-		state.hoveredTarget = target.name
+		const destination = location(event, target)
+		if (destination?.parent?.name === target.name) hover(event, destination)
+	}
+
+	function leave(target: OutlineChapter) {
+		if (state.hoveredTarget === target.name) clearHover()
 	}
 
 	function overRoot(event: DragEvent) {
-		if (
-			event.target instanceof Element &&
-			event.target.closest('[data-section-drop]')
-		)
-			return
-		if (state.item?.kind !== 'section' || state.item.node.is_scorm_package)
-			return
-		event.preventDefault()
-		if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
-		state.hoveredTarget = null
+		const destination = location(event)
+		if (destination && !destination.parent) hover(event, destination)
+	}
+
+	function commit(event: Event | undefined, destination: DropLocation) {
+		if (state.handled || !state.item || !allowed(destination)) return
+		event?.preventDefault()
+		state.handled = true
+		options.onDrop({ item: state.item, sourceParent: state.sourceParent,
+			targetParent: destination.parent?.name ?? null, idx: destination.idx })
 	}
 
 	function drop(event: Event, target: OutlineChapter) {
-		if (state.handled || !state.item || !canDropIntoSection(state.item, target))
-			return
-		event.preventDefault()
-		state.handled = true
-		options.onDrop({
-			item: state.item,
-			sourceParent: state.sourceParent,
-			targetParent: target.name,
-			idx: (target.lessons?.length ?? 0) + (target.sections?.length ?? 0),
-		})
+		const destination = location(event, target)
+		if (destination?.parent?.name === target.name) commit(event, destination)
 	}
 
 	function dropRoot(event: Event) {
-		if (
-			state.handled ||
-			state.item?.kind !== 'section' ||
-			state.item.node.is_scorm_package ||
-			(event.target instanceof Element &&
-				event.target.closest('[data-section-drop]'))
-		)
-			return
-		event.preventDefault()
-		state.handled = true
-		options.onDrop({
-			item: state.item,
-			sourceParent: state.sourceParent,
-			targetParent: null,
-			idx: options.getOutline()?.length ?? 0,
-		})
+		const destination = location(event)
+		if (destination && !destination.parent) commit(event, destination)
 	}
 
-	function sectionAtPoint(event?: Event): OutlineChapter | undefined {
-		const original = event as (MouseEvent & Partial<TouchEvent>) | undefined
-		const point =
-			original?.touches?.[0] ?? original?.changedTouches?.[0] ?? original
-		if (!point || !Number.isFinite(point.clientX)) return
-		const element = document.elementFromPoint(point.clientX, point.clientY)
-		const name = element?.closest<HTMLElement>('[data-section-drop]')?.dataset
-			.sectionDrop
-		return flattenSections(options.getOutline()).find(
-			(section) => section.name === name
-		)
-	}
-
-	function move(
-		event: { to?: { el?: HTMLElement } },
-		originalEvent: Event
-	): boolean {
-		const targetParent = event.to?.el?.dataset.chapter ?? null
-		// Cross-parent section drops go through the section/root drop targets.
-		// Returning false here leaves the row intact while those targets enforce
-		// depth and cycle rules before sending the move request.
-		if (
-			state.item?.kind === 'section' &&
-			state.sourceParent !== targetParent
-		) {
-			const target = sectionAtPoint(originalEvent)
-			state.hoveredTarget = target && canDropIntoSection(state.item, target)
-				? target.name
-				: null
+	function move(event: { to?: { el?: HTMLElement } }, originalEvent: Event): boolean {
+		const destination = location(originalEvent)
+		if (destination && state.item) {
+			if (allowed(destination)) {
+				state.hoveredTarget = destination.parent?.name ?? null
+				state.hoveredBefore = destination.before
+			} else clearHover()
+			// Keep both differently shaped Vue lists intact. The guarded drop
+			// commits the move once, including exact insertion position.
 			return false
 		}
-		const target = sectionAtPoint(originalEvent)
-		if (!target || !state.item) {
-			state.hoveredTarget = null
-			return true
-		}
-		state.hoveredTarget = canDropIntoSection(state.item, target)
-			? target.name
-			: null
-		// Keep a title target in place. Sortable otherwise swaps the source into
-		// that row before mouseup, so the eventual drop lands on the source itself.
-		return false
+		clearHover()
+		return !(state.item?.kind === 'section' && state.sourceParent !== (event.to?.el?.dataset.chapter ?? null))
 	}
 
-	function finish(event: {
-		originalEvent?: Event
-		to?: { dataset?: { chapter?: string } }
-	}): boolean {
-		// Sortable's touch fallback has no native drop event. Resolve the release
-		// point against the same title targets used by mouse/HTML drag-and-drop.
+	function finish(event: { originalEvent?: Event; to?: { dataset?: { chapter?: string } } }): boolean {
 		if (!state.handled && state.item) {
-			const target = sectionAtPoint(event.originalEvent)
-			if (target) {
-				if (canDropIntoSection(state.item, target))
-					drop(event.originalEvent!, target)
-				else {
-					state.handled = true
-					options.onCancel()
-				}
-			} else if (
-				state.item.kind === 'section' &&
-				isRootDrop(event.originalEvent)
-			) {
-				state.handled = true
-				options.onDrop({
-					item: state.item,
-					sourceParent: state.sourceParent,
-					targetParent: null,
-					idx: options.getOutline()?.length ?? 0,
-				})
-			} else if (
-				state.item?.kind === 'section' &&
-				state.sourceParent !== (event.to?.dataset?.chapter ?? null)
-			) {
+			// dragend.target can remain the source; the release coordinates decide.
+			const destination = location(event.originalEvent)
+			if (destination) {
+				if (allowed(destination)) commit(event.originalEvent, destination)
+				else { state.handled = true; options.onCancel() }
+			} else if (state.item.kind === 'section' && state.sourceParent !== (event.to?.dataset?.chapter ?? null)) {
 				state.handled = true
 				options.onCancel()
 			}
 		}
 		const handled = state.handled
 		state.item = null
-		state.hoveredTarget = null
 		state.handled = false
+		clearHover()
 		return handled
 	}
 
-	function isRootDrop(event?: Event): boolean {
-		const original = event as (MouseEvent & Partial<TouchEvent>) | undefined
-		const point = original?.changedTouches?.[0] ?? original
-		if (!point || !Number.isFinite(point.clientX)) return false
-		return Boolean(
-			document
-				.elementFromPoint(point.clientX, point.clientY)
-				?.closest('[data-outline-root-drop]')
-		)
-	}
-
-	return { state, start, over, drop, overRoot, dropRoot, move, finish }
+	return { state, start, over, leave, drop, overRoot, dropRoot, move, finish }
 }
 
-export const courseOutlineDragKey: InjectionKey<
-	ReturnType<typeof createCourseOutlineDrag>
-> = Symbol('courseOutlineDrag')
+export const courseOutlineDragKey: InjectionKey<ReturnType<typeof createCourseOutlineDrag>> = Symbol('courseOutlineDrag')
