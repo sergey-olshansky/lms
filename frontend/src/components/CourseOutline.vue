@@ -44,6 +44,7 @@
 			}"
 		>
 			<Draggable
+				data-outline-list=""
 				:list="outline.data"
 				:disabled="!allowEdit || chapterRenaming"
 				item-key="name"
@@ -63,6 +64,8 @@
 				<template #item="{ element: chapter }">
 					<div
 						class="chapter-item"
+						:data-outline-key="`section-${chapter.name}`"
+						:style="outlineDrag.state.hoveredTarget === null && outlineDrag.state.hoveredBefore === `section-${chapter.name}` ? { boxShadow: 'inset 0 2px 0 var(--outline-blue-2, #2490ef)' } : undefined"
 						:class="chapter.is_scorm_package ? 'scorm-section-row' : ''"
 					>
 						<SectionRow

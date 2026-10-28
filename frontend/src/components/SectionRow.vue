@@ -133,6 +133,7 @@
 			data-testid="section-branch"
 		>
 			<Draggable
+				:data-outline-list="section.name"
 				:list="mergedChildren"
 				:disabled="!allowEdit || dragDisabled"
 				item-key="key"
@@ -156,6 +157,8 @@
 					<div
 						v-if="element.kind === 'section'"
 						class="outline-section-row"
+						:data-outline-key="element.key"
+						:style="outlineDrag?.state.hoveredTarget === section.name && outlineDrag?.state.hoveredBefore === element.key ? { boxShadow: 'inset 0 2px 0 var(--outline-blue-2, #2490ef)' } : undefined"
 						:class="[
 							childIndentClass,
 							element.node!.is_scorm_package ? 'scorm-section-row' : '',
@@ -188,6 +191,8 @@
 					</div>
 					<div
 						v-else
+						:data-outline-key="element.key"
+						:style="outlineDrag?.state.hoveredTarget === section.name && outlineDrag?.state.hoveredBefore === element.key ? { boxShadow: 'inset 0 2px 0 var(--outline-blue-2, #2490ef)' } : undefined"
 					class="outline-row outline-lesson-row flex w-full min-w-0 items-start gap-2 rounded-4 px-2 py-2 text-ink-gray-9 transition-colors hover:bg-surface-gray-1"
 					:class="[
 						childIndentClass,
