@@ -562,9 +562,14 @@ function canTransferChild(
 	_from: unknown,
 	element: HTMLElement
 ): boolean {
+	// Root-level sections are wrapped as `.chapter-item`; nested sections and
+	// lessons use their own row classes. Accept root rows here too so the shared
+	// Sortable group can reach the guarded title drop target inside a section.
 	return (
-		element.classList.contains('outline-lesson-row') ||
-		element.classList.contains('outline-section-row')
+		!element.classList.contains('scorm-section-row') &&
+		(element.classList.contains('chapter-item') ||
+			element.classList.contains('outline-section-row') ||
+			element.classList.contains('outline-lesson-row'))
 	)
 }
 
