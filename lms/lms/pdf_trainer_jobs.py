@@ -22,15 +22,36 @@ def report_progress(message, completed=0, total=0):
 	if not job:
 		return
 	key = _key(job["user"], job["job_id"])
-	state = frappe.cache.get_value(key) or {}
-	if state.get("cancel_requested"):
-		raise ImportCancelled()
-	state.update(status="processing", message=message, completed=completed, total=total)
-	frappe.cache.set_value(key, state, expires_in_sec=TTL)
+	with frappe.cache.lock(key + ":state-lock", timeout=15):
+		state = frappe.cache.get_value(key) or {}
+		if state.get("cancel_requested"):
+			raise ImportCancelled()
+		state.update(status="processing", message=message, completed=completed, total=total)
+		frappe.cache.set_value(key, state, expires_in_sec=TTL)
 
 
 class ImportCancelled(Exception):
 	"""Raised between import stages after a user requests cancellation."""
+
+
+def _reconcile_state(user, job_id, state):
+	from frappe.utils.background_jobs import get_job_status
+
+	if not state or state.get("status") not in {"queued", "processing", "cancelling"}:
+		return state
+	status = get_job_status(f"pdf-trainer-{job_id}")
+	if status in {None, "failed", "stopped", "canceled", "finished"}:
+		key = _key(user, job_id)
+		current = frappe.cache.get_value(key) or state
+		if current.get("status") not in {"queued", "processing", "cancelling"}:
+			return current
+		if current.get("cancel_requested"):
+			current.update(status="cancelled", message=_("Import cancelled."))
+		else:
+			current.update(status="error", error=_("PDF import was interrupted. Your private PDF and validated tasks are kept; retry the import."))
+		frappe.cache.set_value(key, current, expires_in_sec=TTL)
+		return current
+	return state
 
 
 @frappe.whitelist(methods=["GET"])
@@ -78,7 +99,8 @@ def start_import(
 	with frappe.cache.lock(index_key + ":lock", timeout=15):
 		job_id = frappe.cache.get_value(index_key)
 		state = frappe.cache.get_value(_key(user, job_id)) if job_id else None
-		if state and state.get("status") in {"queued", "processing", "done"}:
+		state = _reconcile_state(user, job_id, state)
+		if state and state.get("status") in {"queued", "processing", "cancelling", "done"}:
 			return {"job_id": job_id}
 		job_id = frappe.generate_hash(length=24)
 		key = _key(user, job_id)
@@ -105,7 +127,7 @@ def get_status(job_id: str):
 	state = frappe.cache.get_value(_key(frappe.session.user, job_id))
 	if not state:
 		frappe.throw(_("PDF import job was not found or has expired."), frappe.DoesNotExistError)
-	return state
+	return _reconcile_state(frappe.session.user, job_id, state)
 
 
 @frappe.whitelist(methods=["POST"])
@@ -121,9 +143,16 @@ def cancel_import(job_id: str):
 		frappe.throw(_("PDF import job was not found or has expired."), frappe.DoesNotExistError)
 	if state.get("status") in {"done", "error", "cancelled"}:
 		return state
-	state.update(cancel_requested=True, status="cancelling", message=_("Cancellation requested; stopping after the current step."))
-	frappe.cache.set_value(key, state, expires_in_sec=TTL)
-	return state
+	from frappe.utils.background_jobs import get_job_status
+	with frappe.cache.lock(key + ":state-lock", timeout=15):
+		state = frappe.cache.get_value(key) or state
+		if state.get("status") in {"done", "error", "cancelled"}:
+			return state
+		started = get_job_status(f"pdf-trainer-{job_id}") == "started"
+		state.update(cancel_requested=True, status="cancelling" if started else "cancelled",
+			message=_("Cancellation requested; stopping after the current step.") if started else _("Import cancelled."))
+		frappe.cache.set_value(key, state, expires_in_sec=TTL)
+		return state
 
 
 def run_import(owner, import_job_id, params):
@@ -138,8 +167,11 @@ def run_import(owner, import_job_id, params):
 			raise ImportCancelled()
 		report_progress(_("Reading PDF structure"))
 		result = import_pdf_trainer(**params)
-		frappe.db.commit()
-		frappe.cache.set_value(key, {"status": "done", "result": result}, expires_in_sec=TTL)
+		with frappe.cache.lock(key + ":state-lock", timeout=15):
+			if (frappe.cache.get_value(key) or {}).get("cancel_requested"):
+				raise ImportCancelled()
+			frappe.db.commit()
+			frappe.cache.set_value(key, {"status": "done", "result": result}, expires_in_sec=TTL)
 	except ImportCancelled:
 		frappe.db.rollback()
 		frappe.cache.set_value(key, {"status": "cancelled", "message": _("Import cancelled.")}, expires_in_sec=TTL)

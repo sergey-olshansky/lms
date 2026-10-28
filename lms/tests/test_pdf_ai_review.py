@@ -22,6 +22,13 @@ def candidate():
 
 
 class TestPDFReview(unittest.TestCase):
+	def setUp(self):
+		# These tests exercise planning and answer semantics; PDF-coordinate
+		# resolution is covered separately with real/mocked page geometry.
+		resolver = patch.object(importer, "_resolve_extracted_task", side_effect=lambda task, path: task)
+		resolver.start()
+		self.addCleanup(resolver.stop)
+
 	def test_text_planner_accepts_a_pdf_above_the_old_30_page_limit(self):
 		page = Mock()
 		page.extract_text.return_value = "Page text"
@@ -162,6 +169,11 @@ class TestPDFReview(unittest.TestCase):
 
 
 class TestAIServiceFallback(unittest.TestCase):
+	def setUp(self):
+		resolver = patch.object(importer, "_resolve_extracted_task", side_effect=lambda task, path: task)
+		resolver.start()
+		self.addCleanup(resolver.stop)
+
 	def recognised(self):
 		base = candidate()
 		base.update(parsed_ok=True, title="Recognised PDF")
@@ -245,11 +257,45 @@ class TestAIServiceFallback(unittest.TestCase):
 class TestPDFImportJobs(unittest.TestCase):
 	def setUp(self):
 		from contextlib import nullcontext
+		translation = patch("lms.lms.pdf_trainer_jobs._", side_effect=lambda text: text)
+		translation.start()
+		self.addCleanup(translation.stop)
 		self.cache = Mock()
 		self.values = {}
 		self.cache.lock.side_effect = lambda *args, **kwargs: nullcontext()
 		self.cache.get_value.side_effect = lambda key: self.values.get(key)
 		self.cache.set_value.side_effect = lambda key, value, **kwargs: self.values.__setitem__(key, value)
+
+	def test_queued_cancellation_is_confirmed_without_waiting_for_a_busy_worker(self):
+		from lms.lms import pdf_trainer_jobs as jobs
+		job_id = "b" * 24
+		key = jobs._key(frappe.session.user, job_id)
+		self.values[key] = {"status": "queued"}
+		with patch.object(frappe, "cache", self.cache), patch.object(importer, "_require_import_permission"), patch("frappe.utils.background_jobs.get_job_status", return_value="queued"):
+			state = jobs.cancel_import(job_id)
+		self.assertEqual(state["status"], "cancelled")
+		self.assertTrue(state["cancel_requested"])
+
+	def test_failed_worker_job_does_not_leave_the_ui_processing_forever(self):
+		from lms.lms import pdf_trainer_jobs as jobs
+		job_id = "c" * 24
+		self.values[jobs._key(frappe.session.user, job_id)] = {"status": "processing"}
+		with patch.object(frappe, "cache", self.cache), patch.object(importer, "_require_import_permission"), patch("frappe.utils.background_jobs.get_job_status", return_value="failed"):
+			state = jobs.get_status(job_id)
+		self.assertEqual(state["status"], "error")
+		self.assertIn("retry", state["error"])
+		self.assertIn("no-store", frappe.local.response_headers["Cache-Control"])
+
+	def test_progress_does_not_overwrite_a_cancellation_request(self):
+		from lms.lms import pdf_trainer_jobs as jobs
+		job_id = "d" * 24
+		self.values[jobs._key(frappe.session.user, job_id)] = {"status": "cancelling", "cancel_requested": True}
+		frappe.flags.pdf_trainer_job = {"user": frappe.session.user, "job_id": job_id}
+		try:
+			with patch.object(frappe, "cache", self.cache), self.assertRaises(jobs.ImportCancelled):
+				jobs.report_progress("next stage")
+		finally:
+			frappe.flags.pdf_trainer_job = None
 
 	def test_import_session_refresh_keeps_csrf_protection_and_disables_cache(self):
 		from lms.lms import pdf_trainer_jobs as jobs
@@ -270,7 +316,7 @@ class TestPDFImportJobs(unittest.TestCase):
 
 	def test_retry_does_not_enqueue_a_second_running_import(self):
 		from lms.lms import pdf_trainer_jobs as jobs
-		with patch.object(frappe, "cache", self.cache), patch.object(frappe, "enqueue") as enqueue, patch.object(importer, "_require_import_permission"), patch.object(importer, "_uploaded_pdf"):
+		with patch.object(frappe, "cache", self.cache), patch.object(frappe, "enqueue") as enqueue, patch("frappe.utils.background_jobs.get_job_status", return_value="queued"), patch.object(importer, "_require_import_permission"), patch.object(importer, "_uploaded_pdf"):
 			first = jobs.start_import("source-file", request_id="same-upload-request")
 			second = jobs.start_import("source-file", request_id="same-upload-request")
 			self.assertEqual(first, second)
