@@ -323,6 +323,11 @@ def _extract_page_plan_tasks(pdf_path, pages, entries, candidate, accepted, inst
 	for entry in entries:
 		cached = _checkpoint_get(checkpoint, str(entry["number"]))
 		if cached and entry["number"] not in accepted:
+			try:
+				for region in cached["source_regions"]:
+					_validate_printed_task_number(cached, region)
+			except frappe.ValidationError:
+				continue
 			accepted[entry["number"]] = cached
 	pending = deque((entry, 0, "") for entry in entries if entry["number"] not in accepted)
 	try:

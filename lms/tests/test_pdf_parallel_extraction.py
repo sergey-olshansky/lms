@@ -98,6 +98,14 @@ class TestParallelExtraction(unittest.TestCase):
         with self.assertRaises(importer.AIExtractionInvalid):
             importer._validate_printed_task_number({'number': 2}, {'kind': 'task', 'text': '[3] Other task'})
 
+    def test_old_checkpoint_with_wrong_printed_number_is_reextracted(self):
+        cached = {**result(1)['tasks'][0], 'source_regions': [{'page_number': 1, 'bbox': [0, 0, 1, 1], 'kind': 'task', 'text': '[3] Wrong task'}]}
+        self.cache[('private-owner-prefix', '1')] = cached
+        with patch.object(importer, '_ai_json', return_value=result(1)) as ai:
+            _, tasks = self.extract(1)
+        ai.assert_called_once()
+        self.assertNotEqual(tasks[0], cached)
+
     def test_known_source_regions_are_given_to_ai_and_keep_original_pages(self):
         candidate = {'tasks': [{'number': 1, 'region_refs': ['body']}],
             'regions': {'body': {'page_number': 2, 'kind': 'task', 'text': 'exact source body'}}}
