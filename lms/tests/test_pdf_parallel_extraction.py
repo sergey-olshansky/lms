@@ -106,6 +106,18 @@ class TestParallelExtraction(unittest.TestCase):
         ai.assert_called_once()
         self.assertNotEqual(tasks[0], cached)
 
+    def test_answer_only_page_cannot_be_shown_in_question_crop(self):
+        with self.assertRaises(importer.AIExtractionInvalid):
+            importer._validate_crop_page_scope([{'page_number': 17}], {9})
+
+    def test_old_checkpoint_cannot_reuse_answer_page_in_question_crop(self):
+        cached = {**result(1)['tasks'][0], 'source_regions': [{'page_number': 17, 'bbox': [0, 0, 1, 1], 'kind': 'context', 'text': '12 13 14 312 321'}]}
+        self.cache[('private-owner-prefix', '1')] = cached
+        with patch.object(importer, '_ai_json', return_value=result(1)) as ai:
+            _, tasks = self.extract(1)
+        ai.assert_called_once()
+        self.assertNotEqual(tasks[0], cached)
+
     def test_known_source_regions_are_given_to_ai_and_keep_original_pages(self):
         candidate = {'tasks': [{'number': 1, 'region_refs': ['body']}],
             'regions': {'body': {'page_number': 2, 'kind': 'task', 'text': 'exact source body'}}}
@@ -114,3 +126,4 @@ class TestParallelExtraction(unittest.TestCase):
         self.assertIn('exact source body', content)
         self.assertEqual(scoped['tasks'][0]['region_refs'], ['body'])
         self.assertEqual(allowed, {1, 2})
+        self.assertEqual(scoped['crop_pages'], {1, 2})

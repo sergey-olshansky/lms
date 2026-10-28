@@ -275,6 +275,8 @@ def _task_extraction_request(entry, pages, candidate, instruction, feedback=""):
 	refs = {ref: candidate["regions"][ref] for ref in base.get("region_refs", [])}
 	allowed = set(entry["question_pages"] + entry["context_pages"] + entry["answer_pages"])
 	allowed.update(region["page_number"] for region in refs.values())
+	crop_pages = set(entry["question_pages"] + entry["context_pages"])
+	crop_pages.update(region["page_number"] for region in refs.values())
 	source_number = base.get("source_number", number)
 	prompt = (
 		"Extract ONLY task with stable import number " + str(number) + " (printed source number " + str(source_number) + "). "
@@ -285,6 +287,8 @@ def _task_extraction_request(entry, pages, candidate, instruction, feedback=""):
 		"Copy anchors VERBATIM from page text, including formulas; never paraphrase anchors. "
 		"Use ORIGINAL source page numbers from --- PDF page N --- headers; never renumber this subset. "
 		"Allowed source page numbers: " + json.dumps(sorted(allowed)) + ". "
+		"CROPS are shown to students: source regions must come only from question/context pages " + json.dumps(sorted(crop_pages)) + ". "
+		"Answer-only pages are for copying the answer and MUST NOT appear in source_regions, even as context. "
 		"Copy the provided answer; do NOT solve or check answer correctness. Retain any existing parser answer unchanged. "
 		"Include ALL shared conditions and lists before task regions. Exclude other tasks, answers, advertisements and unrelated headings from crops. "
 		"For unordered selections use options and 1-based correct_options mapped from the printed answer. "
@@ -300,7 +304,13 @@ def _task_extraction_request(entry, pages, candidate, instruction, feedback=""):
 	if base.get("answer"):
 		content += "\nEXISTING PARSER ANSWER (retain unchanged):\n" + base["answer"]
 	content += "\n\n" + "\n\n".join(pages[page - 1] for page in sorted(allowed))
-	return prompt, content, allowed, {"tasks": [{**base, "number": number, "source_number": source_number, "region_refs": list(refs)}], "regions": refs}
+	return prompt, content, allowed, {"tasks": [{**base, "number": number, "source_number": source_number, "region_refs": list(refs)}], "regions": refs, "crop_pages": crop_pages}
+
+
+def _validate_crop_page_scope(regions, crop_pages):
+	for region in regions:
+		if region["page_number"] not in crop_pages:
+			raise AIExtractionInvalid(_("AI selected an answer-only PDF page for a student question image."))
 
 
 def _resolve_extracted_task(task, pdf_path):
@@ -324,6 +334,10 @@ def _extract_page_plan_tasks(pdf_path, pages, entries, candidate, accepted, inst
 		cached = _checkpoint_get(checkpoint, str(entry["number"]))
 		if cached and entry["number"] not in accepted:
 			try:
+				_crop_pages = set(entry["question_pages"] + entry["context_pages"])
+				base = next((item for item in candidate.get("tasks", []) if item["number"] == entry["number"]), {})
+				_crop_pages.update(candidate.get("regions", {}).get(ref, {}).get("page_number") for ref in base.get("region_refs", []))
+				_validate_crop_page_scope(cached["source_regions"], _crop_pages)
 				for region in cached["source_regions"]:
 					_validate_printed_task_number(cached, region)
 			except frappe.ValidationError:
@@ -361,6 +375,7 @@ def _extract_page_plan_tasks(pdf_path, pages, entries, candidate, accepted, inst
 					if len(extracted) != 1 or extracted[0]["number"] != number:
 						raise AIExtractionInvalid(_("AI returned the wrong task."))
 					extracted[0]["source_regions"] = _bind_regions_to_page_plan(extracted[0]["source_regions"], pages, request[2])
+					_validate_crop_page_scope(extracted[0]["source_regions"], request[3]["crop_pages"])
 					task = _resolve_extracted_task(extracted[0], pdf_path)
 				except frappe.ValidationError as exc:
 					if isinstance(exc, AIUnavailable) and not isinstance(exc, AIExtractionInvalid):
