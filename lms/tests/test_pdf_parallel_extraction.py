@@ -86,6 +86,18 @@ class TestParallelExtraction(unittest.TestCase):
         self.assertIn('stable import number 2', ai.call_args.args[0])
         self.assertEqual(tasks[0], cached)
 
+    def test_provider_outage_is_not_retried_or_reclassified(self):
+        outage = importer.AIUnavailable('provider outage')
+        with patch.object(importer, '_ai_json', side_effect=outage) as ai:
+            with self.assertRaises(importer.AIUnavailable) as raised:
+                self.extract(1)
+        self.assertIs(raised.exception, outage)
+        ai.assert_called_once()
+
+    def test_wrong_printed_task_number_is_rejected_before_checkpoint(self):
+        with self.assertRaises(importer.AIExtractionInvalid):
+            importer._validate_printed_task_number({'number': 2}, {'kind': 'task', 'text': '[3] Other task'})
+
     def test_known_source_regions_are_given_to_ai_and_keep_original_pages(self):
         candidate = {'tasks': [{'number': 1, 'region_refs': ['body']}],
             'regions': {'body': {'page_number': 2, 'kind': 'task', 'text': 'exact source body'}}}

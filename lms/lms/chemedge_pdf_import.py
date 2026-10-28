@@ -306,7 +306,15 @@ def _task_extraction_request(entry, pages, candidate, instruction, feedback=""):
 def _resolve_extracted_task(task, pdf_path):
 	with pdfplumber.open(pdf_path) as pdf:
 		task["source_regions"] = [_resolve_source_region(pdf, region) for region in task["source_regions"]]
+	for region in task["source_regions"]:
+		_validate_printed_task_number(task, region)
 	return task
+
+
+def _validate_printed_task_number(task, region):
+	printed_number = re.match(r"^\[?(\d{1,4})(?:\]|\.)", region.get("text", "").strip())
+	if region["kind"] == "task" and printed_number and int(printed_number.group(1)) != int(task.get("source_number", task["number"])):
+		raise AIExtractionInvalid(_("AI associated a question with a different printed task number."))
 
 
 def _extract_page_plan_tasks(pdf_path, pages, entries, candidate, accepted, instruction, checkpoint, plan):
@@ -350,6 +358,8 @@ def _extract_page_plan_tasks(pdf_path, pages, entries, candidate, accepted, inst
 					extracted[0]["source_regions"] = _bind_regions_to_page_plan(extracted[0]["source_regions"], pages, request[2])
 					task = _resolve_extracted_task(extracted[0], pdf_path)
 				except frappe.ValidationError as exc:
+					if isinstance(exc, AIUnavailable) and not isinstance(exc, AIExtractionInvalid):
+						raise
 					if attempt == 0:
 						pending.appendleft((entry, 1, str(exc)))
 						continue
@@ -711,9 +721,7 @@ def _create_ai_task_crops(pdf_path: Path, tasks: list[dict], work_dir: Path) -> 
 				regions, seen = [], set()
 				for raw_region in task["source_regions"]:
 					region = _resolve_source_region(pdf, raw_region)
-					printed_number = re.match(r"^\[?(\d{1,4})(?:\]|\.)", region.get("text", "").strip())
-					if region["kind"] == "task" and printed_number and int(printed_number.group(1)) != int(task.get("source_number", task["number"])):
-						frappe.throw(_("AI associated a question with a different printed task number."), frappe.ValidationError)
+					_validate_printed_task_number(task, region)
 					key = (region["page_number"], tuple(region["bbox"]))
 					if region["kind"] == "context":
 						for previous in regions:
