@@ -22,6 +22,17 @@ def candidate():
 
 
 class TestPDFReview(unittest.TestCase):
+	def test_text_planner_accepts_a_pdf_above_the_old_30_page_limit(self):
+		page = Mock()
+		page.extract_text.return_value = "Page text"
+		pdf = Mock()
+		pdf.pages = [page for _ in range(37)]
+		with patch.object(importer.pdfplumber, "open") as opened:
+			opened.return_value.__enter__.return_value = pdf
+			pages = importer._pdf_pages_as_text(Path("trainer.pdf"))
+		self.assertEqual(len(pages), 37)
+		self.assertIn("--- PDF page 37 ---", pages[-1])
+
 	def test_streamed_json_ignores_reasoning_and_requires_completion(self):
 		response = Mock()
 		# Construct content with the same JSON encoding used by the provider.

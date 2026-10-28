@@ -515,7 +515,10 @@ def find_answer_page_start(pdf: Any, last_task_page_index: int) -> int:
 
 
 def find_answers(
-	pdf: Any, first_page_index: int, last_page_index: int | None = None
+	pdf: Any,
+	first_page_index: int,
+	last_page_index: int | None = None,
+	expected_numbers: set[int] | None = None,
 ) -> dict[int, dict[str, Any]]:
 	answers: dict[int, dict[str, Any]] = {}
 	for page_index in range(first_page_index, last_page_index or len(pdf.pages)):
@@ -528,27 +531,49 @@ def find_answers(
 		)
 		for line_words in cluster_by_top(words, tolerance=2.0):
 			ordered = sorted(line_words, key=lambda word: float(word["x0"]))
-			number_positions = [
-				index
-				for index, word in enumerate(ordered)
-				if ANSWER_NUMBER_RE.fullmatch(str(word["text"]).strip())
-			]
+			number_positions = []
+			combined_answers = {}
+			for index, word in enumerate(ordered):
+				word_text = str(word["text"]).strip()
+				number_match = ANSWER_NUMBER_RE.fullmatch(word_text)
+				if number_match:
+					number_positions.append(index)
+					continue
+				# Some Word-generated answer tables emit the task number and its
+				# one/two-digit multiple-choice key as one text span (e.g. "103.12").
+				# Split only for a task number we already found on the question pages,
+				# and only when the suffix can be a printed choice key. This avoids
+				# interpreting arbitrary decimal answers as a task number.
+				combined_match = re.fullmatch(r"([1-9]\d{0,3})\.([1-5]{1,2})", word_text)
+				if (
+					combined_match
+					and expected_numbers is not None
+					and int(combined_match.group(1)) in expected_numbers
+				):
+					number_positions.append(index)
+					combined_answers[index] = combined_match.group(2)
 			for position_index, word_index in enumerate(number_positions):
 				number_word = ordered[word_index]
 				number_match = ANSWER_NUMBER_RE.fullmatch(str(number_word["text"]).strip())
-				if number_match is None:
-					continue
-				number = int(number_match.group(1))
+				number = (
+					int(number_match.group(1))
+					if number_match
+					else int(str(number_word["text"]).split(".", 1)[0])
+				)
 				next_number_x = (
 					float(ordered[number_positions[position_index + 1]]["x0"])
 					if position_index + 1 < len(number_positions)
 					else math.inf
 				)
-				answer_words = [
-					candidate
-					for candidate in ordered[word_index + 1 :]
-					if float(candidate["x0"]) < next_number_x
-				]
+				answer_words = (
+					[{**number_word, "text": combined_answers[word_index]}]
+					if word_index in combined_answers
+					else [
+						candidate
+						for candidate in ordered[word_index + 1 :]
+						if float(candidate["x0"]) < next_number_x
+					]
+				)
 				if not answer_words:
 					continue
 				segment = [number_word, *answer_words]
@@ -896,8 +921,10 @@ def validate_format(
 				(task["page_index"] for task in tasks if task["page_index"] > answer_page_start),
 				len(pdf.pages),
 			)
-			numbered_answers = find_answers(pdf, answer_page_start, next_task_page)
 			section_numbers = {task["number"] for task in section_tasks}
+			numbered_answers = find_answers(
+				pdf, answer_page_start, next_task_page, expected_numbers=section_numbers
+			)
 			missing = sorted(section_numbers - set(numbered_answers))
 			extra = sorted(set(numbered_answers) - section_numbers)
 			if missing:
@@ -956,8 +983,8 @@ def validate_format(
 			raise FormatError(
 				"Duplicate task numbers require answers printed below each task: " f"{duplicate_numbers}"
 			)
-		numbered_answers = find_answers(pdf, answer_page_start)
 		task_numbers = set(numbers)
+		numbered_answers = find_answers(pdf, answer_page_start, expected_numbers=task_numbers)
 		answer_numbers = set(numbered_answers)
 		missing = sorted(task_numbers - answer_numbers)
 		extra = sorted(answer_numbers - task_numbers)
