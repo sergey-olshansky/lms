@@ -59,11 +59,16 @@ export function createCourseOutlineDrag(options: {
 	}
 
 	function over(event: DragEvent, target: OutlineChapter) {
+    if (!isNearestSectionTarget(event, target)) return
 		if (!state.item || !canDropIntoSection(state.item, target)) return
 		event.preventDefault()
 		if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
 		state.hoveredTarget = target.name
 	}
+
+  function leave(target: OutlineChapter) {
+    if (state.hoveredTarget === target.name) state.hoveredTarget = null
+  }
 
 	function overRoot(event: DragEvent) {
 		if (
@@ -79,6 +84,7 @@ export function createCourseOutlineDrag(options: {
 	}
 
 	function drop(event: Event, target: OutlineChapter) {
+    if (!isNearestSectionTarget(event, target)) return
 		if (state.handled || !state.item || !canDropIntoSection(state.item, target))
 			return
 		event.preventDefault()
@@ -90,6 +96,14 @@ export function createCourseOutlineDrag(options: {
 			idx: (target.lessons?.length ?? 0) + (target.sections?.length ?? 0),
 		})
 	}
+
+  function isNearestSectionTarget(event: Event, target: OutlineChapter) {
+    const hit =
+      event.target instanceof Element
+        ? event.target.closest<HTMLElement>('[data-section-drop]')
+        : null
+    return !hit || hit.dataset.sectionDrop === target.name
+  }
 
 	function dropRoot(event: Event) {
 		if (
@@ -206,7 +220,7 @@ export function createCourseOutlineDrag(options: {
 		)
 	}
 
-	return { state, start, over, drop, overRoot, dropRoot, move, finish }
+  return { state, start, over, leave, drop, overRoot, dropRoot, move, finish }
 }
 
 export const courseOutlineDragKey: InjectionKey<

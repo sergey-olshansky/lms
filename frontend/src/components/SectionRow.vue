@@ -1,6 +1,12 @@
 <template>
 	<Disclosure v-slot="{ open }" :key="section.name" :defaultOpen="defaultOpen">
-		<div class="w-full rounded-4 py-1">
+		<div
+			class="w-full rounded-4 py-1"
+			:data-section-drop="allowEdit ? section.name : undefined"
+			@dragover.capture="outlineDrag?.over($event, section)"
+			@dragleave.self="outlineDrag?.leave(section)"
+			@drop.capture="outlineDrag?.drop($event, section)"
+		>
 			<div
 				class="outline-row outline-section-header flex w-full min-w-0 items-start gap-2 rounded-4 px-2 py-2 transition-colors hover:bg-surface-gray-1"
 				:class="[
@@ -12,10 +18,6 @@
 						: '',
 				]"
 				:data-sortable-level="currentLevel"
-				:data-section-drop="allowEdit ? section.name : undefined"
-				@dragover="outlineDrag?.over($event, section)"
-				@dragleave="outlineDrag && (outlineDrag.state.hoveredTarget = null)"
-				@drop="outlineDrag?.drop($event, section)"
 			>
 				<OutlineActionButton
 					v-if="allowEdit && !section.is_scorm_package"
