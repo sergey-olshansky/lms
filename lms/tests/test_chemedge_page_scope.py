@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 from lms.lms.chemedge_pdf_import import (
 	AIExtractionInvalid,
 	_bind_regions_to_page_plan,
+	_next_task_heading_top,
 	_prepare_trainer,
 	_resolve_source_region,
 )
@@ -24,6 +25,12 @@ class TestAIPageScope(unittest.TestCase):
 		self.assertEqual(regions[0]["page_number"], 2)
 		self.assertEqual(self.region["page_number"], 1)
 
+	def test_repairs_page_number_with_short_numbered_choice_ending(self):
+		pages = ["unrelated page", "[2] Установите соответствие между формулой и названием вещества. 6) стирол", "answer table"]
+		region = {"page_number": 1, "start": "[2] Установите соответствие между формулой", "end": "6) стирол", "kind": "task"}
+		regions = _bind_regions_to_page_plan([region], pages, {2, 3})
+		self.assertEqual(regions[0]["page_number"], 2)
+
 	def test_does_not_accept_matching_text_on_an_unplanned_page(self):
 		with self.assertRaises(AIExtractionInvalid):
 			_bind_regions_to_page_plan([self.region], self.pages, {3})
@@ -35,6 +42,15 @@ class TestAIPageScope(unittest.TestCase):
 	def test_preserves_valid_absolute_page_numbers(self):
 		region = {**self.region, "page_number": 2}
 		self.assertEqual(_bind_regions_to_page_plan([region], self.pages, {2}), [region])
+
+	def test_numbered_choices_do_not_truncate_the_question(self):
+		page = SimpleNamespace(extract_text_lines=lambda **kwargs: [
+			{"text": "4) бензол", "top": 150},
+			{"text": "6) стирол", "top": 180},
+			{"text": "3. Следующее задание", "top": 250},
+		])
+		with patch("lms.lms.chemedge_pdf_import.find_stepenin_task_headings", return_value=[]):
+			self.assertEqual(_next_task_heading_top(page, 100), 250)
 
 	def test_invalid_ai_scope_falls_back_to_recognised_parser(self):
 		candidate = {"parsed_ok": True, "title": "Trainer", "tasks": [{"number": 1}]}

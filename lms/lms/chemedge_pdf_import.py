@@ -404,7 +404,10 @@ def _bind_regions_to_page_plan(regions, pages, allowed):
 			continue
 		anchors = [str(region.get(key) or "").split() for key in ("start", "end")]
 		matches = []
-		if all(len(words) >= 3 for words in anchors):
+		# Keep a substantial opening anchor, but allow a two-token ending such as
+		# ``6) стирол``. Rebinding is accepted only when both anchors occur once,
+		# in order, on exactly one of the AI-planned pages.
+		if len(anchors[0]) >= 3 and len(anchors[1]) >= 2:
 			patterns = [re.compile(r"\s+".join(re.escape(word) for word in words), re.IGNORECASE) for words in anchors]
 			for number in sorted(allowed):
 				starts, ends = [list(pattern.finditer(pages[number - 1])) for pattern in patterns]
@@ -675,16 +678,19 @@ def _ai_question_html(task: dict, image_url: str | None = None) -> str:
 	)
 
 
-def _find_source_anchor(page, anchor: str, after: float = 0):
+def _find_source_anchor(page, anchor: str, after: float = 0, before: float | None = None):
 	pattern = r"\s+".join(re.escape(part) for part in anchor.split())
-	matches = [match for match in page.search(pattern, regex=True, case=False) if float(match["top"]) >= after - 1]
+	matches = [match for match in page.search(pattern, regex=True, case=False)
+		if float(match["top"]) >= after - 1 and (before is None or float(match["top"]) < before)]
 	if len(matches) == 1:
 		return float(matches[0]["top"]), float(matches[0]["bottom"])
 	if len(matches) > 1:
 		return None
 	# Normalise token spacing in formulas/line wraps, retaining word coordinates.
 	needle = re.findall(r"\w+", anchor.casefold())[:8]
-	if len(needle) < 3:
+	# Short closing anchors are common in numbered choice lists and printed
+	# answer lines. They remain safe when unique inside the current task boundary.
+	if not needle:
 		return None
 	words = []
 	for word in page.extract_words():
@@ -692,9 +698,28 @@ def _find_source_anchor(page, anchor: str, after: float = 0):
 			words.append((token, word))
 	matches = []
 	for index in range(len(words) - len(needle) + 1):
-		if [token for token, _ in words[index:index + len(needle)]] == needle and float(words[index][1]["top"]) >= after - 1:
+		if ([token for token, _ in words[index:index + len(needle)]] == needle
+				and float(words[index][1]["top"]) >= after - 1
+				and (before is None or float(words[index][1]["top"]) < before)):
 			matches.append((float(words[index][1]["top"]), float(words[index + len(needle) - 1][1]["bottom"])))
 	return matches[0] if len(matches) == 1 else None
+
+
+def _next_task_heading_top(page, after: float) -> float | None:
+	"""Find the next printed task boundary across common numbered PDF layouts."""
+	positions = [float(heading["top"]) for heading in find_stepenin_task_headings(page)
+		if float(heading["top"]) > after + 2]
+	try:
+		lines = page.extract_text_lines(strip=True, return_chars=False)
+	except (AttributeError, TypeError):
+		lines = []
+	for line in lines:
+		text = str(line.get("text", "")).strip()
+		# Parenthesised numbers are answer choices ("4) бензол"), not task
+		# boundaries. Ordinary task stems use "4."; bracketed tasks are above.
+		if re.match(r"^\d{1,4}\.\s+\S", text) and float(line["top"]) > after + 2:
+			positions.append(float(line["top"]))
+	return min(positions) if positions else None
 
 
 def _resolve_source_region(pdf, region: dict) -> dict:
@@ -705,11 +730,13 @@ def _resolve_source_region(pdf, region: dict) -> dict:
 	if "bbox" in region:
 		return region
 	start = _find_source_anchor(page, region["start"])
-	end = _find_source_anchor(page, region["end"], after=start[0] if start else 0)
+	if not start:
+		frappe.throw(_("AI selected a PDF fragment that could not be located safely. Please retry the import."), frappe.ValidationError)
+	next_heading = _next_task_heading_top(page, start[0])
+	end = _find_source_anchor(page, region["end"], after=start[0], before=next_heading)
 	if not start or not end:
 		frappe.throw(_("AI selected a PDF fragment that could not be located safely. Please retry the import."), frappe.ValidationError)
-	next_headings = [heading["top"] for heading in find_stepenin_task_headings(page) if heading["top"] > start[0] + 2]
-	limit = min(next_headings) - 3 if next_headings else float(page.height) - 55
+	limit = next_heading - 3 if next_heading else float(page.height) - 55
 	if end[1] > limit:
 		frappe.throw(_("AI selected a fragment spanning unrelated PDF tasks."), frappe.ValidationError)
 	bottom = end[1] + 5
