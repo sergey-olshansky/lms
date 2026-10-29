@@ -1542,10 +1542,13 @@ def _store_folder_image(folder: frappe._dict, file_name: str, content) -> dict:
 	)
 	stored.insert(ignore_permissions=True)
 
+	# Appends at the end of the folder's image order: a child row saved without
+	# its idx would fall out of that order (every reader sorts by idx).
 	row = frappe.new_doc("Folder Image Reference")
 	row.update(
 		{
 			"image": stored.name,
+			"idx": frappe.db.count("Folder Image Reference", {"parent": folder.name}) + 1,
 			"parent": folder.name,
 			"parenttype": "Course Folder",
 			"parentfield": "images",

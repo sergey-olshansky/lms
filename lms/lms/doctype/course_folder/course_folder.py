@@ -52,15 +52,11 @@ class CourseFolder(Document):
 				and owner.attached_to_name == self.name
 			):
 				owned.append(row.image)
-		# The placement row and the attachment link go before the File doc: frappe's
-		# link check refuses to delete a File that is still attached to this very
-		# folder ("linked with" it) -- exactly the state this method must clear.
+		# Image rows and placement rows go before the File docs: each image row
+		# is a Link to its File, and frappe's link check refuses to delete a
+		# File a child row still points at (delete_folder_image clears its row
+		# first for the same reason).
+		frappe.db.delete("Folder Image Reference", {"parent": self.name})
 		frappe.db.delete("Lesson Reference", {"folder": self.name})
 		for file_name in owned:
-			frappe.db.set_value(
-				"File",
-				file_name,
-				{"attached_to_doctype": None, "attached_to_name": None},
-				update_modified=False,
-		)
 			frappe.delete_doc("File", file_name, ignore_permissions=True)
