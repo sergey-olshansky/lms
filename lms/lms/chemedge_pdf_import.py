@@ -715,7 +715,9 @@ def _next_task_heading_top(page, after: float) -> float | None:
 		lines = []
 	for line in lines:
 		text = str(line.get("text", "")).strip()
-		if re.match(r"^(?:\[\d{1,4}\]|\d{1,4}[.)])\s+\S", text) and float(line["top"]) > after + 2:
+		# Parenthesised numbers are answer choices ("4) бензол"), not task
+		# boundaries. Ordinary task stems use "4."; bracketed tasks are above.
+		if re.match(r"^\d{1,4}\.\s+\S", text) and float(line["top"]) > after + 2:
 			positions.append(float(line["top"]))
 	return min(positions) if positions else None
 

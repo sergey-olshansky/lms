@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 from lms.lms.chemedge_pdf_import import (
 	AIExtractionInvalid,
 	_bind_regions_to_page_plan,
+	_next_task_heading_top,
 	_prepare_trainer,
 	_resolve_source_region,
 )
@@ -41,6 +42,15 @@ class TestAIPageScope(unittest.TestCase):
 	def test_preserves_valid_absolute_page_numbers(self):
 		region = {**self.region, "page_number": 2}
 		self.assertEqual(_bind_regions_to_page_plan([region], self.pages, {2}), [region])
+
+	def test_numbered_choices_do_not_truncate_the_question(self):
+		page = SimpleNamespace(extract_text_lines=lambda **kwargs: [
+			{"text": "4) бензол", "top": 150},
+			{"text": "6) стирол", "top": 180},
+			{"text": "3. Следующее задание", "top": 250},
+		])
+		with patch("lms.lms.chemedge_pdf_import.find_stepenin_task_headings", return_value=[]):
+			self.assertEqual(_next_task_heading_top(page, 100), 250)
 
 	def test_invalid_ai_scope_falls_back_to_recognised_parser(self):
 		candidate = {"parsed_ok": True, "title": "Trainer", "tasks": [{"number": 1}]}
