@@ -36,18 +36,31 @@ class CourseFolder(Document):
 		linked in from elsewhere survives; the Lesson Reference child rows that
 		place the folder in its section go too.
 		"""
+		owned = []
 		for row in self.images or []:
-			if row.image and frappe.db.exists("File", row.image):
-				owner = frappe.db.get_value(
-					"File",
-					row.image,
-					["attached_to_doctype", "attached_to_name"],
-					as_dict=True,
-				)
-				if (
-					owner
-					and owner.attached_to_doctype == self.doctype
-					and owner.attached_to_name == self.name
-				):
-					frappe.delete_doc("File", row.image, ignore_permissions=True)
+			if not (row.image and frappe.db.exists("File", row.image)):
+				continue
+			owner = frappe.db.get_value(
+				"File",
+				row.image,
+				["attached_to_doctype", "attached_to_name"],
+				as_dict=True,
+			)
+			if (
+				owner
+				and owner.attached_to_doctype == self.doctype
+				and owner.attached_to_name == self.name
+			):
+				owned.append(row.image)
+		# The placement row and the attachment link go before the File doc: frappe's
+		# link check refuses to delete a File that is still attached to this very
+		# folder ("linked with" it) -- exactly the state this method must clear.
 		frappe.db.delete("Lesson Reference", {"folder": self.name})
+		for file_name in owned:
+			frappe.db.set_value(
+				"File",
+				file_name,
+				{"attached_to_doctype": None, "attached_to_name": None},
+				update_modified=False,
+		)
+			frappe.delete_doc("File", file_name, ignore_permissions=True)

@@ -229,12 +229,13 @@ class TestCourseFolders(BaseTestUtils):
 		api.create_lesson(self.chapter.name)
 		second = api.create_folder(title="B", chapter=self.chapter.name)
 
-		# Child rows are [A, lesson, B]; move B to the front.
+		# Child rows are [A, lesson, B]; move B to the front, the same
+		# remove-and-insert every mixed-child endpoint uses: [B, A, lesson].
 		api.update_folder_index(folder=second, parent=self.chapter.name, idx=0)
 
 		node = get_course_outline(self.course.name)[0]
 		self.assertEqual([f.title for f in node.folders], ["B", "A"])
-		self.assertEqual([f.position for f in node.folders], [1, 3])
+		self.assertEqual([f.position for f in node.folders], [1, 2])
 		self.assertEqual([l.number for l in node.lessons], ["1-1"])
 
 		with self.assertRaises(frappe.DoesNotExistError):
@@ -488,6 +489,10 @@ class TestFolderArchiveRoundTrip(BaseTestUtils):
 
 		path = self.export(self.course.name)
 		trimmed = self.trim_members(path, ("assets/",))
+
+		# The source folder (its File doc and bytes with it) must be gone, or the
+		# import would legitimately reuse the URL the site already serves.
+		api.delete_folder(folder)
 
 		with self.assertRaises(frappe.ValidationError) as ctx:
 			self.import_(trimmed)

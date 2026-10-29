@@ -1375,10 +1375,14 @@ def create_folder(title: str, chapter: str) -> str:
 	# nosemgrep: lms-unjustified-ignore-permissions - folder creation; access checked via can_modify_course
 	folder.insert(ignore_permissions=True)
 
+	# Appends at the end of the section's single child order, past any lessons
+	# and nested sections: a child row saved without its idx would sit outside
+	# that order (create_lesson numbers itself the same way).
 	row = frappe.new_doc("Lesson Reference")
 	row.update(
 		{
 			"folder": folder.name,
+			"idx": frappe.db.count("Lesson Reference", {"parent": chapter}) + 1,
 			"parent": chapter,
 			"parenttype": "Course Chapter",
 			"parentfield": "lessons",

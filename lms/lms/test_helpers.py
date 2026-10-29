@@ -75,19 +75,27 @@ class BaseTestUtils(IntegrationTestCase):
 		if frappe.db.exists("User", email):
 			return frappe.get_doc("User", email)
 
-		user = frappe.new_doc("User")
-		user.update(
-			{
-				"email": email,
-				"first_name": first_name,
-				"last_name": last_name,
-				"user_type": user_type,
-				"send_welcome_email": False,
-			}
-		)
-		for role in roles:
-			user.append("roles", {"role": role})
-		user.save()
+		# Fixtures are admin actions: a test may sit inside set_user(instructor)
+		# when it asks for another student account, and no course role may
+		# create User docs.
+		previous_user = frappe.session.user
+		frappe.set_user("Administrator")
+		try:
+			user = frappe.new_doc("User")
+			user.update(
+				{
+					"email": email,
+					"first_name": first_name,
+					"last_name": last_name,
+					"user_type": user_type,
+					"send_welcome_email": False,
+				}
+			)
+			for role in roles:
+				user.append("roles", {"role": role})
+			user.save()
+		finally:
+			frappe.set_user(previous_user)
 		return user
 
 	@classmethod
