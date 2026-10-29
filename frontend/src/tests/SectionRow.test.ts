@@ -193,7 +193,8 @@ describe('SectionRow editor actions', () => {
 		expect(wrapper.find('button[aria-label="Move to…"]').exists()).toBe(false)
 		expect(wrapper.find('button[aria-label="Rename"]').exists()).toBe(false)
 		expect(wrapper.get('[role="group"]').classes()).toContain('outline-actions')
-		expect(wrapper.get('[role="group"]').findAll('button')).toHaveLength(3)
+		expect(wrapper.get('[role="group"]').findAll('button')).toHaveLength(4)
+		expect(wrapper.find('button[aria-label="Add Folder"]').exists()).toBe(true)
 		expect(wrapper.get('.outline-section-header').classes()).toContain(
 			'outline-drag-handle-level-1'
 		)
@@ -417,7 +418,9 @@ describe('SectionRow depth limit', () => {
 		})
 
 		expect(wrapper.find('button[aria-label="Add Section"]').exists()).toBe(false)
-		expect(wrapper.get('[role="group"]').findAll('button')).toHaveLength(2)
+		expect(wrapper.get('[role="group"]').findAll('button')).toHaveLength(3)
+		// Folders are allowed at every level; only sections stop at level 2.
+		expect(wrapper.find('button[aria-label="Add Folder"]').exists()).toBe(true)
 	})
 
 	it('offers adding a section at level 1 and emits the parent on click', async () => {

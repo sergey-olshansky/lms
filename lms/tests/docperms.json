@@ -54,6 +54,32 @@
 			"export"
 		]
 	},
+	"Course Folder": {
+		"Course Creator#0": [
+			"read",
+			"write",
+			"create",
+			"delete",
+			"share",
+			"report",
+			"export"
+		],
+		"LMS Student#0": [
+			"read",
+			"share",
+			"report",
+			"export"
+		],
+		"Moderator#0": [
+			"read",
+			"write",
+			"create",
+			"delete",
+			"share",
+			"report",
+			"export"
+		]
+	},
 	"Course Lesson": {
 		"Course Creator#0#if_owner": [
 			"read",

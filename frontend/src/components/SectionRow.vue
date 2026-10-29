@@ -113,6 +113,13 @@
 					<span class="lucide-folder-plus size-4" aria-hidden="true" />
 				</OutlineActionButton>
 				<OutlineActionButton
+					v-if="!section.is_scorm_package"
+					:label="__('Add Folder')"
+					@click="emit('add-folder', section)"
+				>
+					<span class="lucide-folder size-4" aria-hidden="true" />
+				</OutlineActionButton>
+				<OutlineActionButton
 					v-if="section.is_scorm_package"
 					:label="__('Edit Chapter')"
 					@click="emit('edit-chapter', section)"
@@ -146,7 +153,7 @@
 				:handle="`.outline-drag-handle[data-sortable-level='${
 					currentLevel + 1
 				}']`"
-					:filter="'.scorm-section-row, .outline-actions, .outline-disclosure-toggle, input, textarea'"
+					:filter="'.scorm-section-row, .outline-folder-row, .outline-actions, .outline-disclosure-toggle, input, textarea'"
 				:preventOnFilter="false"
 				:move="outlineDrag?.move"
 				:data-chapter="section.name"
@@ -187,6 +194,36 @@
 							@create-lesson="(payload) => emit('create-lesson', payload)"
 							@add-section="(node) => emit('add-section', node)"
 							@reorder-section="(payload) => emit('reorder-section', payload)"
+							@add-folder="(node) => emit('add-folder', node)"
+							@rename-folder="(node) => emit('rename-folder', node)"
+							@delete-folder="(node) => emit('delete-folder', node)"
+							@open-folder="(node) => emit('open-folder', node)"
+							@move-folder="(payload) => emit('move-folder', payload)"
+						/>
+					</div>
+					<div
+						v-else-if="element.kind === 'folder'"
+						:data-outline-key="element.key"
+						:style="outlineDrag?.state.hoveredTarget === section.name && outlineDrag?.state.hoveredBefore === element.key ? { boxShadow: 'inset 0 2px 0 var(--outline-blue-2, #2490ef)' } : undefined"
+						:class="childIndentClass"
+					>
+						<FolderRow
+							:folder="element.folder!"
+							:courseName="courseName"
+							:allowEdit="allowEdit"
+							:position="element.rowIndex"
+							:siblingCount="mergedChildren.length"
+							@open-folder="(node) => emit('open-folder', node)"
+							@rename-folder="(node) => emit('rename-folder', node)"
+							@delete-folder="(node) => emit('delete-folder', node)"
+							@move-folder="
+								(direction) =>
+									emit('move-folder', {
+										folder: element.folder!,
+										direction,
+										parent: section.name,
+									})
+							"
 						/>
 					</div>
 					<div
@@ -309,8 +346,9 @@ import { useRoute, useRouter } from 'vue-router'
 import type { RouteLocationRaw } from 'vue-router'
 import type { InputExposed } from 'frappe-ui'
 import SectionRow from '@/components/SectionRow.vue'
+import FolderRow from '@/components/FolderRow.vue'
 import OutlineActionButton from '@/components/OutlineActionButton.vue'
-import type { OutlineChapter, OutlineLesson, SessionUser } from '@/types'
+import type { OutlineChapter, OutlineFolder, OutlineLesson, SessionUser } from '@/types'
 import { parseLessonNumber } from '@/utils/courseOutline'
 import { courseOutlineDragKey } from '@/composables/courseOutlineDrag'
 import {
@@ -334,10 +372,11 @@ interface DraggableEvent {
 
 interface MergedChild {
 	key: string
-	kind: 'lesson' | 'section'
+	kind: 'lesson' | 'section' | 'folder'
 	rowIndex: number
 	lesson?: OutlineLesson
 	node?: OutlineChapter
+	folder?: OutlineFolder
 }
 
 type SectionReorderPayload =
@@ -390,6 +429,11 @@ const emit = defineEmits<{
 	'create-lesson': [{ chapter: OutlineChapter; lessonIdx: number }]
 	'add-section': [OutlineChapter]
 	'reorder-section': [SectionReorderPayload]
+	'add-folder': [OutlineChapter]
+	'rename-folder': [OutlineFolder]
+	'delete-folder': [OutlineFolder]
+	'open-folder': [OutlineFolder]
+	'move-folder': [{ folder: OutlineFolder; parent: string; direction: 'up' | 'down' }]
 }>()
 
 const route = useRoute()
@@ -476,6 +520,14 @@ const mergedChildren = computed<MergedChild[]>(() => {
 			node,
 		})
 	}
+	for (const folder of props.section.folders ?? []) {
+		children.push({
+			key: `folder-${folder.name}`,
+			kind: 'folder',
+			rowIndex: folder.position ?? children.length,
+			folder,
+		})
+	}
 	return children.sort((a, b) => a.rowIndex - b.rowIndex)
 })
 
@@ -495,7 +547,8 @@ const countsLabel = computed<string>(() => {
 })
 
 // Legacy chapters keep their lesson-only number badge (above); a section that
-// holds both kinds shows the combined direct counts instead.
+// holds both kinds shows the combined direct counts instead. Folders are
+// counted in the folder row itself, not here.
 const childIndentClass = computed<string>(() =>
 	currentLevel.value === 1 ? 'ps-6' : 'ps-4'
 )

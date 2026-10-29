@@ -1318,6 +1318,285 @@ def is_descendant_of(candidate: str, ancestor: str) -> bool:
 	return False
 
 
+# --- Image folders ---------------------------------------------------------
+# A folder is the third kind of a section's child row: it sits in the same
+# single manual order as lessons and nested sections (the Lesson Reference
+# `folder` field), holds its images in Folder Image Reference rows and never
+# joins numbering, progress or locking.
+
+FOLDER_IMAGE_EXTENSIONS = ("jpg", "jpeg", "png", "webp", "gif")
+FOLDER_IMAGE_MAX_SIZE = 10 * 1024 * 1024
+FOLDER_MAX_IMAGES = 200
+
+
+def _folder_or_throw(folder: str) -> frappe._dict:
+	"""Load a Course Folder and enforce course-level write access on it."""
+	if not isinstance(folder, str) or not folder:
+		frappe.throw(_("folder must be a string"))
+	doc = frappe.db.get_value(
+		"Course Folder", folder, ["name", "title", "course", "chapter"], as_dict=True
+	)
+	if not doc:
+		frappe.throw(_("Folder {0} not found").format(folder), frappe.DoesNotExistError)
+	if not can_modify_course(doc.course):
+		frappe.throw(_("You do not have permission to modify this folder."), frappe.PermissionError)
+	return doc
+
+
+@frappe.whitelist(methods=["POST"])
+def create_folder(title: str, chapter: str) -> str:
+	"""Create a named image folder appended to a section's mixed children.
+
+	Titles are deliberately not unique: the folder's docname is numbered, so two
+	folders in one section may share a title ("Тема 1" twice) without colliding.
+	"""
+	if not isinstance(title, str):
+		frappe.throw(_("title must be a string"))
+	if not isinstance(chapter, str):
+		frappe.throw(_("chapter must be a string"))
+	title = title.strip()
+	if not title:
+		frappe.throw(_("Folder title cannot be empty."), frappe.ValidationError)
+
+	section = frappe.db.get_value(
+		"Course Chapter", chapter, ["course", "is_scorm_package"], as_dict=True
+	)
+	if not section or not section.course:
+		frappe.throw(_("Section {0} not found").format(chapter), frappe.DoesNotExistError)
+	if not can_modify_course(section.course):
+		frappe.throw(_("You do not have permission to add a folder."), frappe.PermissionError)
+	if section.is_scorm_package:
+		frappe.throw(_("SCORM sections cannot contain folders."), frappe.ValidationError)
+
+	folder = frappe.new_doc("Course Folder")
+	folder.update({"title": title, "course": section.course, "chapter": chapter})
+	# Access is the course-level check above, not DocPerms: an instructor
+	# without a Desk role holds nothing on Course Folder itself.
+	# nosemgrep: lms-unjustified-ignore-permissions - folder creation; access checked via can_modify_course
+	folder.insert(ignore_permissions=True)
+
+	row = frappe.new_doc("Lesson Reference")
+	row.update(
+		{
+			"folder": folder.name,
+			"parent": chapter,
+			"parenttype": "Course Chapter",
+			"parentfield": "lessons",
+		}
+	)
+	row.insert()
+	return folder.name
+
+
+@frappe.whitelist(methods=["POST"])
+def rename_folder(folder: str, title: str) -> str:
+	if not isinstance(folder, str) or not folder:
+		frappe.throw(_("folder must be a string"))
+	if not isinstance(title, str):
+		frappe.throw(_("title must be a string"))
+	doc = _folder_or_throw(folder)
+	title = title.strip()
+	if not title:
+		frappe.throw(_("Folder title cannot be empty."), frappe.ValidationError)
+	frappe.db.set_value("Course Folder", doc.name, "title", title)
+	return title
+
+
+@frappe.whitelist(methods=["POST"])
+def delete_folder(folder: str):
+	"""Delete a folder, its images and its child-row placement."""
+	doc = _folder_or_throw(folder)
+	parents = set(frappe.get_all("Lesson Reference", {"folder": doc.name}, pluck="parent"))
+	# on_trash removes the folder's own Files and reference rows; the ignore is
+	# for the same course-level-access reason as creation.
+	# nosemgrep: lms-unjustified-ignore-permissions - folder deletion; access checked via can_modify_course
+	frappe.delete_doc("Course Folder", doc.name, ignore_permissions=True)
+	for parent in parents:
+		if frappe.db.exists("Course Chapter", parent):
+			renumber_children(parent)
+
+
+@frappe.whitelist(methods=["POST"])
+def update_folder_index(folder: str, parent: str, idx: int):
+	"""Reorder an image folder inside its section's single order of mixed children.
+
+	`idx` is a 0-based position among ALL child rows of the parent — lessons,
+	sections and folders alike — mirroring update_section_index.
+	"""
+	if not isinstance(folder, str):
+		frappe.throw(_("folder must be a string"))
+	if not isinstance(parent, str):
+		frappe.throw(_("parent must be a string"))
+
+	course = frappe.db.get_value("Course Chapter", parent, "course")
+	if not course:
+		frappe.throw(_("Parent section {0} not found").format(parent), frappe.DoesNotExistError)
+	if not can_modify_course(course):
+		frappe.throw(_("You do not have permission to modify this folder."), frappe.PermissionError)
+
+	rows = frappe.get_all(
+		"Lesson Reference",
+		{"parent": parent},
+		["name", "folder"],
+		order_by="idx",
+	)
+	position = next((i for i, row in enumerate(rows) if row.folder == folder), None)
+	if position is None:
+		frappe.throw(_("Folder {0} not found in this section.").format(folder), frappe.DoesNotExistError)
+
+	moved = rows.pop(position)
+	slot = max(0, min(int(idx), len(rows)))
+	rows.insert(slot, moved)
+	write_child_order(rows)
+
+
+@frappe.whitelist(methods=["POST"])
+def upload_folder_image(folder: str):
+	"""Upload one image into a folder (one request per file).
+
+	A batch uploads file by file, so a failure isolates to its own file and the
+	client retries only the failed ones. Idempotent: the same file name with the
+	same size already inside the folder is skipped, never duplicated.
+	"""
+	doc = _folder_or_throw(folder)
+
+	request = getattr(frappe.local, "request", None)
+	files = getattr(request, "files", None)
+	upload = files.get("file") if files else None
+	if upload is None:
+		frappe.throw(
+			_("No file received. Attach an image as the 'file' part of the request."),
+			frappe.ValidationError,
+		)
+
+	file_name = getattr(upload, "filename", "") or "image"
+	content = upload.read()
+	return _store_folder_image(doc, file_name, content)
+
+
+def _store_folder_image(folder: frappe._dict, file_name: str, content) -> dict:
+	"""Validate one image and store it as the folder's last image row."""
+	file_name = (file_name or "").replace("\\", "/").split("/")[-1].strip() or "image"
+	extension = os.path.splitext(file_name)[1].lstrip(".").lower()
+	if extension not in FOLDER_IMAGE_EXTENSIONS:
+		frappe.throw(_("Only JPG, PNG, WebP and GIF images are allowed."), frappe.ValidationError)
+	if not content:
+		frappe.throw(_("The selected file is empty."), frappe.ValidationError)
+	if len(content) > FOLDER_IMAGE_MAX_SIZE:
+		frappe.throw(
+			_("Image is larger than the {0} MB limit.").format(FOLDER_IMAGE_MAX_SIZE // (1024 * 1024)),
+			frappe.ValidationError,
+		)
+
+	existing_rows = frappe.get_all(
+		"Folder Image Reference",
+		{"parent": folder.name},
+		["name", "image"],
+		order_by="idx",
+	)
+	if len(existing_rows) >= FOLDER_MAX_IMAGES:
+		frappe.throw(
+			_("This folder already holds the maximum of {0} images.").format(FOLDER_MAX_IMAGES),
+			frappe.ValidationError,
+		)
+
+	# The duplicate rule: same file name and same size already inside the folder
+	# means the upload is a retry of a file that already made it — skip it.
+	if existing_rows:
+		stored_files = frappe.get_all(
+			"File",
+			{"name": ("in", [row.image for row in existing_rows])},
+			["name", "file_name", "file_url", "file_size"],
+		)
+		for stored in stored_files:
+			if (stored.file_name or "").strip().casefold() == file_name.casefold() and cint(
+				stored.file_size
+			) == len(content):
+				return {
+					"status": "skipped",
+					"file": {
+						"name": stored.name,
+						"file_name": stored.file_name,
+						"file_url": stored.file_url,
+						"file_size": stored.file_size,
+						},
+				}
+
+	# File checks write on the doctype it attaches to, and a course instructor
+	# holds nothing on Course Folder: access was enforced by _folder_or_throw.
+	# nosemgrep: lms-unjustified-ignore-permissions - folder image upload; access checked via can_modify_course
+	stored = frappe.get_doc(
+		{
+			"doctype": "File",
+			"file_name": file_name,
+			"content": content,
+			"decode": False,
+			"is_private": 1,
+			"attached_to_doctype": "Course Folder",
+			"attached_to_name": folder.name,
+		}
+	)
+	stored.insert(ignore_permissions=True)
+
+	row = frappe.new_doc("Folder Image Reference")
+	row.update(
+		{
+			"image": stored.name,
+			"parent": folder.name,
+			"parenttype": "Course Folder",
+			"parentfield": "images",
+		}
+	)
+	row.insert()
+
+	return {
+		"status": "uploaded",
+		"file": {
+			"name": stored.name,
+			"file_name": stored.file_name,
+			"file_url": stored.file_url,
+			"file_size": stored.file_size,
+		},
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+def delete_folder_image(folder: str, image: str):
+	"""Remove one image — its child row and its private File — from a folder."""
+	doc = _folder_or_throw(folder)
+	if not isinstance(image, str) or not image:
+		frappe.throw(_("image must be a string"))
+
+	rows = frappe.get_all(
+		"Folder Image Reference",
+		{"parent": doc.name},
+		["name", "image"],
+		order_by="idx",
+	)
+	row = next((row for row in rows if row.image == image), None)
+	if not row:
+		frappe.throw(_("Image {0} not found in this folder.").format(image), frappe.DoesNotExistError)
+
+	frappe.db.delete("Folder Image Reference", row.name)
+	if frappe.db.exists("File", image):
+		owner = frappe.db.get_value(
+			"File", image, ["attached_to_doctype", "attached_to_name"], as_dict=True
+		)
+		if (
+				owner
+				and owner.attached_to_doctype == "Course Folder"
+				and owner.attached_to_name == doc.name
+		):
+			# nosemgrep: lms-unjustified-ignore-permissions - folder image delete; access checked via can_modify_course
+			frappe.delete_doc("File", image, ignore_permissions=True)
+
+	remaining = frappe.get_all(
+		"Folder Image Reference", {"parent": doc.name}, ["name"], order_by="idx"
+	)
+	for position, remaining_row in enumerate(remaining, start=1):
+		frappe.db.set_value("Folder Image Reference", remaining_row.name, "idx", position)
+
+
 # Matches SETTINGS_PAGE_LENGTH in the frontend, which pages `start` by this.
 MEMBERS_PAGE_LENGTH = 13
 
@@ -2103,6 +2382,14 @@ def delete_chapter(chapter: str):
 		frappe.db.delete("LMS Video Watch Duration", {"lesson": lesson})
 		# Raw db.delete below skips the controller's on_trash, so unlink back-references here.
 		cleanup_lesson_backreferences(lesson)
+
+	# Image folders of the subtree go with it: on_trash removes their Files and
+	# their reference rows (the bulk Lesson Reference delete below only covers
+	# rows parented to the deleted sections).
+	folders = frappe.get_all("Course Folder", {"chapter": ["in", chapter_names]}, pluck="name")
+	for folder in folders:
+		# nosemgrep: lms-unjustified-ignore-permissions - subtree purge; access checked via can_modify_course above
+		frappe.delete_doc("Course Folder", folder, ignore_permissions=True)
 
 	frappe.db.delete("Lesson Reference", {"parent": ["in", chapter_names]})
 	frappe.db.delete("Course Lesson", {"chapter": ["in", chapter_names]})

@@ -1747,13 +1747,25 @@ def get_course_outline(course: str, progress: bool = False) -> list:
 
 	lesson_rows = get_outline_lessons([c.name for c in all_chapters])
 	files_by_name = get_scorm_files(all_chapters)
+	folder_rows = get_outline_folders([c.name for c in all_chapters])
+	folder_images = get_folder_images([row.name for row in folder_rows])
 	completed = get_completed_lessons(course, lesson_rows) if progress else set()
 
 	from lms.lms.permissions import enforces_lesson_completion
 
 	enforce = enforces_lesson_completion(course) if progress else False
 
-	return build_outline(chapters, lesson_rows, section_rows, files_by_name, completed, progress, enforce)
+	return build_outline(
+		chapters,
+		lesson_rows,
+		section_rows,
+		files_by_name,
+		completed,
+		progress,
+		enforce,
+		folder_rows,
+		folder_images,
+	)
 
 
 def can_view_course(course: str) -> bool:
@@ -1862,6 +1874,71 @@ def get_outline_sections(root_chapter_names: list) -> list:
 		seen.update(r.name for r in level_rows)
 		pending = [r.name for r in level_rows]
 	return rows
+
+
+def get_outline_folders(chapter_names: list) -> list:
+	"""Image-folder child rows of the given sections, in child-row order.
+
+	Each row is a Lesson Reference child row that references a Course Folder
+	instead of a Course Lesson — the third child kind — so a folder sits in its
+	section's single manual order of mixed children like any other material.
+	"""
+	LessonReference = frappe.qb.DocType("Lesson Reference")
+	CourseFolder = frappe.qb.DocType("Course Folder")
+	return (
+		frappe.qb.from_(LessonReference)
+		.join(CourseFolder)
+		.on(CourseFolder.name == LessonReference.folder)
+		.select(
+			LessonReference.parent.as_("chapter_name"),
+			LessonReference.idx.as_("row_idx"),
+			CourseFolder.name.as_("name"),
+			CourseFolder.title.as_("title"),
+		)
+		.where(LessonReference.parent.isin(chapter_names))
+		.where(LessonReference.folder.notnull())
+		.orderby(LessonReference.parent)
+		.orderby(LessonReference.idx)
+	).run(as_dict=True)
+
+
+def get_folder_images(folder_names: list) -> dict:
+	"""Ordered image lists per folder.
+
+	The Folder Image Reference child rows joined to their File docs, in child-row
+	idx order: the folder's deterministic image order, reproducible on reload.
+	"""
+	if not folder_names:
+		return {}
+	FolderImageReference = frappe.qb.DocType("Folder Image Reference")
+	FileTable = frappe.qb.DocType("File")
+	rows = (
+		frappe.qb.from_(FolderImageReference)
+		.join(FileTable)
+		.on(FileTable.name == FolderImageReference.image)
+		.select(
+			FolderImageReference.parent.as_("folder_name"),
+			FolderImageReference.idx.as_("row_idx"),
+			FileTable.name.as_("name"),
+			FileTable.file_name.as_("file_name"),
+			FileTable.file_url.as_("file_url"),
+			FileTable.file_size.as_("file_size"),
+		)
+		.where(FolderImageReference.parent.isin(folder_names))
+		.orderby(FolderImageReference.parent)
+		.orderby(FolderImageReference.idx)
+	).run(as_dict=True)
+	images = frappe._dict()
+	for row in rows:
+		images.setdefault(row.folder_name, []).append(
+			frappe._dict(
+				name=row.name,
+				file_name=row.file_name,
+				file_url=row.file_url,
+				file_size=row.file_size,
+			)
+		)
+	return images
 
 
 def get_scorm_files(chapters: list) -> dict:
@@ -2031,13 +2108,19 @@ def build_outline(
 	completed: set,
 	progress: bool,
 	enforce_completion: bool = False,
+	folder_rows: list = None,
+	folder_images: dict = None,
 ) -> list:
-	"""Assemble the recursive section tree from the three row queries.
+	"""Assemble the recursive section tree from the row queries.
 
 	Document order — the order progress, prev/next and locking walk — is the
 	depth-first traversal of each section's children in child-table row order,
-	whatever mix of lessons and nested sections that order holds.
+	whatever mix of lessons, nested sections and image folders that order holds.
+	Folders never join the document order: they carry no lessons, so numbering,
+	progress and locking read them as ordinary static material of the section.
 	"""
+	folder_rows = folder_rows or []
+	folder_images = folder_images or {}
 	lessons_by_chapter = {}
 	for lr in lesson_rows:
 		lesson = frappe._dict(
@@ -2066,6 +2149,8 @@ def build_outline(
 		)
 	for row in section_rows:
 		children_by_chapter.setdefault(row.chapter_name, []).append(("section", row.row_idx, row))
+	for row in folder_rows:
+		children_by_chapter.setdefault(row.chapter_name, []).append(("folder", row.row_idx, row))
 	for children in children_by_chapter.values():
 		children.sort(key=lambda child: child[1])
 
@@ -2076,7 +2161,7 @@ def build_outline(
 			for kind, _row_idx, payload in children_by_chapter.get(name, []):
 				if kind == "lesson":
 					ordered_names.append(payload.name)
-				else:
+				elif kind == "section":
 					collect_document_order(payload.name)
 
 		for c in chapters:
@@ -2092,6 +2177,7 @@ def build_outline(
 	def build_section(row, level: int, path: str) -> frappe._dict:
 		lessons = []
 		sections = []
+		folders = []
 		for kind, _row_idx, payload in children_by_chapter.get(row.name, []):
 			if kind == "lesson":
 				# A lesson's number suffix is its position among the section's
@@ -2099,6 +2185,20 @@ def build_outline(
 				# two drift apart the moment a nested section is inserted.
 				payload.number = f"{path}-{len(lessons) + 1}"
 				lessons.append(payload)
+			elif kind == "folder":
+				# A folder is static material: it keeps its child-row position in
+				# the section's mixed order but never numbers, locks or progresses
+				# like a lesson does.
+				images = folder_images.get(payload.name, [])
+				folders.append(
+					frappe._dict(
+						name=payload.name,
+						title=payload.title,
+						position=payload.row_idx,
+						images=images,
+						image_count=len(images),
+					)
+				)
 			else:
 				# The number suffix of a nested section is its position among the
 				# parent's sections, mirroring the lesson rule above.
@@ -2117,8 +2217,10 @@ def build_outline(
 			position=row.row_idx if hasattr(row, "row_idx") else row.idx,
 			sections=sections,
 			lessons=lessons,
+			folders=folders,
 			lesson_count=len(lessons),
 			section_count=len(sections),
+			folder_count=len(folders),
 			total_lesson_count=len(lessons) + sum(s.total_lesson_count for s in sections),
 		)
 		# The bare docname is what survives a deleted File row; the expansion is what
