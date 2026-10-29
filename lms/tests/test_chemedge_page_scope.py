@@ -24,6 +24,12 @@ class TestAIPageScope(unittest.TestCase):
 		self.assertEqual(regions[0]["page_number"], 2)
 		self.assertEqual(self.region["page_number"], 1)
 
+	def test_repairs_page_number_with_short_numbered_choice_ending(self):
+		pages = ["unrelated page", "[2] Установите соответствие между формулой и названием вещества. 6) стирол", "answer table"]
+		region = {"page_number": 1, "start": "[2] Установите соответствие между формулой", "end": "6) стирол", "kind": "task"}
+		regions = _bind_regions_to_page_plan([region], pages, {2, 3})
+		self.assertEqual(regions[0]["page_number"], 2)
+
 	def test_does_not_accept_matching_text_on_an_unplanned_page(self):
 		with self.assertRaises(AIExtractionInvalid):
 			_bind_regions_to_page_plan([self.region], self.pages, {3})

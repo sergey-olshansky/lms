@@ -75,6 +75,25 @@ class TestPDFReview(unittest.TestCase):
 		page.search.return_value = [{"top": 10, "bottom": 20}, {"top": 30, "bottom": 40}]
 		self.assertIsNone(importer._find_source_anchor(page, "same repeated text"))
 
+	def test_two_token_source_anchor_can_be_located_from_pdf_words(self):
+		page = Mock()
+		page.search.return_value = []
+		page.extract_words.return_value = [
+			{"text": "5)", "top": 10, "bottom": 20},
+			{"text": "толуол", "top": 10, "bottom": 20},
+			{"text": "6)", "top": 30, "bottom": 40},
+			{"text": "стирол", "top": 30, "bottom": 40},
+		]
+		self.assertEqual(importer._find_source_anchor(page, "6) стирол"), (30.0, 40.0))
+
+	def test_repeated_short_ending_is_unique_inside_task_boundary(self):
+		page = Mock()
+		page.search.return_value = [
+			{"top": 100, "bottom": 110},
+			{"top": 200, "bottom": 210},
+		]
+		self.assertEqual(importer._find_source_anchor(page, "Ответ:", after=80, before=150), (100.0, 110.0))
+
 	def test_unknown_region_is_rejected_instead_of_guessing_a_page(self):
 		with self.assertRaises(frappe.ValidationError):
 			importer._validate_ai_regions([{"ref": "invented"}], candidate(), 1)
