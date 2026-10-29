@@ -12,6 +12,9 @@ visibility, and cleanup on folder/chapter delete.
 
 import base64
 import io
+import json
+import os
+import zipfile
 from contextlib import contextmanager
 from unittest.mock import patch
 
@@ -20,6 +23,8 @@ from frappe.tests import IntegrationTestCase
 from werkzeug.datastructures import FileStorage
 
 from lms.lms import api
+from lms.lms import course_import_export
+from lms.lms.course_import_export import export_course_zip, import_course_zip
 from lms.lms.test_helpers import BaseTestUtils
 from lms.lms.utils import get_course_outline
 
@@ -323,3 +328,180 @@ class TestCourseFolders(BaseTestUtils):
 		# Neither does a guest.
 		frappe.set_user("Guest")
 		self.assertEqual(get_course_outline(self.course.name), [])
+
+
+class TestFolderArchiveRoundTrip(BaseTestUtils):
+	"""The course archive carries folders and their images without silent loss.
+
+	Export packs every folder doc with its images' bytes and order; import
+	rebuilds the folders on the right sections with their File links, privacy and
+	attachment intact -- or refuses, never drops.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		self._create_user(INSTRUCTOR, "Frappe", "Teacher", ["Course Creator"])
+		self.course = self._create_course("Folder Archive Course")
+		frappe.set_user(INSTRUCTOR)
+		self.chapter = self.make_chapter("Materials")
+		self.hash = frappe.generate_hash(length=6).lower()
+
+	def make_chapter(self, title, parent_section=None):
+		chapter = frappe.new_doc("Course Chapter")
+		chapter.update(
+			{"course": self.course.name, "title": title, "parent_section": parent_section}
+		)
+		chapter.insert()
+		if not parent_section:
+			self._create_chapter_reference(self.course.name, chapter.name, idx=1)
+		return chapter
+
+	def attach_section_row(self, parent, child, idx):
+		row = frappe.new_doc("Lesson Reference")
+		row.update(
+			{
+				"section": child.name,
+				"idx": idx,
+				"parent": parent.name,
+				"parenttype": "Course Chapter",
+				"parentfield": "lessons",
+			}
+		)
+		row.insert()
+
+	def upload(self, folder, filename, payload):
+		with multipart(filename, payload):
+			return api.upload_folder_image(folder=folder)["file"]
+
+	def export(self, course_name):
+		"""Run the real export; keep (and clean up) the ZIP it produces."""
+		with patch.object(course_import_export, "serve_zip") as serve, patch.object(
+			course_import_export, "schedule_file_deletion"
+		):
+			export_course_zip(course_name)
+		path = serve.call_args[0][0]
+		self.addCleanup(lambda: os.path.exists(path) and os.remove(path))
+		return path
+
+	def import_(self, path):
+		original = frappe.session.user
+		frappe.set_user(INSTRUCTOR)
+		try:
+			return import_course_zip(f"/private/files/{os.path.basename(path)}")
+		finally:
+			frappe.set_user(original)
+
+	def trim_members(self, path, prefixes):
+		"""The same archive minus the given member trees (a damaged copy)."""
+		trimmed = path.replace(".zip", "-trimmed.zip")
+		with zipfile.ZipFile(path) as src, zipfile.ZipFile(trimmed, "w") as dst:
+			for member in src.namelist():
+				if not member.startswith(tuple(prefixes)):
+					dst.writestr(member, src.read(member))
+		self.addCleanup(lambda: os.path.exists(trimmed) and os.remove(trimmed))
+		return trimmed
+
+	def test_round_trip_keeps_folder_names_order_and_image_bytes(self):
+		# Root section: folder, lesson, folder -- the mixed order; a nested
+		# section carries a folder of its own.
+		first = api.create_folder(title="Тема 1", chapter=self.chapter.name)
+		first_payloads = [PNG_1PX + b"-one", PNG_1PX + b"-two"]
+		first_images = [
+			self.upload(first, f"rt-a-{self.hash}-{n}.png", payload)
+			for n, payload in zip((1, 2), first_payloads)
+		]
+		api.create_lesson(self.chapter.name)
+		second = api.create_folder(title="Extras", chapter=self.chapter.name)
+		second_images = [self.upload(second, f"rt-b-{self.hash}.png", PNG_1PX + b"-extras")]
+		nested = self.make_chapter("Nested Materials", parent_section=self.chapter.name)
+		self.attach_section_row(self.chapter, nested, idx=4)
+		third = api.create_folder(title="Nested folder", chapter=nested.name)
+		third_images = [self.upload(third, f"rt-c-{self.hash}.png", PNG_1PX + b"-nested")]
+
+		path = self.export(self.course.name)
+
+		# What the archive carries: one doc per folder, each image's bytes under
+		# the private root, and the folder's own image order in its JSON.
+		with zipfile.ZipFile(path) as archive:
+			members = archive.namelist()
+			self.assertEqual(len([m for m in members if m.startswith("folders/")]), 3)
+			first_json = json.loads(
+				archive.read(f"folders/{course_import_export.sanitize_string(first)}.json")
+			)
+			self.assertEqual(
+				[row["file_url"] for row in first_json["images"]],
+				[image["file_url"] for image in first_images],
+			)
+			for image in first_images + second_images + third_images:
+				self.assertIn(f"assets/private/files/{image['file_name']}", members)
+
+		# Removing the source folders takes their private files with them, so
+		# every byte below must come out of the archive itself.
+		for folder in (first, second, third):
+			api.delete_folder(folder)
+
+		imported = self.import_(path)
+		self.assertNotEqual(imported, self.course.name)
+
+		node = get_course_outline(imported)[0]
+		self.assertEqual([f.title for f in node.folders], ["Тема 1", "Extras"])
+		self.assertEqual([f.position for f in node.folders], [1, 3])
+		self.assertEqual([l.number for l in node.lessons], ["1-1"])
+		self.assertEqual([f.title for f in node.sections[0].folders], ["Nested folder"])
+
+		# Names and order per folder, then bytes, privacy and links per image.
+		restored = node.folders[0].images
+		self.assertEqual([i.file_name for i in restored], [i["file_name"] for i in first_images])
+		for image, payload in zip(restored, first_payloads):
+			file_doc = frappe.get_doc("File", {"file_url": image.file_url})
+			self.assertEqual(file_doc.is_private, 1)
+			self.assertEqual(file_doc.attached_to_doctype, "Course Folder")
+			self.assertEqual(file_doc.attached_to_name, node.folders[0].name)
+			with open(file_doc.get_full_path(), "rb") as stored:
+				self.assertEqual(stored.read(), payload)
+		self.assertEqual(node.folders[0].image_count, 2)
+
+		# Importing the same archive again reuses the restored files rather than
+		# duplicating them: one File per URL, both courses point at it.
+		again = self.import_(path)
+		self.assertNotEqual(again, imported)
+		for image in restored:
+			self.assertEqual(frappe.db.count("File", {"file_url": image.file_url}), 1)
+
+	def test_export_fails_clearly_when_two_images_would_share_one_archive_entry(self):
+		folder = api.create_folder(title="Clash", chapter=self.chapter.name)
+		# The names differ on disk, but the archive's name sanitizer keeps only
+		# [a-z0-9 -.]: both reduce to the same member name and one would overwrite
+		# the other -- a loss the export must refuse instead of hiding.
+		self.upload(folder, f"img_one_{self.hash}.png", PNG_1PX + b"-one")
+		self.upload(folder, f"imgone{self.hash}.png", PNG_1PX + b"-two")
+
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			self.export(self.course.name)
+		message = str(ctx.exception)
+		self.assertIn(f"img_one_{self.hash}.png", message)
+		self.assertIn(f"imgone{self.hash}.png", message)
+
+	def test_import_fails_clearly_when_folder_image_bytes_are_missing(self):
+		folder = api.create_folder(title="Bytes", chapter=self.chapter.name)
+		self.upload(folder, f"miss-{self.hash}.png", PNG_1PX + b"-bytes")
+
+		path = self.export(self.course.name)
+		trimmed = self.trim_members(path, ("assets/",))
+
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			self.import_(trimmed)
+		message = str(ctx.exception)
+		self.assertIn(f"miss-{self.hash}.png", message)
+		self.assertIn("Bytes", message)
+
+	def test_import_fails_clearly_when_a_folder_doc_is_missing_from_the_archive(self):
+		folder = api.create_folder(title="Ghost", chapter=self.chapter.name)
+		self.upload(folder, f"ghost-{self.hash}.png", PNG_1PX)
+
+		path = self.export(self.course.name)
+		trimmed = self.trim_members(path, ("folders/",))
+
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			self.import_(trimmed)
+		self.assertIn("Ghost", str(ctx.exception))
