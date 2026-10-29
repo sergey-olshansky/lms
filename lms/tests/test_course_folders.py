@@ -505,3 +505,82 @@ class TestFolderArchiveRoundTrip(BaseTestUtils):
 		with self.assertRaises(frappe.ValidationError) as ctx:
 			self.import_(trimmed)
 		self.assertIn("Ghost", str(ctx.exception))
+
+
+class TestLessonReferenceChildKinds(BaseTestUtils):
+	"""The child-row validator accepts exactly one of lesson/section/folder.
+
+	Regressions for the folder stage: a folder row sets neither lesson nor
+	section and must insert, while a row pointing at nothing or at several
+	kinds at once is refused with one clear validation error.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		self._create_user(INSTRUCTOR, "Frappe", "Teacher", ["Course Creator"])
+		self.course = self._create_course("Child Kind Course")
+		frappe.set_user(INSTRUCTOR)
+		self.chapter = self.make_chapter("Materials")
+		self.lesson = api.create_lesson(self.chapter.name)
+		self.nested = self.make_chapter("Nested", parent_section=self.chapter.name)
+		self.folder = api.create_folder(title="Folder", chapter=self.chapter.name)
+
+	def make_chapter(self, title, parent_section=None):
+		chapter = frappe.new_doc("Course Chapter")
+		chapter.update(
+			{"course": self.course.name, "title": title, "parent_section": parent_section}
+		)
+		chapter.insert()
+		if not parent_section:
+			self._create_chapter_reference(self.course.name, chapter.name, idx=1)
+		return chapter
+
+	def insert_row(self, **kwargs):
+		row = frappe.new_doc("Lesson Reference")
+		row.update(
+			{
+				"idx": frappe.db.count("Lesson Reference", {"parent": self.chapter.name}) + 1,
+				"parent": self.chapter.name,
+				"parenttype": "Course Chapter",
+				"parentfield": "lessons",
+				**kwargs,
+			}
+		)
+		row.insert()
+		return row.name
+
+	# -- exactly one kind is valid ---------------------------------------
+
+	def test_lesson_only_row_is_valid(self):
+		self.assertTrue(self.insert_row(lesson=self.lesson))
+
+	def test_section_only_row_is_valid(self):
+		self.assertTrue(self.insert_row(section=self.nested.name))
+
+	def test_folder_only_row_is_valid(self):
+		self.assertTrue(self.insert_row(folder=self.folder))
+
+	# -- zero or several kinds are rejected ------------------------------
+
+	def test_row_with_no_reference_is_rejected(self):
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			self.insert_row()
+		self.assertIn("exactly one of a lesson, a section or a folder", str(ctx.exception))
+
+	def test_row_with_lesson_and_section_is_rejected(self):
+		with self.assertRaises(frappe.ValidationError):
+			self.insert_row(lesson=self.lesson, section=self.nested.name)
+
+	def test_row_with_lesson_and_folder_is_rejected(self):
+		with self.assertRaises(frappe.ValidationError):
+			self.insert_row(lesson=self.lesson, folder=self.folder)
+
+	def test_row_with_section_and_folder_is_rejected(self):
+		with self.assertRaises(frappe.ValidationError):
+			self.insert_row(section=self.nested.name, folder=self.folder)
+
+	def test_row_with_all_three_kinds_is_rejected(self):
+		with self.assertRaises(frappe.ValidationError):
+			self.insert_row(
+				lesson=self.lesson, section=self.nested.name, folder=self.folder
+		)
