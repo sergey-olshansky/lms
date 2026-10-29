@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import re
@@ -379,7 +380,27 @@ def asset_member_path(asset):
 	Flattened to one assets/<name>, a same-named public and private file would
 	share one entry and the import could only recreate one of the two URLs."""
 	root = "assets/private/files/" if asset.startswith("/private/") else "assets/files/"
-	return root + sanitize_string(os.path.basename(asset))
+	return root + sanitized_asset_basename(asset)
+
+
+def sanitized_asset_basename(asset):
+	"""The member basename for an asset URL: sanitized, and never degenerate.
+
+	A name whose sanitizeable part strips to nothing -- a fully Cyrillic name, a
+	name of only underscores -- would leave a dotfile ('.png') or an empty
+	basename: a member that carries no identity of its own, whose extension the
+	import's validation cannot even see. Such names keep a deterministic
+	'asset-<hash of the original name>' stem instead, so the same file maps to
+	the same member across re-exports, and two distinct files that both fall
+	back still meet the export's same-entry refusal rather than each other.
+	"""
+	basename = os.path.basename(asset)
+	safe = sanitize_string(basename)
+	stem, extension = os.path.splitext(safe)
+	if stem and not safe.startswith("."):
+		return safe
+	_, original_extension = os.path.splitext(basename)
+	return "asset-" + hashlib.sha1(basename.encode("utf-8")).hexdigest()[:8] + original_extension
 
 
 def write_assets(zip_file, assets):
@@ -488,12 +509,12 @@ def import_course_zip(zip_file_path):
 		if not course_data:
 			frappe.throw(_("Invalid course ZIP: Missing course.json"))
 
-		created_asset_urls = create_assets(zip_file)
+		asset_resolutions = create_assets(zip_file)
 		create_user_for_instructors(zip_file)
 		create_evaluator(zip_file)
 		course_doc = create_course_doc(course_data)
 		chapter_docs, chapter_info = create_chapter_docs(zip_file, course_doc.name)
-		folder_info = create_folder_docs(zip_file, course_doc.name, chapter_info, created_asset_urls)
+		folder_info = create_folder_docs(zip_file, course_doc.name, chapter_info, asset_resolutions)
 		create_assessment_docs(zip_file)
 		create_lesson_docs(zip_file, course_doc.name, chapter_docs)
 		save_course_structure(zip_file, course_doc, chapter_docs, chapter_info, folder_info)
@@ -951,13 +972,14 @@ def asset_file_url(asset_name, is_private):
 
 
 def imported_asset_url(source_url):
-	"""The URL this import serves for a URL the archive's JSON cites.
+	"""The URL the archive member for a cited URL is expected to serve.
 
-	create_assets names the File after the archive member, and the member is
-	named after a sanitized basename of the cited URL -- so the only faithful
-	mapping from a cited source URL to its imported URL runs through the member
-	path, keeping folder image links exact even for names the sanitize step
-	rewrites.
+	The member is named after a sanitized basename of the cited URL, and the
+	File frappe made for it usually serves exactly this URL -- unless the site
+	already held the same bytes, in which case frappe dedups the new row onto
+	the existing file's URL. That is why create_folder_docs prefers the
+	resolution create_assets recorded for the member and falls back to this
+	prediction only when the archive carried no member for the row.
 	"""
 	member = asset_member_path(source_url)
 	return asset_file_url(base_name(member), member_asset_privacy(member))
@@ -983,10 +1005,17 @@ def existing_asset_urls(file_urls):
 
 
 def create_asset_doc(asset_name, content, is_private, existing):
-	"""Create the File the content cites, unless the site already serves that URL."""
+	"""Create the File the content cites, unless the site already serves that URL.
+
+	Returns the URL this import serves and the row that serves it: the URL
+	frappe actually assigned -- not the one the member name predicts, because
+	with the same bytes already on the site frappe dedups the new row onto the
+	existing file's URL -- and the created row's name, or None when the URL was
+	already served and no row was made.
+	"""
 	file_url = asset_file_url(asset_name, is_private)
 	if file_url in existing:
-		return None
+		return file_url, None
 	asset_doc = frappe.new_doc("File")
 	asset_doc.file_name = asset_name
 	asset_doc.content = content
@@ -994,7 +1023,7 @@ def create_asset_doc(asset_name, content, is_private, existing):
 	# not got yet, so an unset flag silently means public.
 	asset_doc.is_private = is_private
 	asset_doc.insert()
-	return file_url
+	return asset_doc.file_url or file_url, asset_doc.name
 
 
 def is_safe_zip_member(name: str) -> bool:
@@ -1072,11 +1101,13 @@ def asset_is_private(privacy, member, referenced_paths):
 
 
 def process_asset_file(zip_file, file, is_private, existing):
+	"""Create one member's File; the resolution binds the member to its URL/row."""
 	if not is_safe_zip_member(file):
 		return None
 	asset_name = base_name(file)
 	content = read_zip_member(zip_file, file, MAX_IMPORTED_ASSET_BYTES)
-	return create_asset_doc(asset_name, content, is_private, existing)
+	file_url, file_name = create_asset_doc(asset_name, content, is_private, existing)
+	return {"member": file, "file_url": file_url, "file_name": file_name}
 
 
 def validate_assets(members):
@@ -1131,10 +1162,15 @@ def asset_members(zip_file, privacy, referenced_paths):
 
 
 def create_assets(zip_file):
-	"""Create the archive's asset files; return the URLs this import created.
+	"""Create the archive's asset files; return how each member resolved.
 
-	The created set is what lets a later step attach the freshly made folder
-	images to their folders without touching files the site already had.
+	One resolution per member -- the URL the import serves it at and the File
+	row that serves it (None when the site already served that URL) -- keyed by
+	the member name. This is what lets a later step bind a folder's image rows
+	to the File this import actually produced for the member the export wrote:
+	frappe can assign that File a URL the member name does not predict, when
+	the same bytes are already on the site and the new row dedups onto the
+	existing file's URL.
 	"""
 	privacy, referenced_paths = get_asset_citations(zip_file)
 	members = asset_members(zip_file, privacy, referenced_paths)
@@ -1142,12 +1178,12 @@ def create_assets(zip_file):
 	existing = existing_asset_urls(
 		{asset_file_url(base_name(info.filename), is_private) for info, is_private in members}
 	)
-	created = set()
+	resolutions = {}
 	for info, is_private in members:
 		try:
-			created_url = process_asset_file(zip_file, info.filename, is_private, existing)
-			if created_url:
-				created.add(created_url)
+			resolution = process_asset_file(zip_file, info.filename, is_private, existing)
+			if resolution:
+				resolutions[resolution["member"]] = resolution
 		except Exception:
 			# One bad asset must not abort the import. The title stays constant because
 			# the member name is attacker-supplied and Error Log stores it in a Data
@@ -1156,7 +1192,7 @@ def create_assets(zip_file):
 				title="Course import: asset skipped",
 				message=f"{info.filename}\n\n{frappe.get_traceback()}",
 			)
-	return created
+	return resolutions
 
 
 def folder_archive_files(zip_file):
@@ -1164,16 +1200,17 @@ def folder_archive_files(zip_file):
 	return sorted(m for m in zip_file.namelist() if m.startswith("folders/") and m.endswith(".json"))
 
 
-def create_folder_docs(zip_file, course_name, chapter_info, created_asset_urls):
+def create_folder_docs(zip_file, course_name, chapter_info, asset_resolutions):
 	"""Recreate the archive's image folders on the imported sections.
 
 	Each folder's images are rebuilt in child-row order, every row pointing at
-	the File create_assets made for the URL the export recorded next to it. A
-	folder that cannot be restored whole -- its section missing, an image's bytes
-	missing, its member unreadable -- throws, so no folder or image is dropped
-	silently.
+	the File create_assets resolved for the member the export wrote that row's
+	bytes under. A folder that cannot be restored whole -- its section missing,
+	an image's bytes missing, its member unreadable -- throws, so no folder or
+	image is dropped silently.
 	"""
 	folder_info = []
+	created_names = set()
 	old_to_new_chapter = {info["old_name"]: info["doc"].name for info in chapter_info}
 	for member in folder_archive_files(zip_file):
 		folder_data = read_json_from_zip(zip_file, member)
@@ -1203,7 +1240,12 @@ def create_folder_docs(zip_file, course_name, chapter_info, created_asset_urls):
 		folder_doc.chapter = new_chapter
 
 		# Every image row resolves through its recorded URL; the source site's
-		# File docname would point at nothing here.
+		# File docname would point at nothing here. The export wrote the row's
+		# bytes under the member that URL maps to, and create_assets recorded
+		# how that member resolved -- the URL the import serves it at can differ
+		# from the one the member name predicts when the site already held the
+		# same bytes. Rows whose member the archive never carried fall back to
+		# the predicted URL, which must already be served or the import refuses.
 		attached = []
 		for row in sorted(folder_data.get("images") or [], key=lambda r: r.get("idx") or 0):
 			source_url = row.get("file_url") if isinstance(row, dict) else None
@@ -1214,8 +1256,11 @@ def create_folder_docs(zip_file, course_name, chapter_info, created_asset_urls):
 					),
 					frappe.ValidationError,
 				)
-			file_url = imported_asset_url(source_url)
-			file_name = frappe.db.get_value("File", {"file_url": file_url}, "name")
+			resolution = asset_resolutions.get(asset_member_path(source_url))
+			file_url = (resolution or {}).get("file_url") or imported_asset_url(source_url)
+			file_name = (resolution or {}).get("file_name") or frappe.db.get_value(
+				"File", {"file_url": file_url}, "name"
+			)
 			if not file_name:
 				frappe.throw(
 					_("Image {0} of folder {1} is missing from the archive. Nothing was imported.").format(
@@ -1223,6 +1268,8 @@ def create_folder_docs(zip_file, course_name, chapter_info, created_asset_urls):
 					),
 					frappe.ValidationError,
 				)
+			if resolution and resolution.get("file_name"):
+				created_names.add(resolution["file_name"])
 			folder_doc.append("images", {"image": file_name})
 			attached.append((file_name, file_url))
 
@@ -1236,7 +1283,7 @@ def create_folder_docs(zip_file, course_name, chapter_info, created_asset_urls):
 		# shape for files this import created. Files the site already served keep
 		# the attachments -- and therefore the permissions -- they arrived with.
 		for file_name, file_url in attached:
-			if file_url in created_asset_urls and not frappe.db.get_value(
+			if file_name in created_names and not frappe.db.get_value(
 				"File", file_name, "attached_to_doctype"
 			):
 				frappe.db.set_value(

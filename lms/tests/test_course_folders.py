@@ -11,6 +11,7 @@ visibility, and cleanup on folder/chapter delete.
 """
 
 import base64
+import hashlib
 import io
 import json
 import os
@@ -510,6 +511,116 @@ class TestFolderArchiveRoundTrip(BaseTestUtils):
 		with self.assertRaises(frappe.ValidationError) as ctx:
 			self.import_(trimmed)
 		self.assertIn("Ghost", str(ctx.exception))
+
+	def test_a_name_that_sanitizes_to_nothing_gets_a_stable_member_name(self):
+		# The member sanitizer keeps [a-zA-Z0-9 space - .]: a fully Cyrillic
+		# name strips to '.png' -- a dotfile member that carries none of the
+		# name's identity and whose extension the import's validation cannot
+		# even see. It maps to a deterministic asset-<hash> stem instead: same
+		# name, same member, re-export after re-export, and two distinct such
+		# files still land in the export's same-entry refusal rather than in
+		# each other.
+		stem = hashlib.sha1("изображение.png".encode("utf-8")).hexdigest()[:8]
+		self.assertEqual(
+			course_import_export.asset_member_path("/private/files/изображение.png"),
+			f"assets/private/files/asset-{stem}.png",
+		)
+		# Underscore and uppercase names keep their stripped form, as before.
+		self.assertEqual(
+			course_import_export.asset_member_path("/private/files/p_ok2.png"),
+			"assets/private/files/pok2.png",
+		)
+
+	def test_round_trip_images_whose_names_the_sanitizer_rewrites(self):
+		# The tester's defect class: underscore, uppercase and Cyrillic names
+		# rewrite on the way into the archive, so the folder row's link cannot
+		# be guessed back from the member name -- and a name that strips to
+		# nothing needs a member of its own at all.
+		folder = api.create_folder(title="Переплет", chapter=self.chapter.name)
+		names_and_payloads = [
+			(f"p_ok_{self.hash}.png", PNG_1PX + b"-under"),
+			(f"P_OK-{self.hash}.PNG", PNG_1PX + b"-upper"),
+			(f"тема_{self.hash}.png", PNG_1PX + b"-mixed"),
+			("изображение.png", PNG_1PX + b"-pure"),
+		]
+		uploads = [self.upload(folder, name, payload) for name, payload in names_and_payloads]
+
+		path = self.export(self.course.name)
+
+		# The archive stores each image's bytes under its sanitized member and
+		# still cites the original URLs next to the folder's rows.
+		with zipfile.ZipFile(path) as archive:
+			members = archive.namelist()
+			for expected in (
+				f"assets/private/files/pok{self.hash}.png",
+				f"assets/private/files/POK-{self.hash}.PNG",
+				f"assets/private/files/{self.hash}.png",
+				course_import_export.asset_member_path("/private/files/изображение.png"),
+			):
+				self.assertIn(expected, members)
+			folder_json = json.loads(
+				archive.read(f"folders/{course_import_export.sanitize_string(folder)}.json")
+			)
+			self.assertEqual(
+				[row["file_url"] for row in folder_json["images"]],
+				[upload["file_url"] for upload in uploads],
+			)
+
+		# Every byte below must come out of the archive: the source folder and
+		# its private files are gone.
+		api.delete_folder(folder)
+
+		imported = self.import_(path)
+		self.assertNotEqual(imported, self.course.name)
+
+		node = get_course_outline(imported)[0]
+		restored = node.folders[0].images
+		self.assertEqual(len(restored), len(names_and_payloads))
+		for image, (_, payload) in zip(restored, names_and_payloads):
+			file_doc = frappe.get_doc("File", image.name)
+			self.assertEqual(file_doc.is_private, 1)
+			self.assertEqual(file_doc.attached_to_doctype, "Course Folder")
+			self.assertEqual(file_doc.attached_to_name, node.folders[0].name)
+			with open(file_doc.get_full_path(), "rb") as stored:
+				self.assertEqual(stored.read(), payload)
+
+	def test_round_trip_back_into_a_site_that_still_has_the_images(self):
+		# The exact repro from the test report: export and import back into the
+		# very site that still serves the originals. The File the import makes
+		# for the sanitized member can dedup onto the original's URL, so the
+		# folder row must bind through what the import actually produced, not
+		# through the URL the member name predicts.
+		folder = api.create_folder(title="Тема 1", chapter=self.chapter.name)
+		payloads = [PNG_1PX + b"-ok2", PNG_1PX + b"-ok3"]
+		uploads = [
+			self.upload(folder, f"p_ok{n}_{self.hash}.png", payload)
+			for n, payload in zip((2, 3), payloads)
+		]
+
+		path = self.export(self.course.name)
+		imported = self.import_(path)
+
+		self.assertNotEqual(imported, self.course.name)
+		node = get_course_outline(imported)[0]
+		restored = node.folders[0].images
+		self.assertEqual(len(restored), 2)
+		for image, payload in zip(restored, payloads):
+			file_doc = frappe.get_doc("File", image.name)
+			self.assertEqual(file_doc.is_private, 1)
+			with open(file_doc.get_full_path(), "rb") as stored:
+				self.assertEqual(stored.read(), payload)
+
+		# The source folder keeps exactly its own rows and files; nothing was
+		# moved, renamed or re-attached under it.
+		source_rows = frappe.get_all(
+			"Folder Image Reference", {"parent": folder}, ["image"], order_by="idx"
+		)
+		self.assertEqual([row.image for row in source_rows], [u["name"] for u in uploads])
+		for upload, payload in zip(uploads, payloads):
+			file_doc = frappe.get_doc("File", upload["name"])
+			self.assertEqual(file_doc.attached_to_name, folder)
+			with open(file_doc.get_full_path(), "rb") as stored:
+				self.assertEqual(stored.read(), payload)
 
 
 class TestLessonReferenceChildKinds(BaseTestUtils):
