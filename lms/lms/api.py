@@ -33,6 +33,7 @@ from frappe.utils import (
 	getdate,
 	now,
 )
+from frappe.utils.file_manager import get_content_hash
 from frappe.utils.response import Response
 from pypika import functions as fn
 
@@ -1504,16 +1505,24 @@ def _store_folder_image(folder: frappe._dict, file_name: str, content) -> dict:
 			frappe.ValidationError,
 		)
 
-	# The duplicate rule: same file name and same size already inside the folder
-	# means the upload is a retry of a file that already made it — skip it.
+	# The duplicate rule: the same file name with the same size already inside
+	# the folder means the upload is a retry of a file that already made it —
+	# skip it. The stored name may also be frappe's hash-suffixed form of the
+	# requested name: when another file already occupies the requested path on
+	# disk, frappe writes new bytes as stem+<last 6 of the content hash>+ext,
+	# and matching only the bare name would let every retry of such a file
+	# append another copy to the folder.
 	if existing_rows:
 		stored_files = frappe.get_all(
 			"File",
 			{"name": ("in", [row.image for row in existing_rows])},
 			["name", "file_name", "file_url", "file_size"],
 		)
+		stem, extension = os.path.splitext(file_name)
+		hashed_name = f"{stem}{get_content_hash(content)[-6:]}{extension}"
 		for stored in stored_files:
-			if (stored.file_name or "").strip().casefold() == file_name.casefold() and cint(
+			stored_name = (stored.file_name or "").strip().casefold()
+			if stored_name in (file_name.casefold(), hashed_name.casefold()) and cint(
 				stored.file_size
 			) == len(content):
 				return {

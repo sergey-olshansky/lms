@@ -37,6 +37,40 @@ PNG_1PX = base64.b64decode(
 	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
 )
 
+# Two real JPEG images (solid 8x8 and 12x8 photos, written by Pillow): the
+# upload path the human acceptance reported is a JPEG photo whose file name
+# carries spaces and parentheses, so the fixtures are genuine JPEG bytes.
+JPEG_PHOTO = base64.b64decode(
+	"/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAoHBwgHBgoICAgLCgoLDhgQDg0NDh0VFhEY"
+	"Ix8lJCIfIiEmKzcvJik0KSEiMEExNDk7Pj4+JS5ESUM8SDc9Pjv/2wBDAQoLCw4NDhwQ"
+	"EBw7KCIoOzs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7"
+	"Ozs7Ozv/wAARCAAIAAgDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQF"
+	"BgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEI"
+	"I0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNk"
+	"ZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLD"
+	"xMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEB"
+	"AQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJB"
+	"UQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZH"
+	"SElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaan"
+	"qKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oA"
+	"DAMBAAIRAxEAPwDnqKKK8k+/P//Z"
+)
+JPEG_OTHER = base64.b64decode(
+	"/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAoHBwgHBgoICAgLCgoLDhgQDg0NDh0VFhEY"
+	"Ix8lJCIfIiEmKzcvJik0KSEiMEExNDk7Pj4+JS5ESUM8SDc9Pjv/2wBDAQoLCw4NDhwQ"
+	"EBw7KCIoOzs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7"
+	"Ozs7Ozv/wAARCAAIAAwDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQF"
+	"BgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEI"
+	"I0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNk"
+	"ZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLD"
+	"xMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEB"
+	"AQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJB"
+	"UQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZH"
+	"SElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaan"
+	"qKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oA"
+	"DAMBAAIRAxEAPwDh6KKK+/OU/9k="
+)
+
 
 @contextmanager
 def multipart(filename: str, content: bytes):
@@ -177,6 +211,75 @@ class TestCourseFolders(BaseTestUtils):
 			third = api.upload_folder_image(folder=folder)
 		self.assertEqual(third["status"], "uploaded")
 		self.assertNotEqual(third["file"]["name"], first["file"]["name"])
+		self.assertEqual(
+			frappe.db.count("Folder Image Reference", {"parent": folder}), 2
+		)
+
+	def test_upload_accepts_a_jpeg_photo_name_with_spaces_and_parentheses(self):
+		# The exact name from the human acceptance report: spaces, parentheses,
+		# a JPEG photo. It must store byte-for-byte, privately, in order.
+		folder = api.create_folder(title="Jpeg Folder", chapter=self.chapter.name)
+		with multipart("photo_2025-05-05_14-19-43 (2).jpg", JPEG_PHOTO):
+			result = api.upload_folder_image(folder=folder)
+
+		self.assertEqual(result["status"], "uploaded")
+		stored = frappe.get_doc("File", result["file"]["name"])
+		self.assertEqual(stored.is_private, 1)
+		self.assertTrue(stored.file_url.startswith("/private/files/"))
+		self.assertEqual(int(stored.file_size), len(JPEG_PHOTO))
+		self.assertEqual(
+			frappe.get_all(
+				"Folder Image Reference", {"parent": folder}, pluck="image", order_by="idx"
+			),
+			[stored.name],
+		)
+
+		# The stored bytes are exactly what was uploaded.
+		with open(stored.get_full_path(), "rb") as saved_file:
+			self.assertEqual(saved_file.read(), JPEG_PHOTO)
+
+		# The upper-case extension of camera exports passes the same check.
+		with multipart("IMG_2451 (1).JPG", JPEG_OTHER):
+			upper = api.upload_folder_image(folder=folder)
+		self.assertEqual(upper["status"], "uploaded")
+
+	def test_upload_without_a_file_part_is_a_clear_error(self):
+		folder = api.create_folder(title="Wrong Field", chapter=self.chapter.name)
+
+		# A multipart body whose file part is not named 'file': refused with the
+		# documented reason, not a KeyError traceback.
+		saved = getattr(frappe.local, "request", None)
+		frappe.local.request = frappe._dict(
+			files={"image": FileStorage(stream=io.BytesIO(JPEG_PHOTO), filename="a.jpg")},
+			headers={},
+			host="foldertest.local",
+			method="POST",
+		)
+		try:
+			with self.assertRaises(frappe.ValidationError) as raised:
+				api.upload_folder_image(folder=folder)
+			self.assertIn("No file received", str(raised.exception))
+		finally:
+			frappe.local.request = saved
+
+	def test_retry_after_a_name_collision_does_not_duplicate(self):
+		folder = api.create_folder(title="Collision", chapter=self.chapter.name)
+
+		# The first photo takes the bare name; a different photo under the same
+		# name is stored by frappe under a hash-suffixed name of its own.
+		with multipart("repro.jpg", JPEG_PHOTO):
+			first = api.upload_folder_image(folder=folder)
+		with multipart("repro.jpg", JPEG_OTHER):
+			second = api.upload_folder_image(folder=folder)
+		self.assertEqual(second["status"], "uploaded")
+		self.assertNotEqual(second["file"]["file_name"], "repro.jpg")
+
+		# Retrying that second upload must skip onto the stored file even though
+		# its stored name was rewritten — matching names would duplicate it.
+		with multipart("repro.jpg", JPEG_OTHER):
+			retry = api.upload_folder_image(folder=folder)
+		self.assertEqual(retry["status"], "skipped")
+		self.assertEqual(retry["file"]["name"], second["file"]["name"])
 		self.assertEqual(
 			frappe.db.count("Folder Image Reference", {"parent": folder}), 2
 		)

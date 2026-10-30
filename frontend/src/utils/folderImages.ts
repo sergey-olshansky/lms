@@ -116,3 +116,95 @@ export function formatFileSize(bytes: number): string {
 	if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
 	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
+
+/** Server payload of one stored folder image, as the upload API returns it. */
+export interface FolderUploadResponse {
+	status: 'uploaded' | 'skipped'
+	file: OutlineFolderImage
+}
+
+interface UploadXHRLike {
+	status: number
+	response: unknown
+}
+
+/** POST one image to the folder upload API through a raw XHR, for per-file
+ * progress.
+ *
+ * The request must carry the session's CSRF token exactly like every
+ * frappe-ui request does: frappe validates the token on POSTs before any
+ * whitelisted method runs, so a bare XHR (no `X-Frappe-CSRF-Token` header,
+ * no `csrf_token` field) is rejected as `CSRFTokenError` — "Invalid request"
+ * in the UI — for every file, whatever its name or format. The SPA shell
+ * renders `window.csrf_token` at page load; the `{{ csrf_token }}` guard is
+ * the same unrendered-template check frappe-ui itself uses. */
+export function uploadFolderImage(options: {
+	folder: string
+	file: File
+	onProgress?: (percent: number) => void
+}): Promise<FolderUploadResponse> {
+	return new Promise((resolve, reject) => {
+		const xhr = new XMLHttpRequest()
+		xhr.open('POST', '/api/method/lms.lms.api.upload_folder_image')
+		xhr.setRequestHeader('Accept', 'application/json')
+		const csrfToken = (window as Window & { csrf_token?: string }).csrf_token
+		if (csrfToken && csrfToken !== '{{ csrf_token }}') {
+			xhr.setRequestHeader('X-Frappe-CSRF-Token', csrfToken)
+		}
+		xhr.upload.onprogress = (event) => {
+			if (event.lengthComputable && options.onProgress) {
+				options.onProgress(Math.round((event.loaded / event.total) * 100))
+			}
+		}
+		xhr.onerror = () => reject(new Error(__('Network error')))
+		xhr.onload = () => {
+			if (xhr.status >= 200 && xhr.status < 300) {
+				try {
+					const body =
+						typeof xhr.response === 'string' ? JSON.parse(xhr.response) : xhr.response
+					const message = body?.message ?? body
+					if (message?.file?.name) resolve(message)
+					else reject(new Error(__('Error Uploading File')))
+				} catch {
+					reject(new Error(__('Error Uploading File')))
+				}
+			} else {
+				reject(new Error(serverErrorMessage(xhr)))
+			}
+		}
+		const form = new FormData()
+		form.append('folder', options.folder)
+		form.append('file', options.file)
+		xhr.send(form)
+	})
+}
+
+/** Pull the human-readable reason out of a Frappe JSON error body. */
+export function serverErrorMessage(xhr: UploadXHRLike): string {
+	try {
+		const body =
+			typeof xhr.response === 'string' && xhr.response
+				? JSON.parse(xhr.response)
+				: xhr.response
+		const raw = body?._server_messages
+		if (typeof raw === 'string') {
+			const messages = JSON.parse(raw)
+			const first = typeof messages?.[0] === 'string' ? JSON.parse(messages[0]) : messages?.[0]
+			const text = first?.message ?? first
+			if (typeof text === 'string' && text) return stripTags(text)
+		}
+		if (typeof body?.message === 'string' && body.message) {
+			return stripTags(body.message)
+		}
+	} catch {
+		// fall through to the generic message
+	}
+	if (xhr.status === 413) {
+		return __('Image is larger than the {0} MB limit.').format(10)
+	}
+	return __('Error Uploading File')
+}
+
+function stripTags(text: string): string {
+	return text.replace(/<[^>]*>/g, '').trim()
+}
