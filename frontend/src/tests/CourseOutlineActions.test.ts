@@ -27,6 +27,9 @@ vi.mock('@/components/SectionRow.vue', () => ({
 vi.mock('@/components/Modals/SectionFormModal.vue', () => ({
 	default: { template: '<div />' },
 }))
+vi.mock('@/components/Modals/FolderFormModal.vue', () => ({
+	default: { template: '<div />' },
+}))
 vi.mock('@/components/Modals/MoveSectionModal.vue', () => ({
 	default: { template: '<div />' },
 }))

@@ -7,7 +7,8 @@
  "engine": "InnoDB",
  "field_order": [
   "lesson",
-  "section"
+  "section",
+  "folder"
  ],
  "fields": [
   {
@@ -18,17 +19,24 @@
    "options": "Course Lesson"
   },
   {
-   "description": "A child row referencing a nested section instead of a lesson; rows of both kinds share one order.",
+   "description": "A child row referencing a nested section instead of a lesson; rows of every kind share one order.",
    "fieldname": "section",
    "fieldtype": "Link",
    "label": "Section",
    "options": "Course Chapter"
+  },
+  {
+   "description": "A child row referencing an image folder instead of a lesson; rows of every kind share one order.",
+   "fieldname": "folder",
+   "fieldtype": "Link",
+   "label": "Folder",
+   "options": "Course Folder"
   }
  ],
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-10-20 04:00:00.000000",
+ "modified": "2026-10-29 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "LMS",
  "name": "Lesson Reference",

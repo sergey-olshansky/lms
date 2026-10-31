@@ -91,6 +91,23 @@ export interface OutlineLesson {
 	position?: number
 }
 
+export interface OutlineFolderImage {
+	name: string
+	file_name: string
+	file_url: string
+	file_size: number
+}
+
+export interface OutlineFolder {
+	name: string
+	title: string
+	/** Position of the child-table row that places this folder inside its
+	 * section's single manual order of mixed lessons, sections and folders. */
+	position?: number
+	image_count?: number
+	images?: OutlineFolderImage[]
+}
+
 export interface OutlineChapter {
 	name: string
 	title: string
@@ -104,9 +121,11 @@ export interface OutlineChapter {
 	scorm_package?: { file_name: string; file_size: number } | null
 	lessons?: OutlineLesson[]
 	sections?: OutlineChapter[]
+	folders?: OutlineFolder[]
 	/** Direct child counts. */
 	lesson_count?: number
 	section_count?: number
+	folder_count?: number
 	/** Every lesson in this section's subtree (the learner-facing badge). */
 	total_lesson_count?: number
 }

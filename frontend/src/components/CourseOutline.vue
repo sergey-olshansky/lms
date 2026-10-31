@@ -95,6 +95,10 @@
 							@create-lesson="createLessonInline"
 							@add-section="openAddSection"
 							@reorder-section="reorderSection"
+							@add-folder="openAddFolder"
+							@rename-folder="(folder) => folderForm?.openRename(folder)"
+							@delete-folder="trashFolder"
+							@move-folder="moveFolder"
 						/>
 					</div>
 				</template>
@@ -103,6 +107,12 @@
 		<SectionFormModal
 			v-if="allowEdit"
 			ref="sectionForm"
+			:courseName="courseName"
+			:outline="outline"
+		/>
+		<FolderFormModal
+			v-if="allowEdit"
+			ref="folderForm"
 			:courseName="courseName"
 			:outline="outline"
 		/>
@@ -123,6 +133,7 @@ import Draggable from 'vuedraggable'
 
 import SectionRow from '@/components/SectionRow.vue'
 import SectionFormModal from '@/components/Modals/SectionFormModal.vue'
+import FolderFormModal from '@/components/Modals/FolderFormModal.vue'
 import { openFormRoute } from '@/composables/useFormRoute'
 import {
 	flattenLessons,
@@ -130,7 +141,7 @@ import {
 	forEachLesson,
 	parseLessonNumber,
 } from '@/utils/courseOutline'
-import type { OutlineChapter, OutlineLesson, Resource } from '@/types'
+import type { OutlineChapter, OutlineFolder, OutlineLesson, Resource } from '@/types'
 
 interface DraggableEvent {
 	item: {
@@ -181,6 +192,7 @@ const emit = defineEmits<{
 // The chapter whose "Add Lesson" button is mid-create (for the button spinner).
 const creatingLessonChapter = ref<string>('')
 const sectionForm = ref<InstanceType<typeof SectionFormModal> | null>(null)
+const folderForm = ref<InstanceType<typeof FolderFormModal> | null>(null)
 
 const props = withDefaults(
 	defineProps<{
@@ -302,6 +314,34 @@ const updateSectionIndex = createResource({
 
 const dropSection = createResource({
 	url: 'lms.lms.api.move_section',
+	onSuccess() {
+		outline.reload()
+	},
+	onError(error: FrappeResourceError) {
+		outline.reload()
+		toast.error(resourceErrorMessage(error, __('Error')))
+	},
+})
+
+const deleteFolder = createResource({
+	url: 'lms.lms.api.delete_folder',
+	makeParams(values: { folder: string }) {
+		return values
+	},
+	onSuccess() {
+		outline.reload()
+		toast.success(__('Folder deleted'))
+	},
+	onError(err: FrappeResourceError) {
+		toast.error(resourceErrorMessage(err, __('Error')))
+	},
+})
+
+const updateFolderIndex = createResource({
+	url: 'lms.lms.api.update_folder_index',
+	makeParams(values: { folder: string; parent: string; idx: number }) {
+		return values
+	},
 	onSuccess() {
 		outline.reload()
 	},
@@ -534,6 +574,57 @@ function openAddSection(parent: OutlineChapter) {
 		parent,
 		ancestors.map((a) => a.title)
 	)
+}
+
+// Folders are created the way sections are: a small title dialog, with the
+// chapter chain as its context line.
+function openAddFolder(parent: OutlineChapter) {
+	const ancestors = findAncestorsByName(parent.name)
+	folderForm.value?.openCreate(
+		parent,
+		ancestors.map((a) => a.title)
+	)
+}
+
+function trashFolder(folder: OutlineFolder) {
+	const count = folder.image_count ?? folder.images?.length ?? 0
+	const message = count
+		? __('The folder and its {0} images will be deleted permanently. This action cannot be undone.').format(
+				count
+		  )
+		: __('This folder is empty. It will be deleted permanently.')
+	$dialog({
+		title: __('Delete this folder?'),
+		message,
+		actions: [
+			{
+				label: __('Delete'),
+				theme: 'red',
+				variant: 'solid',
+				onClick({ close }) {
+					deleteFolder.submit({ folder: folder.name })
+					close()
+				},
+			},
+		],
+	})
+}
+
+// Folder rows stay outside the lesson/section drag group (#36 stays parked):
+// up/down moves write the same mixed-child order via its own endpoint, one
+// slot at a time, clamped at the ends.
+function moveFolder(payload: {
+	folder: OutlineFolder
+	parent: string
+	direction: 'up' | 'down'
+}) {
+	const position = payload.folder.position ?? 1
+	const slot = payload.direction === 'up' ? position - 2 : position
+	updateFolderIndex.submit({
+		folder: payload.folder.name,
+		parent: payload.parent,
+		idx: Math.max(0, slot),
+	})
 }
 
 function findAncestorsByName(name: string): OutlineChapter[] {
