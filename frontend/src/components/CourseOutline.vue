@@ -98,7 +98,6 @@
 							@add-folder="openAddFolder"
 							@rename-folder="(folder) => folderForm?.openRename(folder)"
 							@delete-folder="trashFolder"
-							@open-folder="openFolder"
 							@move-folder="moveFolder"
 						/>
 					</div>
@@ -114,11 +113,6 @@
 		<FolderFormModal
 			v-if="allowEdit"
 			ref="folderForm"
-			:courseName="courseName"
-			:outline="outline"
-		/>
-		<FolderModal
-			ref="folderModal"
 			:courseName="courseName"
 			:outline="outline"
 		/>
@@ -140,7 +134,6 @@ import Draggable from 'vuedraggable'
 import SectionRow from '@/components/SectionRow.vue'
 import SectionFormModal from '@/components/Modals/SectionFormModal.vue'
 import FolderFormModal from '@/components/Modals/FolderFormModal.vue'
-import FolderModal from '@/components/Modals/FolderModal.vue'
 import { openFormRoute } from '@/composables/useFormRoute'
 import {
 	flattenLessons,
@@ -200,7 +193,6 @@ const emit = defineEmits<{
 const creatingLessonChapter = ref<string>('')
 const sectionForm = ref<InstanceType<typeof SectionFormModal> | null>(null)
 const folderForm = ref<InstanceType<typeof FolderFormModal> | null>(null)
-const folderModal = ref<InstanceType<typeof FolderModal> | null>(null)
 
 const props = withDefaults(
 	defineProps<{
@@ -633,10 +625,6 @@ function moveFolder(payload: {
 		parent: payload.parent,
 		idx: Math.max(0, slot),
 	})
-}
-
-function openFolder(folder: OutlineFolder) {
-	folderModal.value?.open(folder, props.allowEdit)
 }
 
 function findAncestorsByName(name: string): OutlineChapter[] {

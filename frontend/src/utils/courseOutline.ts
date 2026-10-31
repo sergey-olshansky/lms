@@ -1,4 +1,4 @@
-import type { OutlineChapter, OutlineLesson } from '@/types'
+import type { OutlineChapter, OutlineFolder, OutlineLesson } from '@/types'
 
 type Chapters = OutlineChapter[] | null | undefined
 
@@ -155,4 +155,32 @@ export function isLessonInChapter(
 	const section = flattenSections(chapters).find((c) => c.name === chapterName)
 	if (!section) return false
 	return flattenLessons([section]).some((l) => l.name === lessonName)
+}
+
+export interface FolderLookup {
+	folder: OutlineFolder
+	/** The sections from the level-1 parent down to the folder's own section. */
+	ancestors: OutlineChapter[]
+}
+
+/** Find an image folder by docname anywhere in the outline, with the chain of
+ * sections that holds it — the folder page's data and its breadcrumbs. */
+export function findFolder(
+	chapters: Chapters,
+	folderName: string
+): FolderLookup | null {
+	const find = (
+		nodes: Chapters,
+		path: OutlineChapter[]
+	): FolderLookup | null => {
+		for (const chapter of nodes ?? []) {
+			const nextPath = [...path, chapter]
+			const folder = chapter.folders?.find((f) => f.name === folderName)
+			if (folder) return { folder, ancestors: nextPath }
+			const nested = find(chapter.sections, nextPath)
+			if (nested) return nested
+		}
+		return null
+	}
+	return find(chapters, [])
 }

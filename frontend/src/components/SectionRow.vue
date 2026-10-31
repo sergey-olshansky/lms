@@ -197,7 +197,6 @@
 							@add-folder="(node) => emit('add-folder', node)"
 							@rename-folder="(node) => emit('rename-folder', node)"
 							@delete-folder="(node) => emit('delete-folder', node)"
-							@open-folder="(node) => emit('open-folder', node)"
 							@move-folder="(payload) => emit('move-folder', payload)"
 						/>
 					</div>
@@ -213,7 +212,6 @@
 							:allowEdit="allowEdit"
 							:position="element.rowIndex"
 							:siblingCount="mergedChildren.length"
-							@open-folder="(node) => emit('open-folder', node)"
 							@rename-folder="(node) => emit('rename-folder', node)"
 							@delete-folder="(node) => emit('delete-folder', node)"
 							@move-folder="
@@ -432,7 +430,6 @@ const emit = defineEmits<{
 	'add-folder': [OutlineChapter]
 	'rename-folder': [OutlineFolder]
 	'delete-folder': [OutlineFolder]
-	'open-folder': [OutlineFolder]
 	'move-folder': [{ folder: OutlineFolder; parent: string; direction: 'up' | 'down' }]
 }>()
 

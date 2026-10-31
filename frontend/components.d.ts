@@ -68,7 +68,6 @@ declare module 'vue' {
     FeedbackBanner: typeof import('./src/components/Assessment/FeedbackBanner.vue')['default']
     FeedbackModal: typeof import('./src/components/Modals/FeedbackModal.vue')['default']
     FolderFormModal: typeof import('./src/components/Modals/FolderFormModal.vue')['default']
-    FolderModal: typeof import('./src/components/Modals/FolderModal.vue')['default']
     FolderRow: typeof import('./src/components/FolderRow.vue')['default']
     FormShell: typeof import('./src/components/FormShell.vue')['default']
     FrappeCloudIcon: typeof import('./src/components/Icons/FrappeCloudIcon.vue')['default']

@@ -19,12 +19,11 @@
 		>
 			<span class="lucide-chevron-down size-4" aria-hidden="true" />
 		</OutlineActionButton>
-		<button
-			type="button"
+		<router-link
+			:to="folderRoute"
 			class="flex min-w-0 flex-1 cursor-pointer items-start gap-2 py-1.5 text-start text-sm leading-5"
 			:title="folder.title"
 			data-testid="open-folder"
-			@click.prevent.stop="emit('open-folder', folder)"
 		>
 			<span class="lucide-folder mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
 			<span class="min-w-0 flex-1 whitespace-normal break-words">{{
@@ -35,7 +34,7 @@
 			>
 				{{ imagesLabel }}
 			</span>
-		</button>
+		</router-link>
 		<div
 			v-if="allowEdit"
 			class="outline-actions ms-auto flex shrink-0 items-center justify-end gap-1"
@@ -58,13 +57,16 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import type { RouteLocationRaw } from 'vue-router'
 import OutlineActionButton from '@/components/OutlineActionButton.vue'
 import type { OutlineFolder } from '@/types'
 
 // An image folder as a child row of a section: a plain material row next to
 // lessons and nested sections. Reorder stays in the section's single mixed
 // order (up/down buttons — folders are deliberately outside the lesson/section
-// drag group), and opening shows the gallery.
+// drag group), and opening NAVIGATES to the folder's own page, the way a
+// lesson row navigates to its lesson (task #39 UI correction: the gallery is
+// no longer an overlay over the course overview).
 const props = withDefaults(
 	defineProps<{
 		folder: OutlineFolder
@@ -83,11 +85,15 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
-	'open-folder': [OutlineFolder]
 	'rename-folder': [OutlineFolder]
 	'delete-folder': [OutlineFolder]
 	'move-folder': ['up' | 'down']
 }>()
+
+const folderRoute = computed<RouteLocationRaw>(() => ({
+	name: 'CourseFolder',
+	params: { courseName: props.courseName, folderName: props.folder.name },
+}))
 
 const imagesLabel = computed<string>(() => {
 	const count = props.folder.image_count ?? props.folder.images?.length ?? 0

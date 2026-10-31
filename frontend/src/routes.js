@@ -65,6 +65,15 @@ export const routes = [
 		props: true,
 	},
 	{
+		// Task #39 UI correction: a folder's gallery is a page of the course, not
+		// an overlay over the course overview. It sits beside the learn routes so
+		// a folder row navigates exactly the way a lesson row does.
+		path: '/courses/:courseName/folder/:folderName',
+		name: 'CourseFolder',
+		component: () => import('@/pages/CourseFolder.vue'),
+		props: true,
+	},
+	{
 		path: '/courses/:courseName/certification',
 		name: 'CourseCertification',
 		component: () => import('@/pages/Courses/CourseCertification.vue'),

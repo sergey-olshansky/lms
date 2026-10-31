@@ -412,3 +412,6 @@ Folder {0} holds an image without a file URL; the archive is incomplete.,Пап�
 Image {0} of folder {1} is missing from the archive. Nothing was imported.,Изображение {0} из папки {1} отсутствует в архиве. Импорт не выполнен.,
 "Section {0} places folder {1}, which is missing from the archive.","Раздел {0} содержит папку {1}, которой нет в архиве.",
 "A course child row must reference exactly one of a lesson, a section or a folder.","Строка содержимого курса должна ссылаться ровно на один объект: урок, раздел или папку.",
+images,изображения,
+Back to course,Вернуться к курсу,
+This folder does not exist in this course anymore.,Эта папка больше не существует в этом курсе.,

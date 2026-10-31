@@ -21,14 +21,26 @@ vi.mock('frappe-ui', () => ({
 
 import FolderRow from '@/components/FolderRow.vue'
 import type { OutlineFolder } from '@/types'
+import { routes } from '@/routes'
+import {
+	createMemoryHistory,
+	createRouter,
+	type Router,
+} from 'vue-router'
 
-// The row's action labels are `__()` calls in the template, which resolve
-// against app globalProperties, not module scope. Same shape as
-// lessonFormTeardown.test.ts.
+// The REAL route table: the folder row is a router-link now (task #39 UI
+// correction — the gallery is a page, not a modal), so the link is asserted
+// against the routes the app actually registers.
+const makeRouter = (): Router =>
+	createRouter({ history: createMemoryHistory(), routes })
+
+// OutlineActionButton renders frappe-ui's Tooltip; a passthrough keeps the
+// real button (and its aria-label/disabled attributes) in the tree.
 function mountRow(props: Record<string, unknown>) {
 	return mount(FolderRow, {
-		props,
+		props: { courseName: 'COURSE-1', ...props },
 		global: {
+			plugins: [makeRouter()],
 			config: { globalProperties: { __: (s: string) => s } as any },
 		},
 	})
@@ -67,13 +79,15 @@ describe('FolderRow (task #39)', () => {
 		expect(wrapper.text()).toContain('1 image')
 	})
 
-	it('opens the folder from the row', () => {
+	it('links the folder row to its own course page', () => {
 		const wrapper = mountRow({ folder })
-		wrapper.find('[data-testid="open-folder"]').trigger('click')
-		expect(wrapper.emitted('open-folder')).toHaveLength(1)
-		expect(wrapper.emitted('open-folder')![0][0]).toMatchObject({
-			name: folder.name,
-		})
+		const link = wrapper.find('[data-testid="open-folder"]')
+		// A navigation element, not an action button: the gallery opens as a
+		// dedicated page (task #39 UI correction), never an overlay.
+		expect(link.element.tagName).toBe('A')
+		expect(link.attributes('href')).toBe(
+			`/courses/COURSE-1/folder/${encodeURIComponent(folder.name)}`
+		)
 	})
 
 	it('shows no editing actions for a student', () => {
