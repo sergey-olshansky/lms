@@ -572,8 +572,10 @@ def _validate_ai_tasks(result, pdf_path, candidate, require_review=True):
 		if ordered_answer:
 			options = []
 			raw_correct_options = []
-		elif not options and re.search(r"выберите\s+(?:два|две|три|четыре|пять|\d)|каких\s+из\s+(?:двух|тр[её]х)", question + "\n" + source_text, re.IGNORECASE):
+		elif not options and re.search(r"выберите\s+(?:все|два|две|три|четыре|пять|\d)|каких\s+из\s+(?:двух|тр[её]х)", question + "\n" + source_text, re.IGNORECASE):
 			# A source-proven numbered list can repair an AI type omission.
+			# «выберите все вещества» tasks have no literal «все» option: the
+			# printed key concatenates the chosen option numbers («15» = 1 и 5).
 			for region in [*regions[1:], *regions[:1]]:
 				text = region.get("text", "")
 				matches = list(re.finditer(r"(?<!\w)([1-9])\)\s*", text))
@@ -678,12 +680,13 @@ def _ai_question_html(task: dict, image_url: str | None = None) -> str:
 	)
 
 
-def _find_source_anchor(page, anchor: str, after: float = 0, before: float | None = None):
+def _find_source_anchor(page, anchor: str, after: float = 0, before: float | None = None, column=None):
 	pattern = r"\s+".join(re.escape(part) for part in anchor.split())
 	matches = [match for match in page.search(pattern, regex=True, case=False)
-		if float(match["top"]) >= after - 1 and (before is None or float(match["top"]) < before)]
+		if float(match["top"]) >= after - 1 and (before is None or float(match["top"]) < before)
+		and (column is None or (float(match["x1"]) > column[0] and float(match["x0"]) < column[1]))]
 	if len(matches) == 1:
-		return float(matches[0]["top"]), float(matches[0]["bottom"])
+		return float(matches[0]["top"]), float(matches[0]["bottom"]), float(matches[0]["x0"]), float(matches[0]["x1"])
 	if len(matches) > 1:
 		return None
 	# Normalise token spacing in formulas/line wraps, retaining word coordinates.
@@ -694,6 +697,8 @@ def _find_source_anchor(page, anchor: str, after: float = 0, before: float | Non
 		return None
 	words = []
 	for word in page.extract_words():
+		if column and not (float(word["x1"]) > column[0] and float(word["x0"]) < column[1]):
+			continue
 		for token in re.findall(r"\w+", word["text"].casefold()):
 			words.append((token, word))
 	matches = []
@@ -701,14 +706,28 @@ def _find_source_anchor(page, anchor: str, after: float = 0, before: float | Non
 		if ([token for token, _ in words[index:index + len(needle)]] == needle
 				and float(words[index][1]["top"]) >= after - 1
 				and (before is None or float(words[index][1]["top"]) < before)):
-			matches.append((float(words[index][1]["top"]), float(words[index + len(needle) - 1][1]["bottom"])))
+			first, last = words[index][1], words[index + len(needle) - 1][1]
+			matches.append((float(first["top"]), float(last["bottom"]), float(first["x0"]), float(last["x1"])))
 	return matches[0] if len(matches) == 1 else None
 
 
-def _next_task_heading_top(page, after: float) -> float | None:
-	"""Find the next printed task boundary across common numbered PDF layouts."""
-	positions = [float(heading["top"]) for heading in find_stepenin_task_headings(page)
-		if float(heading["top"]) > after + 2]
+BRACKET_TASK_WORD_RE = re.compile(r"^\[(\d{1,4})\](?=\S)")
+
+
+def _printed_task_starts(page) -> list[dict]:
+	"""Locate every printed task start with its coordinates on the page.
+
+	Side-by-column layouts glue the bracketed number to the first stem word
+	(``[3]Из предложенного``), and such a word always opens its column's task.
+	"""
+	starts = [{"top": float(heading["top"]), "x0": float(heading["x0"]), "x1": float(heading["x1"])}
+		for heading in find_stepenin_task_headings(page)]
+	try:
+		words = page.extract_words()
+	except AttributeError:
+		words = []
+	starts.extend({"top": float(word["top"]), "x0": float(word["x0"]), "x1": float(word["x1"])}
+		for word in words if BRACKET_TASK_WORD_RE.match(str(word.get("text", ""))))
 	try:
 		lines = page.extract_text_lines(strip=True, return_chars=False)
 	except (AttributeError, TypeError):
@@ -717,9 +736,70 @@ def _next_task_heading_top(page, after: float) -> float | None:
 		text = str(line.get("text", "")).strip()
 		# Parenthesised numbers are answer choices ("4) бензол"), not task
 		# boundaries. Ordinary task stems use "4."; bracketed tasks are above.
-		if re.match(r"^\d{1,4}\.\s+\S", text) and float(line["top"]) > after + 2:
-			positions.append(float(line["top"]))
+		if re.match(r"^\d{1,4}\.\s+\S", text):
+			starts.append({"top": float(line["top"]), "x0": float(line["x0"]), "x1": float(line["x1"])})
+	return starts
+
+
+def _next_task_heading_top(page, after: float, column=None) -> float | None:
+	"""Find the next printed task boundary across common numbered PDF layouts."""
+	positions = [start["top"] for start in _printed_task_starts(page)
+		if start["top"] > after + 2
+		and (column is None or (start["x1"] > column[0] and start["x0"] < column[1]))]
 	return min(positions) if positions else None
+
+
+def _task_column(page, start):
+	"""Bound the anchor's column so a crop cannot absorb a neighbouring task.
+
+	Wide slide-format trainers place two tasks side by side, so one vertical
+	band interleaves both columns. Printed task starts mark each column's left
+	edge, and the band's own horizontal coverage confirms where the columns
+	separate. ``None`` keeps the previous single-column behaviour.
+	"""
+	edges = sorted({start["x0"] for start in _printed_task_starts(page)})
+	clustered = []
+	for value in edges:
+		if not clustered or value - clustered[-1] > 20:
+			clustered.append(value)
+	if len(clustered) < 2:
+		return None
+	limit = _next_task_heading_top(page, start[0]) or float(page.height) - 55
+	spans = sorted(
+		(max(0.0, float(item["x0"])), min(float(page.width), float(item["x1"])))
+		for item in [*page.chars, *page.images]
+		if start[0] - 3 <= float(item["top"]) < limit
+	)
+	merged = []
+	for x0, x1 in spans:
+		if merged and x0 <= merged[-1][1] + 2:
+			merged[-1][1] = max(merged[-1][1], x1)
+		else:
+			merged.append([x0, x1])
+	bounds = [0.0]
+	for left_edge, right_edge in zip(clustered, clustered[1:], strict=False):
+		boundary = right_edge - 6
+		if any(x0 < boundary < x1 for x0, x1 in merged):
+			# Content crosses the candidate split; only a clean projection gap
+			# between the two column edges can still justify a boundary.
+			gaps = [
+				(right_x0 - left_x1, (left_x1 + right_x0) / 2)
+				for left_x1, right_x0 in zip([interval[1] for interval in merged], [interval[0] for interval in merged][1:], strict=False)
+				if right_x0 - left_x1 > 0 and left_edge <= left_x1 and right_x0 <= right_edge
+			]
+			if not gaps:
+				return None
+			boundary = max(gaps)[1]
+		bounds.append(boundary)
+	bounds.append(float(page.width))
+	for x0, x1 in zip(bounds, bounds[1:], strict=False):
+		if start[2] < x1 and start[3] > x0:
+			return (x0, x1)
+	return None
+
+
+def _item_in_column(item, column) -> bool:
+	return column is None or (float(item["x1"]) > column[0] and float(item["x0"]) < column[1])
 
 
 def _resolve_source_region(pdf, region: dict) -> dict:
@@ -732,8 +812,11 @@ def _resolve_source_region(pdf, region: dict) -> dict:
 	start = _find_source_anchor(page, region["start"])
 	if not start:
 		frappe.throw(_("AI selected a PDF fragment that could not be located safely. Please retry the import."), frappe.ValidationError)
-	next_heading = _next_task_heading_top(page, start[0])
-	end = _find_source_anchor(page, region["end"], after=start[0], before=next_heading)
+	# A wide page can hold a second task beside this one; bound the task's
+	# column before reading further text or crop geometry from the page.
+	column = _task_column(page, start)
+	next_heading = _next_task_heading_top(page, start[0], column=column)
+	end = _find_source_anchor(page, region["end"], after=start[0], before=next_heading, column=column)
 	if not start or not end:
 		frappe.throw(_("AI selected a PDF fragment that could not be located safely. Please retry the import."), frappe.ValidationError)
 	limit = next_heading - 3 if next_heading else float(page.height) - 55
@@ -743,15 +826,16 @@ def _resolve_source_region(pdf, region: dict) -> dict:
 	# Include diagrams after the text, without crossing the next task boundary.
 	graphics = []
 	for item in sorted([*page.images, *page.rects, *page.curves], key=lambda item: float(item["top"])):
-		if start[0] <= float(item["top"]) <= bottom + 36 and float(item["bottom"]) < limit:
+		if start[0] <= float(item["top"]) <= bottom + 36 and float(item["bottom"]) < limit and _item_in_column(item, column):
 			graphics.append(item)
 			bottom = max(bottom, float(item["bottom"]) + 4)
 	top, bottom = max(0, start[0] - 3), min(limit, bottom)
-	items = [item for item in [*page.chars, *page.images, *graphics] if top <= float(item["top"]) < bottom]
+	items = [item for item in [*page.chars, *page.images, *graphics]
+		if top <= float(item["top"]) < bottom and _item_in_column(item, column)]
 	if not items:
 		frappe.throw(_("AI selected an empty PDF fragment."), frappe.ValidationError)
-	bbox = (max(0, min(float(item["x0"]) for item in items) - 6), top,
-		min(float(page.width), max(float(item["x1"]) for item in items) + 6), bottom)
+	bbox = (max(column[0] if column else 0, min(float(item["x0"]) for item in items) - 6), top,
+		min(column[1] if column else float(page.width), max(float(item["x1"]) for item in items) + 6), bottom)
 	return {**region, "bbox": bbox, "page_width": float(page.width), "page_height": float(page.height), "text": page.crop(bbox).extract_text() or ""}
 
 
