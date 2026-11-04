@@ -195,7 +195,9 @@ def render_attempt_report_html(doc, correct_answers: dict[str, list[str]] | None
 				'<div class="keys"><span class="klabel">'
 				+ _("Correct Answer:")
 				+ "</span>"
-				+ (", ".join(keys) if keys else "—")
+				# A raster-only key is an image tag (task 40): inline it like the
+				# question/answer bodies so the emailed PDF shows the printed key.
+				+ (_absolute_asset_urls(_inline_private_images(", ".join(keys))) if keys else "—")
 				+ "</div>"
 			)
 		parts.append("</div>")

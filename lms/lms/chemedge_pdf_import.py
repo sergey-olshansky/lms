@@ -290,6 +290,7 @@ def _task_extraction_request(entry, pages, candidate, instruction, feedback=""):
 		"CROPS are shown to students: source regions must come only from question/context pages " + json.dumps(sorted(crop_pages)) + ". "
 		"Answer-only pages are for copying the answer and MUST NOT appear in source_regions, even as context. "
 		"Copy the provided answer; do NOT solve or check answer correctness. Retain any existing parser answer unchanged. "
+		"If the printed answer exists only as an image, return an empty answer instead of transcribing or inventing it; that printed image is preserved from the PDF automatically. "
 		"Include ALL shared conditions and lists before task regions. Exclude other tasks, answers, advertisements and unrelated headings from crops. "
 		"For unordered selections use options and 1-based correct_options mapped from the printed answer. "
 		"For ordering or matching use a text answer and empty options. Never invent answers. "
@@ -325,6 +326,127 @@ def _validate_printed_task_number(task, region):
 	printed_number = re.match(r"^\[?(\d{1,4})(?:\]|\.)", region.get("text", "").strip())
 	if region["kind"] == "task" and printed_number and int(printed_number.group(1)) != int(task.get("source_number", task["number"])):
 		raise AIExtractionInvalid(_("AI associated a question with a different printed task number."))
+
+
+ANSWER_MARKER_RE = re.compile(r"^\[(\d{1,4})\]$")
+
+
+def _answer_marker_column(page, markers, marker):
+	"""Bound the marker's column from the answer key's own marker edges.
+
+	Answer keys share the wide two-column slide layout: each column's keys
+	start at their own marker left edge, so clustered marker edges split the
+	page the same way printed task starts do for questions. A single marker
+	column keeps full-width bands.
+	"""
+	edges = sorted({item["x0"] for item in markers})
+	clustered = []
+	for value in edges:
+		if not clustered or value - clustered[-1] > 20:
+			clustered.append(value)
+	if len(clustered) < 2:
+		return None
+	bounds = [0.0, *(edge - 6 for edge in clustered[1:]), float(page.width)]
+	for left, right in zip(bounds, bounds[1:]):
+		if marker["x0"] < right and marker["x1"] > left:
+			return (left, right)
+	return None
+
+
+def _answer_marker_starts(page) -> list[dict]:
+	"""Locate printed answer-key markers: standalone bracketed numbers.
+
+	Answer keys alternate ``[N]`` markers with their printed answers (the same
+	structure the template parser reads), so a standalone bracketed number is a
+	key's own boundary marker even when the answer itself is an image.
+	"""
+	try:
+		words = page.extract_words()
+	except AttributeError:
+		return []
+	markers = []
+	for word in words:
+		match = ANSWER_MARKER_RE.fullmatch(str(word.get("text", "")).strip())
+		if match:
+			markers.append({
+				"number": int(match.group(1)),
+				"top": float(word["top"]), "bottom": float(word["bottom"]),
+				"x0": float(word["x0"]), "x1": float(word["x1"]),
+			})
+	return markers
+
+
+def _raster_answer_region(pdf, answer_pages, printed_number) -> dict | None:
+	"""Resolve a task's answer band when the printed key is only a raster image.
+
+	The AI endpoint is text-only, so an answer printed purely as an embedded
+	image can never be transcribed; such a key is preserved as the image itself.
+	Accept a band only when the task's ``[N]`` marker is unique across the planned
+	answer pages and its band holds that marker plus embedded images with no
+	answer text at all. Any other layout returns ``None`` so an answer the model
+	cannot ground in printed text keeps failing safely.
+	"""
+	if type(printed_number) is not int or not TASK_NUMBER_MIN <= printed_number <= TASK_NUMBER_MAX:
+		return None
+	marker_pages, found = {}, []
+	for page_number in sorted({page for page in (answer_pages or []) if type(page) is int and 1 <= page <= len(pdf.pages)}):
+		page = pdf.pages[page_number - 1]
+		markers = _answer_marker_starts(page)
+		marker_pages[page_number] = (page, markers)
+		found.extend((page_number, marker) for marker in markers if marker["number"] == printed_number)
+	if len(found) != 1:
+		return None
+	page_number, marker = found[0]
+	page, markers = marker_pages[page_number]
+	column = _answer_marker_column(page, markers, marker)
+	following = [item["top"] for item in markers if item["top"] > marker["top"] + 2 and _item_in_column(item, column)]
+	next_marker_top = min(following) if following else None
+	# The band ends at the next key marker; without one, keep the same bottom
+	# margin as question crops so page footers are never read as answer text.
+	text_band_bottom = next_marker_top - 3 if next_marker_top else float(page.height) - 55
+	band_top = marker["top"] - 1
+	images = [
+		image for image in page.images
+		if float(image["bottom"]) > band_top
+		and (next_marker_top is None or float(image["bottom"]) < next_marker_top - 3)
+		and (next_marker_top is None or float(image["top"]) < next_marker_top)
+		and _item_in_column(image, column)
+	]
+	band_words = [
+		word for word in page.extract_words()
+		if band_top <= float(word["top"]) and float(word["bottom"]) < text_band_bottom
+		and _item_in_column(word, column)
+		and not ANSWER_MARKER_RE.fullmatch(str(word.get("text", "")).strip())
+	]
+	if not images or any(str(word.get("text", "")).strip() for word in band_words):
+		return None
+	items = [{"x0": marker["x0"], "x1": marker["x1"]}, *images]
+	bbox = (
+		max(column[0] if column else 0, min(float(item["x0"]) for item in items) - 6),
+		max(0, marker["top"] - 3),
+		min(column[1] if column else float(page.width), max(float(item["x1"]) for item in items) + 6),
+		min(float(page.height), max(float(image["bottom"]) for image in images) + 5),
+	)
+	return {"page_number": page_number, "bbox": bbox, "page_width": float(page.width), "page_height": float(page.height), "text": ""}
+
+
+def _verified_raster_answer(pdf_path: Path, entry, base: dict) -> dict | None:
+	"""Deterministically verify a raster-only printed answer from the PDF itself."""
+	source_number = base.get("source_number", entry["number"])
+	try:
+		with pdfplumber.open(pdf_path) as pdf:
+			return _raster_answer_region(pdf, entry.get("answer_pages"), source_number)
+	except (ValueError, TypeError, KeyError, IndexError, AttributeError, OSError):
+		return None
+
+
+def _reject_unprinted_answer(result, number):
+	"""Refuse a model answer where the PDF's answer band has no printed text."""
+	if isinstance(result.get("tasks"), list):
+		for item in result["tasks"]:
+			if isinstance(item, dict) and item.get("number") == number:
+				if str(item.get("answer") or "").strip() or item.get("options"):
+					raise AIExtractionInvalid(_("AI returned an answer that is not printed as text in this PDF."))
 
 
 def _extract_page_plan_tasks(pdf_path, pages, entries, candidate, accepted, instruction, checkpoint, plan):
@@ -371,9 +493,16 @@ def _extract_page_plan_tasks(pdf_path, pages, entries, candidate, accepted, inst
 						for item in result["tasks"]:
 							if isinstance(item, dict) and item.get("number") == number:
 								item["answer"] = base["answer"]
-					_title, extracted = _validate_ai_tasks(result, pdf_path, request[3])
+					raster_answer = None if base.get("answer") else _verified_raster_answer(pdf_path, entry, base)
+					if raster_answer:
+						# A raster-only band holds no printed answer text, so any
+						# returned answer text would be invented, not copied.
+						_reject_unprinted_answer(result, number)
+					_title, extracted = _validate_ai_tasks(result, pdf_path, request[3], allow_empty_answer=bool(raster_answer))
 					if len(extracted) != 1 or extracted[0]["number"] != number:
 						raise AIExtractionInvalid(_("AI returned the wrong task."))
+					if raster_answer:
+						extracted[0]["answer_image_region"] = raster_answer
 					extracted[0]["source_regions"] = _bind_regions_to_page_plan(extracted[0]["source_regions"], pages, request[2])
 					_validate_crop_page_scope(extracted[0]["source_regions"], request[3]["crop_pages"])
 					task = _resolve_extracted_task(extracted[0], pdf_path)
@@ -518,7 +647,13 @@ def _ai_json(prompt, content, settings=None):
 		raise AIUnavailable("AI returned an unreadable result for this PDF.")
 
 
-def _validate_ai_tasks(result, pdf_path, candidate, require_review=True):
+def _validate_ai_tasks(result, pdf_path, candidate, require_review=True, allow_empty_answer=False):
+	"""Validate model output; ``allow_empty_answer`` is never taken from model JSON.
+
+	It is passed only by the page-plan path after the PDF itself verified that
+	the task's printed answer exists solely as a raster image, so an empty text
+	answer stays an error everywhere else.
+	"""
 	title = str(result.get("title") or pdf_path.stem)[:140]
 	tasks = result.get("tasks")
 	if not isinstance(tasks, list) or not 1 <= len(tasks) <= 300:
@@ -603,7 +738,7 @@ def _validate_ai_tasks(result, pdf_path, candidate, require_review=True):
 			)
 		if (
 			not question
-			or (not correct_answer and not options)
+			or (not correct_answer and not options and not allow_empty_answer)
 			or len(question) > 12000
 			or len(correct_answer) > 4000
 		):
@@ -921,6 +1056,55 @@ def _store_task_image(image_path: Path, quiz_name: str, task_number: int):
 	return file_doc
 
 
+def _create_answer_images(pdf_path: Path, tasks: list[dict], work_dir: Path) -> dict[int, Path]:
+	"""Render verified raster-only answer bands exactly like question crops."""
+	wanted = {int(task["number"]): task["answer_image_region"] for task in tasks if task.get("answer_image_region")}
+	images, page_cache = {}, {}
+	if not wanted:
+		return images
+	with pdfplumber.open(pdf_path) as pdf:
+		def get_page(page_number):
+			if page_number not in page_cache:
+				page_cache[page_number] = pdf.pages[page_number - 1].to_image(resolution=180, antialias=True).original.convert("RGB")
+			return page_cache[page_number]
+		try:
+			for number, region in wanted.items():
+				image = compose_source_regions([region], get_page)
+				path = work_dir / f"ai-answer-{number:04d}.png"
+				image.save(path, format="PNG", optimize=True)
+				image.close()
+				images[number] = path
+		finally:
+			for page_image in page_cache.values():
+				page_image.close()
+	return images
+
+
+def _store_answer_image(image_path: Path, quiz_name: str, task_number: int):
+	file_doc = frappe.get_doc(
+		{
+			"doctype": "File",
+			"file_name": f"chemedge-answer-{task_number:04d}.png",
+			"content": image_path.read_bytes(),
+			"decode": False,
+			"is_private": True,
+			"attached_to_doctype": "LMS Quiz",
+			"attached_to_name": quiz_name,
+		}
+	)
+	file_doc.insert(ignore_permissions=True)
+	return file_doc
+
+
+def _answer_image_html(task: dict, image_url: str) -> str:
+	"""Show a raster-only printed key as its verbatim source image."""
+	number = int(task["number"])
+	return sanitize_html(
+		f'<p><img src="{frappe.utils.escape_html(image_url)}" alt="Task {number} printed answer"></p>',
+		always_sanitize=True,
+	)
+
+
 def _question_html(task: dict, image_url: str) -> str:
 	number = int(task["number"])
 	task_id = frappe.utils.escape_html(str(task["id"]))
@@ -1150,6 +1334,7 @@ def import_pdf_trainer(
 
 		report_progress(_("Preparing question images"))
 		crops = _create_ai_task_crops(pdf_path, tasks, work_dir)
+		answer_crops = _create_answer_images(pdf_path, tasks, work_dir)
 		quiz = _create_quiz({"header": header}, source_folder, task_number_range, show_answers)
 		quiz_name = quiz.name
 		for task in tasks:
@@ -1166,6 +1351,10 @@ def import_pdf_trainer(
 					question_data[f"is_correct_{index}"] = int(index in task["correct_options"])
 			else:
 				question_data["possibility_1"] = str(task["answer"])
+				if int(task["number"]) in answer_crops:
+					answer_file = _store_answer_image(answer_crops[int(task["number"])], quiz.name, int(task["number"]))
+					created_file_names.append(answer_file.name)
+					question_data["possibility_1"] = _answer_image_html(task, answer_file.file_url)
 			question = frappe.get_doc(question_data)
 			question.insert(ignore_permissions=True)
 			created_question_names.append(question.name)
