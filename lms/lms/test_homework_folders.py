@@ -410,15 +410,38 @@ class TestFolderDynamics(FolderHomeworkBase):
 		("do not invent it at implement stage"). No LMS code may delete a folder
 		homework still depends on -- and none is needed: standard link
 		integrity refuses the deletion while a requirement links it, so the
-		row, its folder link and its progress survive intact (question recorded
-		in card #41 for the owner to spec the transition if ever needed)."""
+		folder, its requirement row and the recorded per-image progress all
+		survive. (frappe runs the #39 on_trash image cleanup BEFORE the link
+		check, so a refused attempt may still empty the folder -- pre-existing
+		released behavior, unchanged here; question recorded in card #41.)"""
+		frappe.set_user(self.student.name)
+		homework_service.record_folder_image_opened(self.folder, self.images[0])
+		progress = frappe.get_all(
+			"LMS Homework Folder Image",
+			{"parent": self.assignment, "image": self.images[0]},
+			pluck="name",
+		)
+		self.assertEqual(len(progress), 1)
 		frappe.set_user("Administrator")
 		with self.assertRaises(frappe.LinkExistsError):
 			frappe.delete_doc("Course Folder", self.folder, ignore_permissions=True)
-		row = self.folder_row(self.assignment)
-		self.assertEqual(row["folder"], self.folder)
-		self.assertEqual(row["status"], "Pending")
-		self.assertFalse(row["folder_empty"])
+		# The refusal protects exactly what issued homework depends on: the
+		# folder doc itself, its requirement row and the recorded progress.
+		self.assertTrue(frappe.db.exists("Course Folder", self.folder))
+		requirement = frappe.get_all(
+			"LMS Homework Requirement",
+			{"parent": self.assignment, "requirement_type": "Open Folder", "folder": self.folder},
+			pluck="name",
+		)
+		self.assertEqual(len(requirement), 1)
+		self.assertEqual(
+			frappe.get_all(
+				"LMS Homework Folder Image",
+				{"parent": self.assignment, "image": self.images[0]},
+				pluck="name",
+			),
+			progress,
+		)
 
 
 class TestFolderPriorCredit(FolderHomeworkBase):
