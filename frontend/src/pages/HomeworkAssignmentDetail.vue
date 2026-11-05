@@ -321,7 +321,7 @@
 										:aria-label="row.state_label"
 									>
 										<span
-											v-if="isDone(row)"
+											v-if="isDone(row) && !row.folder_empty"
 											class="lucide-check size-3.5"
 											aria-hidden="true"
 										/>
@@ -875,20 +875,23 @@ const allConfirmed = computed(() => {
 	)
 })
 const stateClass = (row) => {
+	// D2: an emptied folder is neutral NOW, so the muted presentation wins
+	// over any completed-earlier state -- same look as a never-completed
+	// emptied folder, never a green "done" styling on a muted note.
+	if (row.status === 'Unavailable' || row.folder_empty)
+		return 'border-outline-gray-3 bg-surface-gray-2 text-ink-gray-5'
 	if (isDone(row))
 		return 'border-outline-gray-3 bg-surface-green-2 text-ink-green-5'
 	if (row.status === 'Awaiting Grading')
 		return 'border-outline-gray-3 bg-surface-orange-1 text-ink-orange-5'
-	if (row.status === 'Unavailable' || row.folder_empty)
-		return 'border-outline-gray-3 bg-surface-gray-2 text-ink-gray-5'
 	return 'border-outline-red-2 bg-surface-red-1 text-ink-red-5'
 }
 const stateTextClass = (row) => {
+	if (row.status === 'Unavailable' || row.folder_empty)
+		return 'bg-surface-gray-2 text-ink-gray-5'
 	if (isDone(row)) return 'bg-surface-green-2 text-ink-green-5'
 	if (row.status === 'Awaiting Grading')
 		return 'bg-surface-orange-1 text-ink-orange-5'
-	if (row.status === 'Unavailable' || row.folder_empty)
-		return 'bg-surface-gray-2 text-ink-gray-5'
 	return 'bg-surface-red-1 text-ink-red-5'
 }
 const rowKey = (row) =>

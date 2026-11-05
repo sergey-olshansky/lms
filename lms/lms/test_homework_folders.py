@@ -8,8 +8,10 @@ folders are selectable leaves and sections recurse), each stored requirement
 is ONE folder whose checklist expands to per-image sub-items, and opening each
 individual picture in the real gallery completes exactly that image,
 idempotently (Sergey #1521), against the folder's CURRENT image set as the
-denominator -- later uploads appear unchecked, deletions drop out, an empty
-folder is a muted non-blocking note, and a deleted folder goes Unavailable.
+denominator -- later uploads appear unchecked, deletions drop out, and an
+emptied folder is a muted non-blocking note even when the row completed
+before the folder emptied (the folder's own deletion lifecycle is beyond the
+spec's two fixed dynamics: link integrity keeps a linked folder in place).
 """
 
 import unittest
@@ -137,16 +139,18 @@ class TestFolderSourceTree(FolderHomeworkBase):
 		"""The #1445 scenario: a section with ONLY folders is attachable now."""
 		chapter = B._create_chapter("F41 media only", self.course.name)
 		B._create_chapter_reference(self.course.name, chapter.name, idx=2)
-		_create_folder("Slides", chapter.name, self.course.name)
-		_add_folder_image(
-			_create_folder("Album", chapter.name, self.course.name), "album-1.png"
-		)
+		# T1: Course Folder autonames are format:{####} {title}, so picker keys
+		# are name-based -- derive them from the created documents, never from
+		# the titles.
+		slides = _create_folder("Slides", chapter.name, self.course.name)
+		album = _create_folder("Album", chapter.name, self.course.name)
+		_add_folder_image(album, "album-1.png")
 		tree = homework_sources.get_course_source_tree(self.course.name)
 		section = next(n for n in tree["nodes"] if n["name"] == chapter.name)
 		self.assertTrue(section["assignable"])
 		# The empty folder itself is NOT selectable -- only the one with images.
 		states = {c["key"]: c["assignable"] for c in section["children"]}
-		self.assertEqual(states, {"folder:Slides": False, "folder:Album": True})
+		self.assertEqual(states, {f"folder:{slides}": False, f"folder:{album}": True})
 
 	def test_truly_empty_section_stays_unassignable(self):
 		"""Spec 3.4.5 survives: no lessons, no quizzes, no folders with images."""
@@ -400,12 +404,21 @@ class TestFolderDynamics(FolderHomeworkBase):
 		self.assertEqual(detail["total_requirements"], 0)
 		self.assertEqual(detail["status"], "Review")
 
-	def test_deleted_folder_goes_unavailable(self):
+	def test_folder_deletion_while_linked_is_refused(self):
+		"""The approved spec fixes ONLY image add/remove as post-attach folder
+		dynamics; the folder's own deletion lifecycle is explicitly unspecified
+		("do not invent it at implement stage"). No LMS code may delete a folder
+		homework still depends on -- and none is needed: standard link
+		integrity refuses the deletion while a requirement links it, so the
+		row, its folder link and its progress survive intact (question recorded
+		in card #41 for the owner to spec the transition if ever needed)."""
 		frappe.set_user("Administrator")
-		frappe.delete_doc("Course Folder", self.folder, ignore_permissions=True)
-		homework_service.recompute_folder_requirements(self.folder)
+		with self.assertRaises(frappe.LinkExistsError):
+			frappe.delete_doc("Course Folder", self.folder, ignore_permissions=True)
 		row = self.folder_row(self.assignment)
-		self.assertEqual(row["status"], "Unavailable")
+		self.assertEqual(row["folder"], self.folder)
+		self.assertEqual(row["status"], "Pending")
+		self.assertFalse(row["folder_empty"])
 
 
 class TestFolderPriorCredit(FolderHomeworkBase):
@@ -445,8 +458,10 @@ class TestFolderLessonRegression(FolderHomeworkBase):
 	"""Folders ride WITH lessons; the lesson flow itself stays untouched."""
 
 	def test_lesson_and_folder_composition_issues_both(self):
-		lesson = B._create_lesson("F41 lesson", self.chapter.name, self.course.name)
-		B._create_lesson_reference(self.chapter.name, lesson.name)
+		# T2: _create_lesson returns the DOCUMENT; the selection carries the
+		# lesson's NAME string (a Document object is not a material id).
+		lesson = B._create_lesson("F41 lesson", self.chapter.name, self.course.name).name
+		B._create_lesson_reference(self.chapter.name, lesson)
 		folder = self.make_folder("With lesson", images=1)
 		frappe.set_user(self.teacher.name)
 		homework = homework_api.save_homework(

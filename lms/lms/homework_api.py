@@ -398,7 +398,7 @@ def save_homework(
 						"lesson": item["lesson"],
 						"quiz": item["quiz"],
 						"assignment": item["assignment"],
-						"folder": item["folder"],
+						"folder": item.get("folder"),
 						"course": item["course"],
 						"label": item["label"],
 						"path": item["path"],
@@ -425,7 +425,7 @@ def save_homework(
 					"lesson": item["lesson"],
 					"quiz": item["quiz"],
 					"assignment": item["assignment"],
-					"folder": item["folder"],
+					"folder": item.get("folder"),
 					"course": item["course"],
 					"label": item["label"],
 					"path": item["path"],
@@ -1241,7 +1241,12 @@ def _folder_progress_payload(row, status: str) -> dict:
 		"opened_count": sum(1 for item in items if item["opened"]),
 		"folder_empty": not items,
 	}
-	if payload["folder_empty"] and status not in ("Completed", "Completed Earlier", "Unavailable"):
+	# D2: an emptied folder is neutral no matter what the row completed
+	# earlier -- the muted note IS its current state (spec 6), so it wins
+	# over any stored completion label. Only a dead source keeps
+	# "Unavailable": a deleted folder is gone, not empty, and must not read
+	# as a mere note.
+	if payload["folder_empty"] and status != "Unavailable":
 		payload["state_label"] = _("The folder has no images")
 	return payload
 

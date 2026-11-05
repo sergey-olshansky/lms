@@ -366,7 +366,12 @@ def canonicalize_selection(selection: list[dict]) -> list[dict]:
 
 
 def _canonical_item(source_type: str, name: str) -> dict:
-	"""One source resolved from the database: existence, course, label, path."""
+	"""One source resolved from the database: existence, course, label, path.
+
+	Every branch emits the SAME key set (lesson/quiz/assignment/folder, the
+	material-specific one set and the rest None) so consumers such as
+	save_homework can read any key unconditionally -- a Folder-only key
+	broke every non-Folder save with KeyError 'folder' (task 41 fix, R1)."""
 	if source_type == "Lesson":
 		row = frappe.db.get_value("Course Lesson", name, ["name", "title", "course", "chapter"], as_dict=True)
 		if not row:
@@ -389,6 +394,7 @@ def _canonical_item(source_type: str, name: str) -> dict:
 			"lesson": name,
 			"quiz": None,
 			"assignment": None,
+			"folder": None,
 			"course": row.course,
 			"label": row.title,
 			"path": _display_path(row.course, row.chapter, row.title),
@@ -406,6 +412,7 @@ def _canonical_item(source_type: str, name: str) -> dict:
 			"lesson": None,
 			"quiz": name,
 			"assignment": None,
+			"folder": None,
 			"course": course,
 			"label": row.title,
 			"path": _display_path(course, None, row.title),
@@ -439,6 +446,7 @@ def _canonical_item(source_type: str, name: str) -> dict:
 		"lesson": None,
 		"quiz": None,
 		"assignment": name,
+		"folder": None,
 		"course": course,
 		"label": row.title,
 		"path": _display_path(course, None, row.title),
