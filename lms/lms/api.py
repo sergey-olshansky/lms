@@ -1565,6 +1565,11 @@ def _store_folder_image(folder: frappe._dict, file_name: str, content) -> dict:
 	)
 	row.insert()
 
+	# Task #41: the folder's image set just grew -- homework cards carrying it
+	# catch up in the same request, so a card In Review with a new unchecked
+	# image is returned to the student immediately, never silently stale.
+	_recompute_folder_homework(folder.name)
+
 	return {
 		"status": "uploaded",
 		"file": {
@@ -1574,6 +1579,16 @@ def _store_folder_image(folder: frappe._dict, file_name: str, content) -> dict:
 			"file_size": stored.file_size,
 		},
 	}
+
+
+def _recompute_folder_homework(folder_name: str) -> None:
+	"""Task #41: a folder's image set just changed through the real upload and
+	delete endpoints -- bring the homework cards carrying an Open Folder row on
+	it back in step (denominators, statuses, counters, auto-review). Targeted
+	through the requirement rows; inert for folders no homework references."""
+	from lms.lms.homework_service import recompute_folder_requirements
+
+	recompute_folder_requirements(folder_name)
 
 
 @frappe.whitelist(methods=["POST"])
@@ -1611,6 +1626,10 @@ def delete_folder_image(folder: str, image: str):
 	)
 	for position, remaining_row in enumerate(remaining, start=1):
 		frappe.db.set_value("Folder Image Reference", remaining_row.name, "idx", position)
+
+	# Task #41: the image left the folder -- it leaves every denominator too,
+	# without a stale check and without blocking completion.
+	_recompute_folder_homework(doc.name)
 
 
 # Matches SETTINGS_PAGE_LENGTH in the frontend, which pages `start` by this.

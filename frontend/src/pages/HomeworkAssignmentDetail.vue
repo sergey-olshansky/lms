@@ -336,7 +336,11 @@
 											class="block truncate text-sm text-ink-gray-9"
 											:title="row.path"
 										>
-											{{ row.label }}
+											{{
+												row.requirement_type === 'Open Folder'
+													? __('Open folder «{0}»').format(row.label)
+													: row.label
+											}}
 										</span>
 										<span
 											class="block truncate text-xs text-ink-gray-5"
@@ -348,8 +352,16 @@
 									<span
 										class="shrink-0 rounded-4 px-1.5 py-0.5 text-xs"
 										:class="stateTextClass(row)"
+										:data-testid="`folder-progress-${row.folder}`"
 									>
-										{{ row.state_label }}
+										{{
+											row.requirement_type === 'Open Folder' && row.image_count
+												? __('{0} / {1}').format(
+														String(row.opened_count),
+														String(row.image_count)
+														)
+												: row.state_label
+										}}
 									</span>
 									<!-- U02: an exhausted attempt limit is the one reason a
 									     stuck card may have that the checklist alone never
@@ -401,7 +413,51 @@
 									</router-link>
 								</div>
 
-								<!-- Spec 5.3.4: the quizzes of a selected lesson are
+									<!-- Task #41 (Sergey #1521): the folder group expands to one
+							sub-row per CURRENT image; opening the gallery lightbox on
+							exactly that image (also from this deep link) completes it. -->
+							<div
+								v-if="
+								row.requirement_type === 'Open Folder' &&
+								(row.images || []).length
+							"
+								class="mt-1 ms-8 divide-y divide-outline-gray-1 rounded-4 border border-outline-gray-2"
+								:data-testid="`folder-images-${row.folder}`"
+							>
+								<div
+									v-for="image in row.images"
+									:key="image.name"
+									class="flex items-center gap-2 px-2 py-1.5 text-xs"
+								>
+									<span
+										class="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-4 border"
+										:class="
+											image.opened
+												? 'border-outline-gray-3 bg-surface-green-2 text-ink-green-5'
+												: 'border-outline-gray-3 bg-surface-red-1 text-ink-red-5'
+										"
+										:aria-label="
+											image.opened ? __('Done') : __('Not done')
+										"
+									>
+										<span
+											v-if="image.opened"
+												class="lucide-check size-3"
+												aria-hidden="true"
+											/>
+									</span>
+									<router-link
+										:to="folderImageRoute(row, image)"
+										class="min-w-0 flex-1 truncate text-ink-gray-7 hover:underline"
+										:title="image.file_name"
+										:data-testid="`folder-image-${image.name}`"
+									>
+										{{ image.file_name }}
+									</router-link>
+								</div>
+							</div>
+
+						<!-- Spec 5.3.4: the quizzes of a selected lesson are
 								expandable sub-rows of that lesson, each with its own
 								state and, when passed, the attempt link. -->
 								<div
@@ -823,7 +879,7 @@ const stateClass = (row) => {
 		return 'border-outline-gray-3 bg-surface-green-2 text-ink-green-5'
 	if (row.status === 'Awaiting Grading')
 		return 'border-outline-gray-3 bg-surface-orange-1 text-ink-orange-5'
-	if (row.status === 'Unavailable')
+	if (row.status === 'Unavailable' || row.folder_empty)
 		return 'border-outline-gray-3 bg-surface-gray-2 text-ink-gray-5'
 	return 'border-outline-red-2 bg-surface-red-1 text-ink-red-5'
 }
@@ -831,7 +887,8 @@ const stateTextClass = (row) => {
 	if (isDone(row)) return 'bg-surface-green-2 text-ink-green-5'
 	if (row.status === 'Awaiting Grading')
 		return 'bg-surface-orange-1 text-ink-orange-5'
-	if (row.status === 'Unavailable') return 'bg-surface-gray-2 text-ink-gray-5'
+	if (row.status === 'Unavailable' || row.folder_empty)
+		return 'bg-surface-gray-2 text-ink-gray-5'
 	return 'bg-surface-red-1 text-ink-red-5'
 }
 const rowKey = (row) =>
@@ -894,8 +951,28 @@ const rowRoute = (route) => {
 			query: { hw: props.assignmentID },
 		}
 	}
+	if (route.type === 'folder' && route.folder) {
+		// Task #41: the folder group links into the REAL gallery page (never a
+		// copy of the images), carrying the homework context for the way back.
+		return {
+			name: 'CourseFolder',
+			params: { courseName: route.course, folderName: route.folder },
+			query: { hw: props.assignmentID },
+		}
+	}
 	return null
 }
+
+// Task #41: one image sub-row's deep link into the gallery -- the lightbox
+// opens on exactly that image, which records its own completion (#1521).
+const folderImageRoute = (row, image) => ({
+	name: 'CourseFolder',
+	params: {
+		courseName: row.route?.course || row.course,
+		folderName: row.folder,
+	},
+	query: { hw: props.assignmentID, image: image.name },
+})
 
 // B11: the quiz link is ADDRESSABLE. A confirmed row carries its proof -- the
 // very submission that earned the pass, which may not be the newest attempt --
@@ -935,6 +1012,12 @@ const continueWorking = () => {
 		router.push({
 			name: 'AssignmentSubmission',
 			params: { assignmentID: target.assignment, submissionName: 'new' },
+			query: { hw: props.assignmentID },
+		})
+	} else if (target.type === 'folder' && target.folder) {
+		router.push({
+			name: 'CourseFolder',
+			params: { courseName: target.course, folderName: target.folder },
 			query: { hw: props.assignmentID },
 		})
 	}

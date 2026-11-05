@@ -742,6 +742,13 @@ const continueCard = async (card) => {
 			params: { quizID: target.quiz },
 			query: { hw: card.name },
 		})
+	} else if (target.type === 'folder' && target.folder) {
+		// Task #41: continue straight into the folder's real gallery.
+		router.push({
+			name: 'CourseFolder',
+			params: { courseName: target.course, folderName: target.folder },
+			query: { hw: card.name },
+		})
 	} else {
 		openCard(card)
 	}

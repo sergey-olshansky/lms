@@ -36,6 +36,7 @@ from lms.lms.utils import (
 REQUIREMENT_OPEN_LESSON = "Open Lesson"
 REQUIREMENT_PASS_QUIZ = "Pass Quiz"
 REQUIREMENT_OPEN_ASSIGNMENT = "Open Assignment"
+REQUIREMENT_OPEN_FOLDER = "Open Folder"
 REQUIREMENT_REFERENCE = "Reference"
 
 
@@ -111,7 +112,7 @@ def get_course_source_tree(course: str) -> dict:
 	child_rows = frappe.get_all(
 		"Lesson Reference",
 		filters={"parent": ("in", all_section_names), "parenttype": "Course Chapter"},
-		fields=["parent", "idx", "lesson", "section"],
+		fields=["parent", "idx", "lesson", "section", "folder"],
 		order_by="parent, idx",
 	)
 	children_by_section: dict[str, list] = {}
@@ -122,6 +123,9 @@ def get_course_source_tree(course: str) -> dict:
 	lesson_titles = _titles("Course Lesson", lesson_names)
 	quizzes_by_lesson = _embedded_quizzes_by_lesson(course)
 	assignments_by_lesson = _embedded_assignments_by_lesson(course)
+	folder_titles, folder_image_counts = _folder_lookup(
+		[row.folder for row in child_rows if row.folder], course
+	)
 
 	def lesson_node(name: str, parent_section: str) -> dict:
 		return {
@@ -133,6 +137,22 @@ def get_course_source_tree(course: str) -> dict:
 			"quizzes": quizzes_by_lesson.get(name, []),
 			"has_assignment": name in assignments_by_lesson,
 			"assignable": True,
+		}
+
+	def folder_node(name: str, parent_section: str) -> dict:
+		# Task #41: a Folder is the third child kind and a picker LEAF in its
+		# own right (Sergey #1527): selectable alone, and part of its section's
+		# recursive pick. Assignable exactly when images exist today -- the
+		# tree is rebuilt on every picker open, so an upload makes it pickable.
+		count = folder_image_counts.get(name, 0)
+		return {
+			"key": f"folder:{name}",
+			"type": "folder",
+			"name": name,
+			"title": folder_titles.get(name, name),
+			"chapter": parent_section,
+			"image_count": count,
+			"assignable": count > 0,
 		}
 
 	def section_node(name: str, seen: set, depth: int) -> dict | None:
@@ -148,6 +168,8 @@ def get_course_source_tree(course: str) -> dict:
 					children.append(child)
 			elif row.lesson and row.lesson in lesson_titles:
 				children.append(lesson_node(row.lesson, name))
+			elif row.folder and row.folder in folder_titles:
+				children.append(folder_node(row.folder, name))
 		return {
 			"key": f"chapter:{name}",
 			"type": "chapter",
@@ -170,6 +192,34 @@ def get_course_source_tree(course: str) -> dict:
 		"course": {"name": course, "title": course_title or course},
 		"nodes": nodes + standalone,
 	}
+
+
+def _folder_lookup(folder_names: list[str], course: str) -> tuple[dict[str, str], dict[str, int]]:
+	"""Titles and CURRENT image counts of the folders this course's sections
+	reference (task #41). Only folders that still exist and still belong to
+	the course become picker leaves -- the same join stance
+	``get_outline_folders`` takes for the student outline, so the picker and
+	the gallery never disagree about what a section holds."""
+	names = [name for name in dict.fromkeys(folder_names) if name]
+	if not names:
+		return {}, {}
+	rows = frappe.get_all(
+		"Course Folder",
+		filters={"name": ("in", names), "course": course},
+		fields=["name", "title"],
+	)
+	if not rows:
+		return {}, {}
+	titles = {row.name: row.title for row in rows}
+	counts = dict.fromkeys(titles, 0)
+	for row in frappe.get_all(
+		"Folder Image Reference",
+		filters={"parent": ("in", list(titles))},
+		fields=["parent"],
+	):
+		if row.parent in counts:
+			counts[row.parent] += 1
+	return titles, counts
 
 
 def _embedded_quizzes_by_lesson(course: str) -> dict[str, list[dict]]:
@@ -290,7 +340,7 @@ def canonicalize_selection(selection: list[dict]) -> list[dict]:
 	for entry in selection:
 		source_type = entry.get("source_type") if isinstance(entry, dict) else None
 		name = entry.get("name") if isinstance(entry, dict) else None
-		if source_type not in ("Lesson", "Quiz", "Assignment") or not name:
+		if source_type not in ("Lesson", "Quiz", "Assignment", "Folder") or not name:
 			frappe.throw(
 				_("Unsupported material in the selection: {0}.").format(
 					frappe.bold(str(source_type or name))
@@ -359,6 +409,23 @@ def _canonical_item(source_type: str, name: str) -> dict:
 			"course": course,
 			"label": row.title,
 			"path": _display_path(course, None, row.title),
+		}
+
+	if source_type == "Folder":
+		row = frappe.db.get_value(
+			"Course Folder", name, ["name", "title", "course", "chapter"], as_dict=True
+		)
+		if not row:
+			frappe.throw(_("Folder {0} no longer exists.").format(frappe.bold(name)))
+		return {
+			"source_type": source_type,
+			"lesson": None,
+			"quiz": None,
+			"assignment": None,
+			"folder": name,
+			"course": row.course,
+			"label": row.title,
+			"path": _display_path(row.course, row.chapter, row.title),
 		}
 
 	row = frappe.db.get_value("LMS Assignment", name, ["name", "title", "course"], as_dict=True)
@@ -458,6 +525,25 @@ def expand_requirements(items: list) -> list[dict]:
 						"path": f"{base_path} / {assignment['title']}",
 					}
 				)
+		elif item.get("source_type") == "Folder" and item.get("folder"):
+			# Task #41: the stored unit is the folder -- one Open Folder
+			# requirement per selected folder (Sergey #1527); the per-image
+			# completion items expand from the folder's CURRENT image set at
+			# checklist time (Sergey #1521), never as frozen rows here.
+			rows.append(
+				{
+					"requirement_type": REQUIREMENT_OPEN_FOLDER,
+					"course": item.get("course"),
+					"chapter_title": _chapter_title_of_folder(item.folder),
+					"lesson": None,
+					"lesson_snapshot": None,
+					"quiz": None,
+					"reference_assignment": None,
+					"folder": item.folder,
+					"label": item.get("label") or item.folder,
+					"path": item.get("path") or item.folder,
+				}
+			)
 		elif item.get("source_type") == "Quiz" and item.get("quiz"):
 			rows.append(
 				{
@@ -489,6 +575,16 @@ def expand_requirements(items: list) -> list[dict]:
 
 def _chapter_title_of_lesson(lesson: str) -> str:
 	chapter = frappe.db.get_value("Course Lesson", lesson, "chapter")
+	if not chapter:
+		return ""
+	return frappe.db.get_value("Course Chapter", chapter, "title") or ""
+
+
+def _chapter_title_of_folder(folder: str) -> str:
+	"""The snapshot grouping title for an Open Folder row (task #41): the
+	folder's own parent section at issue time, read the same way the lesson
+	branch reads its chapter."""
+	chapter = frappe.db.get_value("Course Folder", folder, "chapter")
 	if not chapter:
 		return ""
 	return frappe.db.get_value("Course Chapter", chapter, "title") or ""
@@ -613,6 +709,8 @@ def validate_sources_for_student(items: list, student: str) -> list[str]:
 			course = frappe.db.get_value("LMS Assignment", item.assignment, "course") or _course_of_placed(
 				"LMS Assignment", item.assignment
 			)
+		elif item.source_type == "Folder" and item.folder:
+			course = frappe.db.get_value("Course Folder", item.folder, "course")
 		else:
 			course = None
 		if course:
@@ -673,6 +771,11 @@ def validate_sources_for_student(items: list, student: str) -> list[str]:
 				reasons.append(_("Assignment {0} no longer exists.").format(frappe.bold(item.label)))
 			else:
 				reasons.extend(_assessment_block_reasons("LMS Assignment", [item.assignment], student))
+		elif item.source_type == "Folder":
+			if item.folder and not frappe.db.exists("Course Folder", item.folder):
+				reasons.append(_("Folder {0} no longer exists.").format(frappe.bold(item.label)))
+			else:
+				reasons.extend(_folder_block_reasons(item.folder, student))
 	return reasons
 
 
@@ -709,6 +812,28 @@ def _assessment_block_reasons(assessment_type: str, names: list[str], student: s
 	return reasons
 
 
+def _folder_block_reasons(folder: str, student: str) -> list[str]:
+	"""Why the folder's gallery is not reachable for this student (task #41).
+
+	The gallery is real course content reached through the outline, so the
+	issue gate mirrors the outline's own reach: a member reaches their course's
+	folders, and a published course is open. A draft course without enrollment
+	stays closed for this student -- the folder link cannot ride the narrow
+	grant the way a lesson placement can, because the outline (the gallery's
+	own data source) honors enrollment, not requirement rows. Nothing here
+	opens access (R05): the reason names the course to enroll into."""
+	from lms.lms.utils import get_membership
+
+	course = frappe.db.get_value("Course Folder", folder, "course") if folder else None
+	if not course:
+		return []
+	published = frappe.db.get_value("LMS Course", course, "published")
+	if published or get_membership(course, student):
+		return []
+	title = frappe.db.get_value("Course Folder", folder, "title") or folder
+	return [_("Folder {0} is not available to this student.").format(frappe.bold(title))]
+
+
 def _narrow_grant_mode(assessment_type: str, name: str, student: str) -> bool:
 	"""E04: whether this assessment rides on the assignment's narrow grant --
 	its course is the session teacher's own and the student is not enrolled,
@@ -737,6 +862,12 @@ def narrow_access_courses(items: list, student: str) -> list[str]:
 			course = frappe.db.get_value("LMS Assignment", item.assignment, "course") or _course_of_placed(
 				"LMS Assignment", item.assignment
 			)
+		elif item.source_type == "Folder" and item.folder:
+			# A folder never rides the narrow grant (task #41): its gallery is
+			# reached through the course outline, so a folder course without
+			# membership blocks at precheck instead of pretending the issue
+			# opens it.
+			course = None
 		else:
 			course = None
 		if course and can_source_from(course) and not get_membership(course, student):

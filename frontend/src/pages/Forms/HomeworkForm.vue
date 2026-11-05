@@ -349,6 +349,7 @@ const removeItem = (index) => {
 const typeIcon = (type) => {
 	if (type === 'Quiz') return 'lucide-circle-help'
 	if (type === 'Assignment') return 'lucide-pencil'
+	if (type === 'Folder') return 'lucide-images'
 	return 'lucide-file-text'
 }
 
@@ -372,6 +373,13 @@ const itemRoute = (route) => {
 		return {
 			name: 'AssignmentSubmission',
 			params: { assignmentID: route.assignment, submissionName: 'new' },
+		}
+	}
+	if (route.type === 'folder' && route.folder) {
+		// Task #41: the real gallery page inside the course, not a copy.
+		return {
+			name: 'CourseFolder',
+			params: { courseName: route.course, folderName: route.folder },
 		}
 	}
 	return null
