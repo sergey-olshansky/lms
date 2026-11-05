@@ -25,6 +25,10 @@
 								String(composition.quizzes)
 							)
 						}}
+						<!-- Task #41: folders are materials too -- shown when present. -->
+						<span v-if="composition.folders">
+							· {{ __('{0} folders').format(String(composition.folders)) }}</span
+						>
 					</p>
 					<!-- F01: the count includes the chosen lessons' mandatory
 					     embedded quizzes -- say so when no quiz was picked
@@ -179,6 +183,7 @@ const composition = computed(() => ({
 	lessons: homeworkDoc.data?.counts?.lessons ?? 0,
 	quizzes: homeworkDoc.data?.counts?.quizzes ?? 0,
 	assignments: homeworkDoc.data?.counts?.assignments ?? 0,
+	folders: homeworkDoc.data?.counts?.folders ?? 0,
 }))
 
 // The hint a teacher needs when the quiz count is not what the picker seemed

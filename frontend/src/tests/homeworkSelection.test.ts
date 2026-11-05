@@ -10,6 +10,7 @@ import {
 	collectLeafKeys,
 	flattenWithPaths,
 	lessonRouteParams,
+	matchesSearch,
 	progressLine,
 	selectionToEntries,
 	toggleNode,
@@ -36,6 +37,17 @@ const chapter = (
 	title: name,
 	children,
 	assignable,
+})
+
+// Task #41: a Folder leaf exactly as the server tree emits it -- assignable
+// only while it holds images (Sergey #1527).
+const folder = (name: string, image_count: number): TreeNode => ({
+	key: `folder:${name}`,
+	type: 'folder',
+	name,
+	title: name,
+	image_count,
+	assignable: image_count > 0,
 })
 
 describe('homework selection', () => {
@@ -102,6 +114,57 @@ describe('homework selection', () => {
 				quizzes_total: 0,
 			})
 		).toBe('1 / 4')
+	})
+})
+
+describe('homework folder selection (task #41)', () => {
+	it('collects folders as leaves and skips empty folders', () => {
+		const tree = chapter('Media block', [
+			folder('Photos', 12),
+			folder('Empty', 0),
+		])
+		expect(collectLeafKeys(tree)).toEqual(['folder:Photos'])
+		expect(checkState(tree, new Set())).toBe('unchecked')
+	})
+
+	it('makes a folder-only section selectable (the #1445 scenario)', () => {
+		const tree = chapter('Photos section', [folder('Photos', 12)])
+		const picked = toggleNode(tree, new Set(), true)
+		expect(picked.has('folder:Photos')).toBe(true)
+		expect(checkState(tree, picked)).toBe('checked')
+	})
+
+	it('keeps a section of only empty folders unselectable (spec 3.4.5)', () => {
+		const tree = chapter('Empty folders', [folder('A', 0), folder('B', 0)])
+		expect(collectLeafKeys(tree)).toEqual([])
+	})
+
+	it('treats a mixed section as indeterminate on a partial folder pick', () => {
+		const tree = chapter('Mixed', [lesson('Theory'), folder('Photos', 12)])
+		expect(checkState(tree, new Set(['lesson:Theory']))).toBe('indeterminate')
+		expect(
+			checkState(tree, new Set(['lesson:Theory', 'folder:Photos']))
+		).toBe('checked')
+	})
+
+	it('maps a folder leaf to the Folder source type with its path', () => {
+		const nodes = [chapter('Section', [folder('Photos', 12)])]
+		const index = flattenWithPaths(nodes)
+		const courses = new Map([['course-a', index]])
+		const entries = selectionToEntries(new Set(['folder:Photos']), courses)
+		expect(entries).toHaveLength(1)
+		expect(entries[0]).toMatchObject({
+			source_type: 'Folder',
+			name: 'Photos',
+			course: 'course-a',
+			path: 'Section / Photos',
+		})
+	})
+
+	it('finds folders by title and keeps their section reachable', () => {
+		const tree = chapter('Lecture notes', [folder('Screenshots', 12)])
+		expect(matchesSearch(tree, 'screenshots')).toBe(true)
+		expect(matchesSearch(tree, 'nothing')).toBe(false)
 	})
 })
 

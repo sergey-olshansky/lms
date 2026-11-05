@@ -1,0 +1,62 @@
+{
+ "actions": [],
+ "creation": "2026-11-05 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "requirement",
+  "folder",
+  "image",
+  "opened_at"
+ ],
+ "fields": [
+  {
+   "description": "The LMS Homework Requirement row (Open Folder) this image belongs to; the pair (requirement, image) is the completion key (task #41, Sergey #1521: opening each picture is that image's own item).",
+   "fieldname": "requirement",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Requirement",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "folder",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Folder",
+   "options": "Course Folder",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "image",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Image",
+   "options": "File",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "opened_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Opened At",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-11-05 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "LMS",
+ "name": "LMS Homework Folder Image",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

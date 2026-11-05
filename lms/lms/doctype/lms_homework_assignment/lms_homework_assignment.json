@@ -40,6 +40,7 @@
   "assigned_at",
   "requirements_section",
   "requirements",
+  "folder_images",
   "history_section",
   "history",
   "materials",
@@ -261,6 +262,14 @@
    "fieldtype": "Table",
    "label": "Requirements",
    "options": "LMS Homework Requirement"
+  },
+  {
+   "description": "Task #41: per-image folder completions (Sergey #1521). One row per (requirement, image File) the student opened; the denominator is always the folder's CURRENT image set.",
+   "fieldname": "folder_images",
+   "fieldtype": "Table",
+   "label": "Folder Image Progress",
+   "options": "LMS Homework Folder Image",
+   "read_only": 1
   },
   {
    "collapsible": 1,

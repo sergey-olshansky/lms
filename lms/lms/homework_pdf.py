@@ -39,6 +39,7 @@ TYPE_LABELS = {
 	"Open Lesson": "Lesson",
 	"Pass Quiz": "Quiz",
 	"Open Assignment": "Written assignment",
+	"Open Folder": "Folder",
 	"Reference": "Material",
 }
 
@@ -72,6 +73,11 @@ def _requirement_link(row: dict) -> tuple[str, bool]:
 	if route.get("type") == "assignment" and route.get("assignment"):
 		return _site_url(
 			get_lms_route(f"assignment-submission/{route['assignment']}/new")
+		), True
+	if route.get("type") == "folder" and route.get("folder") and route.get("course"):
+		# Task #41: the folder's real gallery page inside the course.
+		return _site_url(
+			get_lms_route(f"courses/{route['course']}/folder/{route['folder']}")
 		), True
 	return "", False
 

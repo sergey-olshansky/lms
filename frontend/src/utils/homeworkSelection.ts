@@ -12,28 +12,33 @@
 
 export interface TreeNode {
 	key: string
-	type: 'chapter' | 'lesson' | 'quiz' | 'assignment'
+	type: 'chapter' | 'lesson' | 'quiz' | 'assignment' | 'folder'
 	name: string
 	title: string
 	children?: TreeNode[]
 	quizzes?: { name: string; title: string }[]
 	chapter?: string
 	assignable?: boolean
+	// Task #41: an image folder leaf (Sergey #1527) -- selectable on its own
+	// or through its section's recursive pick; assignable exactly when the
+	// folder holds images today (the tree is rebuilt on every picker open).
+	image_count?: number
 	// B11: the server-stamped working link (lesson numbers follow the outline's
 	// multi-segment rules), so a freshly chosen material previews before save.
 	route?: MaterialRoute | null
 }
 
 export interface MaterialRoute {
-	type: 'lesson' | 'quiz' | 'assignment'
+	type: 'lesson' | 'quiz' | 'assignment' | 'folder'
 	course: string
 	number?: string
 	quiz?: string
 	assignment?: string
+	folder?: string
 }
 
 export interface SelectionEntry {
-	source_type: 'Lesson' | 'Quiz' | 'Assignment'
+	source_type: 'Lesson' | 'Quiz' | 'Assignment' | 'Folder'
 	name: string
 	course: string
 	title: string
@@ -46,6 +51,10 @@ export const nodeKey = (node: TreeNode): string => node.key
 // A container's selectable leaves: every assignable lesson/quiz/assignment node
 // in its subtree. Chapters with no assignable content are not homework work and
 // contribute nothing (spec 3.4.5) -- an empty chapter shows, but selects nothing.
+// Task #41: an image folder is a selectable leaf in its own right (Sergey
+// #1527); a folder with no images is not selectable -- it shows with the "no
+// images" hint -- so a section holding ONLY empty folders stays unselectable
+// exactly as spec 3.4.5 demands.
 export function collectLeafKeys(node: TreeNode): string[] {
 	if (isLeaf(node)) {
 		return node.assignable === false ? [] : [nodeKey(node)]

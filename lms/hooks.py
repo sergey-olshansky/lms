@@ -204,6 +204,17 @@ doc_events = {
 		"on_update": "lms.lms.homework_service.on_quiz_submission_update",
 		"after_delete": "lms.lms.homework_service.on_quiz_submission_delete",
 	},
+	# Task #41: every Course Folder write from any writer -- a Desk edit of its
+	# images table, a rename -- and the folder's own deletion bring the homework
+	# cards carrying it back in step (denominator, statuses, counters,
+	# auto-review), targeted through the requirement rows. The upload/delete
+	# API calls the same recompute itself: its child-row writes never fire the
+	# parent's hooks. after_delete for the same reason the quiz hook rides it:
+	# on_trash still sees the rows it is about to lose.
+	"Course Folder": {
+		"on_change": "lms.lms.homework_service.on_course_folder_changed",
+		"after_delete": "lms.lms.homework_service.on_course_folder_deleted",
+	},
 	"LMS Question": {"validate": CHILD_ROW_MOVE_GATE},
 	"LMS Quiz Question": {"validate": CHILD_ROW_MOVE_GATE},
 	"LMS Test Case": {"validate": CHILD_ROW_MOVE_GATE},

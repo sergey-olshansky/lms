@@ -24,6 +24,7 @@ from frappe.utils import cint, now_datetime
 
 from lms.lms.homework_sources import (
 	REQUIREMENT_OPEN_ASSIGNMENT,
+	REQUIREMENT_OPEN_FOLDER,
 	REQUIREMENT_OPEN_LESSON,
 	REQUIREMENT_PASS_QUIZ,
 	REQUIREMENT_REFERENCE,
@@ -38,10 +39,14 @@ STATUS_DONE = "Done"
 
 COMPLETED_STATUSES = {"Completed", "Completed Earlier"}
 # Reference rows are links, not checkable work: never counted, never gating.
+# An Open Folder row is checkable work whose unit is the FOLDER (task #41,
+# Sergey #1527); its per-image completion items expand from the folder's
+# current image set, never as frozen requirement rows.
 CHECKABLE_TYPES = {
 	REQUIREMENT_OPEN_LESSON,
 	REQUIREMENT_PASS_QUIZ,
 	REQUIREMENT_OPEN_ASSIGNMENT,
+	REQUIREMENT_OPEN_FOLDER,
 }
 
 MAX_HOMEWORK_DAYS = 3650
@@ -253,6 +258,11 @@ def _apply_prior_credit(requirements: list[dict], student: str) -> list[dict]:
 			if row["requirement_type"] == REQUIREMENT_OPEN_ASSIGNMENT and row.get("reference_assignment")
 		],
 	)
+	prior_folder_openings: dict[str, set[str]] = {
+		row["folder"]: _prior_folder_opened_images(student, row["folder"])
+		for row in requirements
+		if row["requirement_type"] == REQUIREMENT_OPEN_FOLDER and row.get("folder")
+	}
 	for row in requirements:
 		if row["requirement_type"] == REQUIREMENT_OPEN_LESSON:
 			if frappe.db.exists(
@@ -285,6 +295,17 @@ def _apply_prior_credit(requirements: list[dict], student: str) -> list[dict]:
 				row["completed_at"] = now_datetime()
 				row["proof_type"] = "Assignment View"
 				row["proof_name"] = row["reference_assignment"]
+		elif row["requirement_type"] == REQUIREMENT_OPEN_FOLDER:
+			# Task #41 (D05's stance): every image the folder holds TODAY was
+			# already opened under an earlier card of this student -- a stored
+				# fact, never an invented viewing; a folder that gained images
+				# since stays honestly Pending.
+			opened = prior_folder_openings.get(row.get("folder")) or set()
+			if opened and set(_folder_current_images(row["folder"])) <= opened:
+				row["status"] = "Completed Earlier"
+				row["completed_at"] = now_datetime()
+				row["proof_type"] = "Folder Images"
+				row["proof_name"] = row["folder"]
 	return requirements
 
 
@@ -307,6 +328,30 @@ def _prior_assignment_view_evidence(student: str, assignments: list[str]) -> set
 	return _prior_requirement_evidence(
 		student, REQUIREMENT_OPEN_ASSIGNMENT, "reference_assignment", assignments
 	)
+
+
+def _prior_folder_opened_images(student: str, folder: str) -> set[str]:
+	"""Images of this folder the student already opened under EARLIER homework
+	(task #41, D05's stance): the stored per-image progress rows on the
+	student's own cards -- server-recorded openings, never a client checkbox
+	and never another student's viewing."""
+	if not folder:
+		return set()
+	rows = frappe.get_all(
+		"LMS Homework Folder Image",
+		filters={"folder": folder, "image": ("is", "set")},
+		fields=["parent", "image"],
+	)
+	if not rows:
+		return set()
+	owned = set(
+		frappe.get_all(
+			"LMS Homework Assignment",
+			filters={"name": ("in", {row.parent for row in rows}), "student": student},
+			pluck="name",
+		)
+	)
+	return {row.image for row in rows if row.parent in owned}
 
 
 def _prior_requirement_evidence(
@@ -350,7 +395,56 @@ def source_alive(row) -> bool:
 		return bool(frappe.db.exists("LMS Quiz", row.quiz))
 	if row.get("requirement_type") in ("Reference", "Open Assignment") and row.get("reference_assignment"):
 		return bool(frappe.db.exists("LMS Assignment", row.reference_assignment))
+	if row.get("requirement_type") == REQUIREMENT_OPEN_FOLDER:
+		# Task #41: a deleted folder is a dead source exactly like a deleted
+		# lesson; an empty-but-alive folder is NOT dead -- it is neutral
+		# (excluded from the denominator), see _folder_row_is_empty.
+		return bool(row.get("folder")) and bool(frappe.db.exists("Course Folder", row.folder))
 	return True
+
+
+# --- Folder requirements (task #41, Sergey #1521/#1527) -------------------------
+
+
+def _folder_current_images(folder: str) -> list[str]:
+	"""The folder's CURRENT ordered image File names: the denominator of every
+	folder completion decision. Read fresh on every call on purpose -- uploads
+	and deletions change it between two statements of the same request, and a
+	stale denominator is exactly the bug this feature exists to avoid."""
+	if not folder or not frappe.db.exists("Course Folder", folder):
+		return []
+	return frappe.get_all(
+		"Folder Image Reference",
+		filters={"parent": folder},
+		pluck="image",
+		order_by="idx",
+	)
+
+
+def _folder_row_is_empty(row) -> bool:
+	"""Whether an Open Folder row is NEUTRAL right now (task #41): the folder
+	still exists but currently holds no images. Such a row shows the muted
+	"no images" note, stays outside the progress denominator, never blocks
+	the gates and never auto-closes -- uploading images returns it to Pending.
+	A deleted folder is NOT neutral (it goes Unavailable), so existence is
+	checked here, not just the count."""
+	if row.get("requirement_type") != REQUIREMENT_OPEN_FOLDER or not row.get("folder"):
+		return False
+	if not frappe.db.exists("Course Folder", row.folder):
+		return False
+	return not _folder_current_images(row.folder)
+
+
+def _checkable_rows(assignment) -> list:
+	"""Checkable requirement rows with the folder rule applied (task #41): a
+	live but currently empty folder row leaves the denominator, so the board's
+	counters and the transition gates never wait on content that does not
+	exist. Every aggregate reads the same list."""
+	return [
+		row
+		for row in assignment.requirements
+		if row.requirement_type in CHECKABLE_TYPES and not _folder_row_is_empty(row)
+	]
 
 
 # --- Quiz evidence (spec 6.2) ---------------------------------------------------
@@ -585,6 +679,338 @@ def apply_opening_job(
 	A card recalled before the job runs is frozen history -- the cancelled
 	check inside makes this a safe no-op (C06)."""
 	_persist_opening(name, user, lesson=lesson, assignment=assignment, attempt=attempt)
+
+
+def record_folder_image_opened(folder: str, image: str) -> dict:
+	"""A confirmed opening of ONE folder image by the session student, fired
+	from the gallery lightbox -- including the checklist's deep link, which
+	opens the same lightbox (task #41, Sergey #1521: opening each individual
+	picture completes that image's own item).
+
+	The student's right to see the image is re-checked at event time (R04):
+	the image must be in the folder RIGHT NOW and the course must be reachable
+	exactly the way the gallery itself reaches it -- a revoked enrollment on a
+	draft course or an unpublished course leaves nothing recorded. Guests and
+	users with no active homework on the folder get a silent no-op: the event
+	is quiet by design, never an error for browsing."""
+	from lms.lms.utils import can_view_course
+
+	user = frappe.session.user
+	if user == "Guest":
+		return {"updated": 0}
+	if not folder or not image or not frappe.db.exists("Course Folder", folder):
+		return {"updated": 0}
+	if image not in _folder_current_images(folder):
+		return {"updated": 0}
+	course = frappe.db.get_value("Course Folder", folder, "course")
+	if not course or not can_view_course(course):
+		return {"updated": 0}
+
+	assignment_names = frappe.get_all(
+		"LMS Homework Assignment",
+		filters={"student": user, "cancelled": 0, "status": ("in", [STATUS_TO_DO, STATUS_IN_PROGRESS])},
+		pluck="name",
+	)
+	updated = 0
+	for name in assignment_names:
+		if _persist_folder_image_opening(name, user, folder, image):
+			updated += 1
+	return {"updated": updated}
+
+
+def _persist_folder_image_opening(
+	name: str, user: str, folder: str, image: str, attempt: int = 1
+) -> bool:
+	"""Apply and persist one image opening on one card, with the same
+	write-race stance as material openings (B06): one fresh retry from a
+	re-read row, then the bounded queue. A recalled card is frozen (C06): the
+	cancelled check inside the apply step makes deferred events no-ops."""
+	doc = frappe.get_doc("LMS Homework Assignment", name)
+	if not _apply_folder_image_opening(doc, user, folder, image):
+		return False
+	doc.flags.homework_service = True
+	try:
+		doc.save(ignore_permissions=True)
+		_maybe_auto_review(doc)
+		return True
+	except frappe.TimestampMismatchError:
+		frappe.clear_last_message()
+
+	fresh = frappe.get_doc("LMS Homework Assignment", name)
+	if _apply_folder_image_opening(fresh, user, folder, image):
+		fresh.flags.homework_service = True
+		try:
+			fresh.save(ignore_permissions=True)
+			_maybe_auto_review(fresh)
+			return True
+		except frappe.TimestampMismatchError:
+			frappe.clear_last_message()
+		_enqueue_folder_image_job(user, name, folder, image, attempt)
+	return False
+
+
+def _enqueue_folder_image_job(
+	user: str, name: str, folder: str, image: str, attempt: int
+) -> None:
+	"""The bounded recovery tail for deferred image openings (B06/C06), the
+	folder twin of _enqueue_opening_job."""
+	if frappe.flags.in_test:
+		frappe.log_error(
+			title="Homework folder image opening deferred after write races",
+			message=f"assignment={name} user={user} folder={folder} attempt={attempt}",
+		)
+		return
+	if attempt >= 3:
+		frappe.log_error(
+			title="Homework folder image opening kept losing write races",
+			message=f"assignment={name} user={user} folder={folder} attempts={attempt}",
+		)
+		return
+	frappe.enqueue(
+		apply_folder_image_opening_job,
+		queue="short",
+		enqueue_after_commit=True,
+		user=user,
+		name=name,
+		folder=folder,
+		image=image,
+		attempt=attempt + 1,
+	)
+
+
+def apply_folder_image_opening_job(
+	user: str, name: str, folder: str, image: str, attempt: int = 1
+) -> None:
+	"""Queued re-application of one confirmed image opening (B06/C06)."""
+	_persist_folder_image_opening(name, user, folder, image, attempt=attempt)
+
+
+def _apply_folder_image_opening(assignment_doc, user: str, folder: str, image: str) -> bool:
+	"""Idempotently credit one image opening on one card. False means the card
+	carries no Open Folder requirement on this folder (also the cross-card
+	dedupe); a matching card starts even when the image was already recorded,
+	mirroring the material-opening rule. A recalled card is frozen (C06)."""
+	if assignment_doc.cancelled:
+		return False
+	matched_rows = [
+		row
+		for row in assignment_doc.requirements
+		if row.requirement_type == REQUIREMENT_OPEN_FOLDER
+		and row.folder == folder
+		and row.status != "Unavailable"
+	]
+	if not matched_rows:
+		return False
+	matched_names = {row.name for row in matched_rows}
+	already = {
+		progress.image
+		for progress in (assignment_doc.folder_images or [])
+		if progress.requirement in matched_names
+	}
+	touched = False
+	if image not in already:
+		for row in matched_rows:
+			assignment_doc.append(
+				"folder_images",
+				{
+					"requirement": row.name,
+					"folder": folder,
+					"image": image,
+					"opened_at": now_datetime(),
+				},
+			)
+		touched = True
+	if not assignment_doc.first_opened_at:
+		# Working the gallery directly also starts the card (spec 7).
+		assignment_doc.first_opened_at = now_datetime()
+		from_status = assignment_doc.status
+		if assignment_doc.status == STATUS_TO_DO:
+			assignment_doc.status = STATUS_IN_PROGRESS
+		_add_history(assignment_doc, "started", from_status, assignment_doc.status)
+	for row in matched_rows:
+		touched |= _refresh_folder_requirement(assignment_doc, row)
+	if touched:
+		_refresh_counts(assignment_doc)
+	return True
+
+
+def _refresh_folder_requirement(assignment, row) -> bool:
+	"""Recompute one Open Folder row from the folder's CURRENT images and the
+	stored per-image openings (task #41). The row closes only when every
+	current image is opened; a folder with no images is neutral (nothing to
+	decide here -- see _folder_row_is_empty). A row completed earlier whose
+	denominator moved away from its openings is a real invalidation (the quiz
+	stance, spec 7): Review falls back to In Progress with the reason in
+	history; Done only records the discrepancy."""
+	images = _folder_current_images(row.folder)
+	if not images:
+		return False
+	opened = {
+		progress.image
+		for progress in (assignment.folder_images or [])
+		if progress.requirement == row.name
+	}
+	if set(images) <= opened:
+		if row.status in COMPLETED_STATUSES:
+			if row.proof_type != "Folder Images" or row.proof_name != row.folder:
+				row.proof_type = "Folder Images"
+				row.proof_name = row.folder
+				return True
+			return False
+		row.status = "Completed"
+		row.completed_at = now_datetime()
+		row.proof_type = "Folder Images"
+		row.proof_name = row.folder
+		return True
+	if row.status in COMPLETED_STATUSES:
+		row.status = "Pending"
+		row.completed_at = None
+		row.proof_type = None
+		row.proof_name = None
+		_add_history(
+			assignment,
+			"requirement_invalidated",
+			assignment.status,
+			assignment.status,
+			_("The confirmed result of {0} is no longer valid.").format(frappe.bold(row.label)),
+		)
+		if assignment.status == STATUS_REVIEW:
+			assignment.status = STATUS_IN_PROGRESS
+		return True
+	return False
+
+
+def recompute_folder_requirements(folder: str) -> None:
+	"""The folder's content changed (upload, image deletion, Desk edit, folder
+	removed): bring every non-cancelled card carrying an Open Folder row on it
+	back in step -- statuses against the new denominator, counters and the
+	auto-review transition (task #41). Targeted by folder through the
+	requirement rows, never a scan of all cards (R20's stance)."""
+	if not isinstance(folder, str) or not folder:
+		return
+	parents = set(
+		frappe.get_all(
+			"LMS Homework Requirement",
+			filters={"parenttype": "LMS Homework Assignment", "folder": folder},
+			pluck="parent",
+		)
+	)
+	if not parents:
+		return
+	names = frappe.get_all(
+		"LMS Homework Assignment",
+		filters={"name": ("in", list(parents)), "cancelled": 0},
+		pluck="name",
+	)
+	for name in names:
+		_recompute_folder_assignment(name, folder)
+
+
+def _recompute_folder_assignment(name: str, folder: str, attempt: int = 1) -> None:
+	"""One card's folder catch-up, with the same race recovery as the quiz
+	recompute (R19/B06): one fresh retry, then the bounded queue."""
+	assignment = frappe.get_doc("LMS Homework Assignment", name)
+	if assignment.cancelled:
+		return
+	touched = _refresh_availability(assignment)
+	for row in assignment.requirements:
+		if (
+			row.requirement_type == REQUIREMENT_OPEN_FOLDER
+			and row.folder == folder
+			and row.status != "Unavailable"
+		):
+			touched |= _refresh_folder_requirement(assignment, row)
+	# A folder entering or leaving the empty-neutral state changes the
+	# denominator WITHOUT any requirement row changing status -- the counters
+	# must be compared, never assumed (B04: rows and aggregates move together).
+	touched |= _refresh_counters_if_changed(assignment)
+	if touched:
+		assignment.flags.homework_service = True
+		try:
+			assignment.save(ignore_permissions=True)
+		except frappe.TimestampMismatchError:
+			frappe.clear_last_message()
+			_recompute_folder_with_retry_or_enqueue(name, folder, attempt)
+			return
+	# The transition itself is retried even when no row moved (B06).
+	_maybe_auto_review(assignment)
+
+
+def _counters_tuple(assignment) -> tuple:
+	"""The denormalized aggregate as one comparable value."""
+	return (
+		assignment.total_requirements,
+		assignment.completed_requirements,
+		assignment.lessons_total,
+		assignment.quizzes_total,
+		assignment.quizzes_completed,
+	)
+
+
+def _refresh_counters_if_changed(assignment) -> bool:
+	"""Refresh the board counters and report whether they moved (task #41):
+	the folder denominator shifts while the row's own status can stay put."""
+	before = _counters_tuple(assignment)
+	_refresh_counts(assignment)
+	return _counters_tuple(assignment) != before
+
+
+def _recompute_folder_with_retry_or_enqueue(name: str, folder: str, attempt: int) -> None:
+	"""The conflict-recovery half (R19): exactly one fresh retry, then a queued
+	after-commit catch-up. A card recalled in between is frozen (C06)."""
+	fresh = frappe.get_doc("LMS Homework Assignment", name)
+	if fresh.cancelled:
+		return
+	changed = _refresh_availability(fresh)
+	for row in fresh.requirements:
+		if (
+			row.requirement_type == REQUIREMENT_OPEN_FOLDER
+			and row.folder == folder
+			and row.status != "Unavailable"
+		):
+			changed |= _refresh_folder_requirement(fresh, row)
+	changed |= _refresh_counters_if_changed(fresh)
+	fresh.flags.homework_service = True
+	try:
+		fresh.save(ignore_permissions=True)
+		_maybe_auto_review(fresh)
+		return
+	except frappe.TimestampMismatchError:
+		frappe.clear_last_message()
+	if frappe.flags.in_test:
+		frappe.log_error(
+			title="Homework folder recompute deferred after write races",
+			message=f"assignment={name} folder={folder} attempt={attempt}",
+		)
+		return
+	if attempt < 3:
+		frappe.enqueue(
+			_recompute_folder_assignment,
+			queue="short",
+			enqueue_after_commit=True,
+			name=name,
+			folder=folder,
+			attempt=attempt + 1,
+		)
+	else:
+		frappe.log_error(
+			title="Homework folder recompute kept losing write races",
+			message=f"assignment={name} folder={folder} attempts={attempt}",
+		)
+
+
+def on_course_folder_changed(doc, method: str | None = None) -> None:
+	"""doc_events hook (task #41): a Course Folder saved by any writer -- Desk
+	included -- may have changed its image set; the cards carrying it catch up.
+	Cheap and idempotent for folders no homework references."""
+	recompute_folder_requirements(doc.get("name") if doc else None)
+
+
+def on_course_folder_deleted(doc, method: str | None = None) -> None:
+	"""after_delete hook: the folder's bytes and rows are gone now, so the
+	recompute sees the dead source and freezes its rows Unavailable (R06).
+	after_delete, not on_trash, for the same reason the quiz hook rides it:"""
+	recompute_folder_requirements(doc.get("name") if doc else None)
 
 
 def _apply_material_opening(assignment_doc, lesson: str | None = None, assignment: str | None = None) -> bool:
@@ -995,7 +1421,9 @@ def _all_requirements_confirmed(assignment) -> bool:
 	rows = [row for row in assignment.requirements if row.requirement_type in CHECKABLE_TYPES]
 	if not rows:
 		return False
-	return all(row.status in COMPLETED_STATUSES for row in rows)
+	# A live but currently empty folder is neutral (task #41): it neither
+	# blocks the gate nor auto-closes -- every other row must be confirmed.
+	return all(row.status in COMPLETED_STATUSES or _folder_row_is_empty(row) for row in rows)
 
 
 def _maybe_auto_review(assignment) -> None:
@@ -1112,7 +1540,7 @@ def recompute_assignment(
 		changed = True
 	if not changed:
 		return
-	rows = [row for row in assignment.requirements if row.requirement_type in CHECKABLE_TYPES]
+	rows = _checkable_rows(assignment)
 	assignment.total_requirements = len(rows)
 	assignment.completed_requirements = sum(1 for row in rows if row.status in COMPLETED_STATUSES)
 	assignment.lessons_total = sum(1 for row in rows if row.requirement_type == REQUIREMENT_OPEN_LESSON)
@@ -1190,8 +1618,10 @@ def _solution_files_present(assignment_name: str) -> bool:
 
 def _refresh_counts(assignment) -> None:
 	"""Denormalized counters for the board: totals count checkable requirements
-	only (spec 6.4 -- no "0 of 0", and a chapter heading is never a done lesson)."""
-	rows = [row for row in assignment.requirements if row.requirement_type in CHECKABLE_TYPES]
+	only (spec 6.4 -- no "0 of 0", and a chapter heading is never a done lesson).
+	A live but currently empty folder row is outside the denominator (task #41):
+	it shows the muted note instead of a fraction."""
+	rows = _checkable_rows(assignment)
 	assignment.total_requirements = len(rows)
 	assignment.completed_requirements = sum(1 for row in rows if row.status in COMPLETED_STATUSES)
 	assignment.lessons_total = sum(1 for row in rows if row.requirement_type == REQUIREMENT_OPEN_LESSON)

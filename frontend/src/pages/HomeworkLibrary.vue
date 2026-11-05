@@ -261,6 +261,8 @@ const compositionLabel = (row) => {
 		parts.push(__('{0} lessons').format(String(row.lessons_count)))
 	if (row.quizzes_count)
 		parts.push(__('{0} quizzes').format(String(row.quizzes_count)))
+	if (row.folders_count)
+		parts.push(__('{0} folders').format(String(row.folders_count)))
 	return parts.join(' · ') || '—'
 }
 

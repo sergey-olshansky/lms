@@ -178,11 +178,12 @@ def _compose_library_counts(rows: list) -> None:
 	lessons_by_template: dict[str, set] = {}
 	quizzes_by_template: dict[str, set] = {}
 	assignments_by_template: dict[str, set] = {}
+	folders_by_template: dict[str, set] = {}
 	lesson_names: set = set()
 	for row in frappe.get_all(
 		"LMS Homework Source",
 		filters={"parent": ("in", template_names), "parenttype": "LMS Homework"},
-		fields=["parent", "source_type", "lesson", "quiz", "assignment"],
+		fields=["parent", "source_type", "lesson", "quiz", "assignment", "folder"],
 	):
 		if row.source_type == "Lesson" and row.lesson:
 			lessons_by_template.setdefault(row.parent, set()).add(row.lesson)
@@ -191,6 +192,8 @@ def _compose_library_counts(rows: list) -> None:
 			quizzes_by_template.setdefault(row.parent, set()).add(row.quiz)
 		elif row.source_type == "Assignment" and row.assignment:
 			assignments_by_template.setdefault(row.parent, set()).add(row.assignment)
+		elif row.source_type == "Folder" and row.folder:
+			folders_by_template.setdefault(row.parent, set()).add(row.folder)
 
 	embedded_by_lesson: dict[str, set] = {}
 	if lesson_names:
@@ -218,11 +221,13 @@ def _compose_library_counts(rows: list) -> None:
 		lessons = lessons_by_template.get(row.name, set())
 		quizzes = quizzes_by_template.get(row.name, set())
 		assignments = assignments_by_template.get(row.name, set())
+		folders = folders_by_template.get(row.name, set())
 		embedded = set().union(*(embedded_by_lesson.get(lesson, set()) for lesson in lessons))
 		row["lessons_count"] = len(lessons)
 		row["quizzes_count"] = len(quizzes | embedded)
 		row["assignments_count"] = len(assignments)
-		row["has_materials"] = bool(lessons or quizzes or assignments)
+		row["folders_count"] = len(folders)
+		row["has_materials"] = bool(lessons or quizzes or assignments or folders)
 		row["has_assignments"] = row.name in issued_templates
 
 
@@ -250,7 +255,7 @@ def get_homework(name: str) -> dict:
 	items = [
 		{
 			"source_type": row.source_type,
-			"name": row.lesson or row.quiz or row.assignment,
+			"name": row.lesson or row.quiz or row.assignment or row.folder,
 			"course": row.course,
 			"label": row.label,
 			"path": row.path,
@@ -272,6 +277,8 @@ def get_homework(name: str) -> dict:
 			item["route"] = {"type": "quiz", "quiz": item["name"], "course": item["course"]}
 		elif item["source_type"] == "Assignment":
 			item["route"] = {"type": "assignment", "assignment": item["name"], "course": item["course"]}
+		elif item["source_type"] == "Folder":
+			item["route"] = {"type": "folder", "folder": item["name"], "course": item["course"]}
 	return {
 		"name": doc.name,
 		"title": doc.title,
@@ -302,6 +309,7 @@ def _canonical_counts(items) -> dict:
 	assignments = {
 		row.assignment for row in items if row.source_type == "Assignment" and row.assignment
 	}
+	folders = {row.folder for row in items if row.source_type == "Folder" and row.folder}
 	embedded: set = set()
 	if lessons:
 		for placement in frappe.get_all(
@@ -320,6 +328,7 @@ def _canonical_counts(items) -> dict:
 		"lessons": len(lessons),
 		"quizzes": len(quizzes | embedded),
 		"assignments": len(assignments),
+		"folders": len(folders),
 	}
 
 
@@ -389,6 +398,7 @@ def save_homework(
 						"lesson": item["lesson"],
 						"quiz": item["quiz"],
 						"assignment": item["assignment"],
+						"folder": item.get("folder"),
 						"course": item["course"],
 						"label": item["label"],
 						"path": item["path"],
@@ -415,6 +425,7 @@ def save_homework(
 					"lesson": item["lesson"],
 					"quiz": item["quiz"],
 					"assignment": item["assignment"],
+					"folder": item.get("folder"),
 					"course": item["course"],
 					"label": item["label"],
 					"path": item["path"],
@@ -452,6 +463,7 @@ def copy_homework(name: str) -> dict:
 				"lesson": row.lesson,
 				"quiz": row.quiz,
 				"assignment": row.assignment,
+				"folder": row.folder,
 				"course": row.course,
 				"label": row.label,
 				"path": row.path,
@@ -513,6 +525,8 @@ def _stamp_tree_routes(nodes: list, course: str, numbers: dict) -> None:
 			node["route"] = {"type": "quiz", "quiz": node.get("name"), "course": course}
 		elif node_type == "assignment":
 			node["route"] = {"type": "assignment", "assignment": node.get("name"), "course": course}
+		elif node_type == "folder":
+			node["route"] = {"type": "folder", "folder": node.get("name"), "course": course}
 		_stamp_tree_routes(node.get("children") or [], course, numbers)
 
 
@@ -759,7 +773,16 @@ def _attach_continue_targets(rows: list) -> None:
 	reqs = frappe.get_all(
 		"LMS Homework Requirement",
 		filters={"parent": ("in", names), "parenttype": "LMS Homework Assignment"},
-		fields=["parent", "requirement_type", "lesson", "quiz", "reference_assignment", "status", "course"],
+		fields=[
+			"parent",
+			"requirement_type",
+			"lesson",
+			"quiz",
+			"reference_assignment",
+			"folder",
+			"status",
+			"course",
+		],
 		order_by="parent asc, idx asc",
 	)
 	placements = _lesson_route_lookup({row.lesson for row in reqs if row.lesson})
@@ -791,6 +814,13 @@ def _attach_continue_targets(rows: list) -> None:
 				"type": "assignment",
 				"assignment": row.reference_assignment,
 				"course": row.course,
+			}
+		elif row.requirement_type == "Open Folder" and row.folder:
+			targets[row.parent] = {
+				"type": "folder",
+				"folder": row.folder,
+				"course": frappe.db.get_value("Course Folder", row.folder, "course")
+				or row.course,
 			}
 	for row in rows:
 		row["continue_target"] = targets.get(row.name)
@@ -1056,8 +1086,40 @@ def get_homework_assignment(name: str) -> dict:
 				"assignment": row.reference_assignment,
 				"course": row.course,
 			}
+		elif row.folder:
+			# Task #41: the folder group links into the REAL gallery page, at the
+			# folder's CURRENT course (the route follows the folder docname, never
+			# a snapshot ordinal). A move never widens rights (D07): when the
+			# student cannot reach the course's pages anymore, the reason ships
+			# beside the link instead of a silent 403.
+			folder_course = (
+				frappe.db.get_value("Course Folder", row.folder, "course") or row.course
+			)
+			formatted["route"] = {
+				"type": "folder",
+				"folder": row.folder,
+				"course": folder_course,
+			}
+			blocked = _student_cannot_view_course_reason(folder_course, doc.student)
+			if blocked:
+				formatted["blocked_reason"] = blocked
 	_stamped_quiz_attempt_states(doc, payload["requirements"])
 	return payload
+
+
+def _student_cannot_view_course_reason(course: str, student: str) -> str | None:
+	"""Why the assignment's student cannot reach the course's pages right now
+	(task #41, D07's stance for the folder gallery): the gallery is outline
+	content -- a draft course the student is no longer enrolled in does not
+	open, while a published course stays public exactly as the outline itself
+	is."""
+	if not student or not frappe.db.exists("User", student):
+		return None
+	if frappe.db.get_value("LMS Course", course, "published"):
+		return None
+	if get_membership(course, student):
+		return None
+	return _("This material is not available to the student right now.")
 
 
 def _stamped_quiz_attempt_states(doc, formatted_rows: list) -> None:
@@ -1127,7 +1189,7 @@ def format_requirement(row, frozen: bool = False) -> dict:
 		"Unavailable": _("Unavailable"),
 	}
 	status = row.status if (frozen or source_alive(row)) else "Unavailable"
-	return {
+	formatted = {
 		"id": row.name,
 		"requirement_type": row.requirement_type,
 		"course": row.course,
@@ -1135,6 +1197,7 @@ def format_requirement(row, frozen: bool = False) -> dict:
 		"lesson": row.lesson,
 		"quiz": row.quiz,
 		"reference_assignment": row.reference_assignment,
+		"folder": row.folder,
 		"label": row.label,
 		"path": row.path,
 		"status": status,
@@ -1143,6 +1206,49 @@ def format_requirement(row, frozen: bool = False) -> dict:
 		"proof_type": row.proof_type,
 		"proof_name": row.proof_name,
 	}
+	if row.requirement_type == "Open Folder" and row.folder:
+		# Task #41: the folder group's own data -- one sub-row per CURRENT image
+		# with its done flag (Sergey #1521), the fraction and the muted
+		# empty-folder note. The denominator follows the folder as it is now,
+		# never a frozen image list.
+		formatted.update(_folder_progress_payload(row, status))
+	return formatted
+
+
+def _folder_progress_payload(row, status: str) -> dict:
+	"""The per-image expansion of one Open Folder row (task #41): the folder's
+	CURRENT images with opened flags, the fraction counts and the
+	folder_empty marker. Later uploads appear as unchecked sub-rows, deletions
+	leave the list, and an empty folder carries the muted note instead of a
+	fraction."""
+	from lms.lms.utils import get_folder_images
+
+	images = get_folder_images([row.folder]).get(row.folder, [])
+	opened = set(
+		frappe.get_all(
+			"LMS Homework Folder Image",
+			filters={"parent": row.parent, "requirement": row.name},
+			pluck="image",
+		)
+	)
+	items = [
+		{"name": image.name, "file_name": image.file_name, "opened": image.name in opened}
+		for image in images
+	]
+	payload = {
+		"images": items,
+		"image_count": len(items),
+		"opened_count": sum(1 for item in items if item["opened"]),
+		"folder_empty": not items,
+	}
+	# D2: an emptied folder is neutral no matter what the row completed
+	# earlier -- the muted note IS its current state (spec 6), so it wins
+	# over any stored completion label. Only a dead source keeps
+	# "Unavailable": a deleted folder is gone, not empty, and must not read
+	# as a mere note.
+	if payload["folder_empty"] and status != "Unavailable":
+		payload["state_label"] = _("The folder has no images")
+	return payload
 
 
 def continue_target(doc) -> dict | None:
@@ -1176,6 +1282,13 @@ def continue_target(doc) -> dict | None:
 				"assignment": row.reference_assignment,
 				"course": row.course,
 			}
+		if row.requirement_type == "Open Folder" and row.folder:
+			# Task #41: the folder's real gallery page, at its current course.
+			return {
+				"type": "folder",
+				"folder": row.folder,
+				"course": frappe.db.get_value("Course Folder", row.folder, "course") or row.course,
+			}
 	return None
 
 
@@ -1199,6 +1312,69 @@ def record_assignment_material_opened(assignment: str) -> dict:
 	"""Called from the assignment's own page once the student has it open (R10):
 	a confirmed opening of a standalone written assignment."""
 	return homework_service.record_assignment_opened(assignment)
+
+
+@frappe.whitelist()
+def record_folder_image_opened(folder: str, image: str) -> dict:
+	"""Called from the folder gallery lightbox once the student has the image
+	open -- deep-linked from the checklist or browsed (task #41): a confirmed
+	per-image opening (Sergey #1521), idempotent, and quietly inert for anyone
+	without a matching active homework or without course reach."""
+	return homework_service.record_folder_image_opened(folder, image)
+
+
+@frappe.whitelist()
+def get_folder_homework_state(folder: str) -> dict:
+	"""The gallery's badge state for the SESSION student (task #41): whether an
+	active homework of this student carries this folder, and which of the
+	folder's CURRENT images are already opened across those cards. Teachers and
+	students without a matching assignment get an inert {"active": False} --
+	their gallery stays exactly as task #39 released it."""
+	from lms.lms.utils import get_folder_images
+
+	user = frappe.session.user
+	if user == "Guest" or not isinstance(folder, str) or not folder:
+		return {"active": False, "opened": []}
+	if not frappe.db.exists("Course Folder", folder):
+		return {"active": False, "opened": []}
+	active = frappe.get_all(
+		"LMS Homework Assignment",
+		filters={
+			"student": user,
+			"cancelled": 0,
+			"status": ("in", [STATUS_TO_DO, STATUS_IN_PROGRESS]),
+		},
+		pluck="name",
+	)
+	if not active:
+		return {"active": False, "opened": []}
+	cards = {
+		row
+		for row in frappe.get_all(
+			"LMS Homework Requirement",
+			filters={
+				"parenttype": "LMS Homework Assignment",
+				"parent": ("in", active),
+				"requirement_type": "Open Folder",
+				"folder": folder,
+			},
+			pluck="parent",
+		)
+	}
+	if not cards:
+		return {"active": False, "opened": []}
+	current = {image.name for image in get_folder_images([folder]).get(folder, [])}
+	if not current:
+		return {"active": True, "opened": []}
+	opened = {
+		row.image
+		for row in frappe.get_all(
+			"LMS Homework Folder Image",
+			filters={"parent": ("in", sorted(cards)), "image": ("in", sorted(current))},
+			fields=["image"],
+		)
+	}
+	return {"active": True, "opened": sorted(opened)}
 
 
 @frappe.whitelist()

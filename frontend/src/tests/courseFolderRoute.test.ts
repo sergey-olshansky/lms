@@ -36,6 +36,10 @@ vi.mock('frappe-ui', () => ({
 	},
 	toast: { success: vi.fn(), error: vi.fn() },
 	usePageMeta: vi.fn(),
+	// Task #41: the folder page reads its homework badge state and records
+	// per-image openings through `call`; defaulting to "no active homework"
+	// keeps every other test exactly as it was.
+	call: vi.fn(async () => ({ active: false, opened: [] })),
 	TextInput: {
 		props: ['modelValue'],
 		emits: ['update:modelValue'],
@@ -301,6 +305,34 @@ describe('the course folder route (task #39 UI correction)', () => {
 		await flushPromises()
 		expect(router.currentRoute.value.name).toBe('CourseDetail')
 		expect(wrapper.text()).toContain('COURSE')
+		wrapper.unmount()
+	})
+
+	it('badges opened images and records openings for active homework (task #41)', async () => {
+		const { call } = await import('frappe-ui')
+		vi.mocked(call).mockReset()
+		vi.mocked(call).mockResolvedValueOnce({ active: true, opened: ['FILE-1'] })
+		const { wrapper } = await openFolderPageFromRow()
+		await flushPromises()
+		// Exactly the already-opened image carries the badge; the gallery
+		// otherwise stays as task #39 released it.
+		expect(wrapper.find('[data-testid="folder-opened-FILE-1"]').exists()).toBe(
+			true
+		)
+		expect(wrapper.find('[data-testid="folder-opened-FILE-2"]').exists()).toBe(
+			false
+		)
+		// Opening the lightbox on the second image records exactly it.
+		await wrapper.findAll('[data-testid="folder-image"]')[1].trigger('click')
+		await flushPromises()
+		expect(call).toHaveBeenCalledWith(
+			'lms.lms.homework_api.record_folder_image_opened',
+			{ folder: 'FOLDER-1', image: 'FILE-2' }
+		)
+		// The completion is silent: an sr-only status, never a toast.
+		expect(wrapper.find('[data-testid="folder-credit-announcer"]').exists()).toBe(
+			true
+		)
 		wrapper.unmount()
 	})
 })
