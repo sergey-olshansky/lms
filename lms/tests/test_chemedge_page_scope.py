@@ -45,9 +45,9 @@ class TestAIPageScope(unittest.TestCase):
 
 	def test_numbered_choices_do_not_truncate_the_question(self):
 		page = SimpleNamespace(extract_text_lines=lambda **kwargs: [
-			{"text": "4) бензол", "top": 150},
-			{"text": "6) стирол", "top": 180},
-			{"text": "3. Следующее задание", "top": 250},
+			{"text": "4) бензол", "top": 150, "x0": 50, "x1": 120},
+			{"text": "6) стирол", "top": 180, "x0": 50, "x1": 120},
+			{"text": "3. Следующее задание", "top": 250, "x0": 50, "x1": 200},
 		])
 		with patch("lms.lms.chemedge_pdf_import.find_stepenin_task_headings", return_value=[]):
 			self.assertEqual(_next_task_heading_top(page, 100), 250)
@@ -71,6 +71,6 @@ class TestAIPageScope(unittest.TestCase):
 		page = SimpleNamespace(width=600, height=800, images=[nearby, advert], rects=[], curves=[],
 			chars=[{"top": 100, "bottom": 170, "x0": 50, "x1": 550}],
 			crop=Mock(return_value=SimpleNamespace(extract_text=lambda: "question and diagram")))
-		with patch("lms.lms.chemedge_pdf_import._find_source_anchor", side_effect=[(100, 110), (160, 170)]), patch("lms.lms.chemedge_pdf_import.find_stepenin_task_headings", return_value=[]):
+		with patch("lms.lms.chemedge_pdf_import._find_source_anchor", side_effect=[(100, 110, 50, 400), (160, 170, 55, 300)]), patch("lms.lms.chemedge_pdf_import.find_stepenin_task_headings", return_value=[]):
 			region = _resolve_source_region(SimpleNamespace(pages=[page]), {"page_number": 1, "start": "question start words", "end": "question end words", "kind": "task"})
 		self.assertEqual(region["bbox"][3], 244)

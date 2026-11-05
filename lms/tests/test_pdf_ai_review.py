@@ -79,20 +79,20 @@ class TestPDFReview(unittest.TestCase):
 		page = Mock()
 		page.search.return_value = []
 		page.extract_words.return_value = [
-			{"text": "5)", "top": 10, "bottom": 20},
-			{"text": "толуол", "top": 10, "bottom": 20},
-			{"text": "6)", "top": 30, "bottom": 40},
-			{"text": "стирол", "top": 30, "bottom": 40},
+			{"text": "5)", "top": 10, "bottom": 20, "x0": 60, "x1": 75},
+			{"text": "толуол", "top": 10, "bottom": 20, "x0": 78, "x1": 110},
+			{"text": "6)", "top": 30, "bottom": 40, "x0": 60, "x1": 75},
+			{"text": "стирол", "top": 30, "bottom": 40, "x0": 78, "x1": 115},
 		]
-		self.assertEqual(importer._find_source_anchor(page, "6) стирол"), (30.0, 40.0))
+		self.assertEqual(importer._find_source_anchor(page, "6) стирол"), (30.0, 40.0, 60.0, 115.0))
 
 	def test_repeated_short_ending_is_unique_inside_task_boundary(self):
 		page = Mock()
 		page.search.return_value = [
-			{"top": 100, "bottom": 110},
-			{"top": 200, "bottom": 210},
+			{"top": 100, "bottom": 110, "x0": 40, "x1": 90},
+			{"top": 200, "bottom": 210, "x0": 40, "x1": 90},
 		]
-		self.assertEqual(importer._find_source_anchor(page, "Ответ:", after=80, before=150), (100.0, 110.0))
+		self.assertEqual(importer._find_source_anchor(page, "Ответ:", after=80, before=150), (100.0, 110.0, 40.0, 90.0))
 
 	def test_unknown_region_is_rejected_instead_of_guessing_a_page(self):
 		with self.assertRaises(frappe.ValidationError):
