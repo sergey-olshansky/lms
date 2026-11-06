@@ -43,6 +43,76 @@ MERGED_THREE_TASK_PAGE = (
 	"Запишите номера выбранных ответов.\n"
 )
 
+# The owner-observed byte-identical fragment pairs (task 42 fix round 3):
+# template twins repeat the whole stem line verbatim under neighbouring
+# markers, and the extraction model quoted task 13/35 anchors WITHOUT their
+# own marker prefix — so the first textual occurrence belonged to the task
+# printed above and both questions shared one crop.
+TEMPLATE_TWIN_PAGE_4 = (
+	"Страница 4\n"
+	"\n"
+	"[12] Выберите два исходных вещества, взаимодействию которых соответствует сокращённое ионное уравнение реакции\n"
+	"Ca²⁺ + SO₃²⁻ = CaSO₃\n"
+	"1) CaO\n2) Ca\n3) CaCl₂\n4) Ag₂SO₃\n5) MgSO₃\n6) Na₂SO₃\n"
+	"Запишите номера выбранных ответов.\n"
+	"\n"
+	"\n"
+	"[13] Выберите два исходных вещества, взаимодействию которых соответствует сокращённое ионное уравнение реакции\n"
+	"3Ba²⁺ + 2PO₄³⁻ = Ba₃(PO₄)₂\n"
+	"1) BaSiO₃\n2) Ca₃(PO₄)₂\n3) BaO\n4) BaI₂\n5) Na₃PO₄\n6) Li₃PO₄\n"
+	"Запишите номера выбранных ответов.\n"
+	"\n"
+	"\n"
+	"[14] Из предложенного перечня выберите названия двух веществ\n"
+	"1) Барий\n2) Оксид бария\n3) Гидроксид бария\n"
+	"Запишите номера выбранных ответов.\n"
+)
+
+TEMPLATE_TWIN_PAGE_9 = (
+	"Страница 9\n"
+	"\n"
+	"[32] Выберите два исходных вещества, взаимодействию которых соответствует сокращённое ионное уравнение реакции\n"
+	"3Ba²⁺ + 2PO₄³⁻ = Ba₃(PO₄)₂\n"
+	"1) BaO\n2) Ba\n3) BaCl₂\n4) H₃PO₄\n5) BaSO₄\n6) Na₃PO₄\n"
+	"Запишите номера выбранных ответов.\n"
+	"□□\n"
+	"\n"
+	"[33] Выберите два исходных вещества, взаимодействию которых соответствует сокращённое ионное уравнение реакции\n"
+	"3Ba²⁺ + 2PO₄³⁻ = Ba₃(PO₄)₂\n"
+	"1) Ba\n2) BaO\n3) Ba(NO₃)₂\n4) H₃PO₄\n5) Na₃PO₄\n6) BaCO₃\n"
+	"Запишите номера выбранных ответов.\n"
+	"\n"
+	"[35] Выберите два исходных вещества, взаимодействию которых соответствует сокращённое ионное уравнение реакции\n"
+	"Fe²⁺ + CO₃²⁻ = FeCO₃\n"
+	"1) Fe(NO₃)₂\n2) CO₂\n3) BaCO₃\n4) FeCl₃\n5) K₂CO₃\n6) Fe\n"
+	"Запишите номера выбранных ответов\n"
+	"□□\n"
+	"\n"
+	"Школа химии | Наш банк заданий | ОГЭ с Химическим котом\n"
+)
+
+# The residual class the distinctness guard must catch: the vision model
+# dropped task 11's own marker, so its anchor can only match the twin above.
+MARKER_DROPPED_TWIN_PAGE = (
+	"[10] Выберите два исходных вещества, взаимодействию которых соответствует уравнение один\n"
+	"1) NaOH 2) KOH 3) Ba(OH)₂ 4) BaCO₃ 5) HBr 6) HNO₂\n"
+	"Запишите номера выбранных ответов.\n"
+	"\n"
+	"Выберите два исходных вещества, взаимодействию которых соответствует уравнение два\n"
+	"1) Cu 2) Fe 3) Zn 4) Mg 5) Ba 6) Al\n"
+	"Запишите номера выбранных ответов.\n"
+)
+
+MARKER_PRESENT_TWIN_PAGE = (
+	"[10] Выберите два исходных вещества, взаимодействию которых соответствует уравнение один\n"
+	"1) NaOH 2) KOH 3) Ba(OH)₂ 4) BaCO₃ 5) HBr 6) HNO₂\n"
+	"Запишите номера выбранных ответов.\n"
+	"\n"
+	"[11] Выберите два исходных вещества, взаимодействию которых соответствует уравнение два\n"
+	"1) Cu 2) Fe 3) Zn 4) Mg 5) Ba 6) Al\n"
+	"Запишите номера выбранных ответов.\n"
+)
+
 TASK32_KEY_TEXT = "1) BaO\n2) Ba\n3) BaCl₂\n4) H₃PO₄\n5) BaSO₄\n6) Na₃PO₄"
 
 
@@ -505,3 +575,216 @@ class VisionDigitizeTestCase(unittest.TestCase):
 			"source_regions": [{"kind": "task", "text": TASK32_KEY_TEXT}]}
 		self.assertFalse(importer._normalize_digit_key_choices(unmappable))
 		self.assertTrue(importer._digit_key_unmappable(unmappable))
+
+	def test_bind_digitized_regions_distinguishes_template_twin_pair_12_13(self):
+		# Round-3 build blocker: tasks 12 and 13 shared chemedge-task-001278adec.png
+		# because 13's marker-less anchor matched 12's identical stem line first.
+		opened = make_opened_pdf(["🐾"] * 4)
+		digitized = {4: TEMPLATE_TWIN_PAGE_4}
+		bands = {}
+		for number, start in (
+			(12, "[12] Выберите два исходных вещества"),
+			(13, "Выберите два исходных вещества, взаимодействию"),
+		):
+			task = {"number": number, "source_number": number, "source_regions": [{
+				"page_number": 4, "start": start, "end": "Запишите номера выбранных ответов.", "kind": "task",
+			}]}
+			with patch.object(importer.pdfplumber, "open", return_value=opened):
+				importer._bind_digitized_regions(task, Path("scan.pdf"), digitized)
+			bands[number] = task["source_regions"][0]
+		self.assertNotEqual(tuple(bands[12]["bbox"]), tuple(bands[13]["bbox"]))
+		# Bands stay distinct with their own content even though the crop
+		# padding around each task's own lines overlaps by design.
+		self.assertLess(bands[12]["bbox"][1], bands[13]["bbox"][1])
+		self.assertLess(bands[12]["bbox"][3], bands[13]["bbox"][3])
+		self.assertIn("CaCl₂", bands[12]["text"])
+		self.assertNotIn("CaCl₂", bands[13]["text"])
+		self.assertIn("BaI₂", bands[13]["text"])
+		self.assertNotIn("[12]", bands[13]["text"])
+		self.assertEqual(
+			importer._digitized_band_conflicts({12: bands[12], 13: bands[13]}, {}), set())
+
+	def test_bind_digitized_regions_distinguishes_template_twin_pair_32_35(self):
+		# Round-3 build blocker: tasks 32 and 35 shared chemedge-task-0032fa4c31.png;
+		# 35's marker-less anchor matched 32's stem line 33 lines above its own.
+		opened = make_opened_pdf(["🐾"] * 9)
+		digitized = {9: TEMPLATE_TWIN_PAGE_9}
+		bands = {}
+		for number, start in (
+			(32, "[32] Выберите два исходных вещества"),
+			(35, "Выберите два исходных вещества, взаимодействию которых соответствует сокращённое"),
+		):
+			task = {"number": number, "source_number": number, "source_regions": [{
+				"page_number": 9, "start": start,
+				"end": "Запишите номера выбранных ответов", "kind": "task",
+			}]}
+			with patch.object(importer.pdfplumber, "open", return_value=opened):
+				importer._bind_digitized_regions(task, Path("scan.pdf"), digitized)
+			bands[number] = task["source_regions"][0]
+		self.assertNotEqual(tuple(bands[32]["bbox"]), tuple(bands[35]["bbox"]))
+		self.assertLess(bands[32]["bbox"][1], bands[35]["bbox"][1])
+		self.assertLess(bands[32]["bbox"][3], bands[35]["bbox"][3])
+		self.assertIn("BaCl₂", bands[32]["text"])
+		self.assertNotIn("BaCl₂", bands[35]["text"])
+		self.assertIn("Fe(NO₃)₂", bands[35]["text"])
+		self.assertEqual(
+			importer._digitized_band_conflicts({32: bands[32], 35: bands[35]}, {}), set())
+
+	def test_task_anchor_outside_its_own_territory_fails_closed(self):
+		# The anchor exists on the page but only inside task 10's lines: binding
+		# it to task 11 would display 10's fragment under question 11, so the
+		# task is re-extracted instead of silently mis-bound.
+		opened = make_opened_pdf(["🐾"])
+		task = {"number": 11, "source_number": 11, "source_regions": [{
+			"page_number": 1, "start": "уравнение один", "end": "Запишите номера выбранных ответов.", "kind": "task",
+		}]}
+		with patch.object(importer.pdfplumber, "open", return_value=opened):
+			with self.assertRaises(frappe.ValidationError):
+				importer._bind_digitized_regions(task, Path("scan.pdf"), {1: MARKER_PRESENT_TWIN_PAGE})
+
+	def test_digitized_band_conflicts_flag_shared_crop_bands(self):
+		shared_bbox = (0.0, 24.0, 595.32, 244.0)
+		tasks = {
+			10: {"number": 10, "source_number": 10, "source_regions": [
+				{"kind": "context", "page_number": 1, "bbox": shared_bbox},
+				{"kind": "task", "page_number": 1, "bbox": shared_bbox},
+			]},
+			11: {"number": 11, "source_number": 11, "source_regions": [
+				{"kind": "task", "page_number": 1, "bbox": shared_bbox},
+			]},
+		}
+		self.assertEqual(importer._digitized_band_conflicts(tasks, {}), {10, 11})
+		distinct = {
+			10: tasks[10],
+			11: {"number": 11, "source_number": 11, "source_regions": [
+				{"kind": "task", "page_number": 1, "bbox": (0.0, 244.0, 595.32, 440.0)},
+			]},
+		}
+		self.assertEqual(importer._digitized_band_conflicts(distinct, {}), set())
+		# Context bands are legitimately shared between tasks and never conflict.
+		context_only = {
+			10: {"number": 10, "source_regions": [{"kind": "context", "page_number": 1, "bbox": shared_bbox}]},
+			11: {"number": 11, "source_regions": [{"kind": "context", "page_number": 1, "bbox": shared_bbox}]},
+		}
+		self.assertEqual(importer._digitized_band_conflicts(context_only, {}), set())
+		# Repeats the recognised parser declared stay exempt.
+		compiled = {"tasks": [{"number": 10, "source_number": 7}, {"number": 11, "source_number": 7}]}
+		repeated = {
+			10: {"number": 10, "source_number": 7, "source_regions": [
+				{"kind": "task", "page_number": 1, "bbox": shared_bbox},
+			]},
+			11: {"number": 11, "source_number": 7, "source_regions": [
+				{"kind": "task", "page_number": 1, "bbox": shared_bbox},
+			]},
+		}
+		self.assertEqual(importer._digitized_band_conflicts(repeated, compiled), set())
+
+	def test_shared_band_is_recovered_by_page_redigitization(self):
+		# A dropped marker leaves no territory to pin task 11's anchor to, so
+		# both twins bind one band; the repair re-digitizes the page once and
+		# re-extracts both tasks onto their own bands.
+		opened = make_opened_pdf(["🐾"])
+		entries = [
+			{"number": 10, "question_pages": [1], "context_pages": [], "answer_pages": [1]},
+			{"number": 11, "question_pages": [1], "context_pages": [], "answer_pages": [1]},
+		]
+		pages = ["--- PDF page 1 ---\n" + MARKER_DROPPED_TWIN_PAGE]
+		extraction = [
+			{"tasks": [{"number": 10, "reviewed": True, "question": "Question ten", "answer": "15",
+				"source_regions": [{"page": 1, "start": "[10] Выберите два исходных вещества", "end": "Запишите номера выбранных ответов.", "kind": "task"}]}]},
+			{"tasks": [{"number": 11, "reviewed": True, "question": "Question eleven", "answer": "25",
+				"source_regions": [{"page": 1, "start": "Выберите два исходных вещества, взаимодействию", "end": "Запишите номера выбранных ответов.", "kind": "task"}]}]},
+		]
+		with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
+			handle.write(b"%PDF-fake")
+			handle.flush()
+			with patch.object(importer.pdfplumber, "open", return_value=opened), \
+				patch.object(importer, "_verified_raster_answer", return_value=None), \
+				patch.object(importer, "_page_image_data_url", return_value="data:image/png;base64,AAA"), \
+				patch.object(importer, "_vision_page_text", return_value=MARKER_PRESENT_TWIN_PAGE) as vision, \
+				patch.object(importer, "_ai_json", side_effect=extraction * 2) as ai:
+				_title, tasks = importer._extract_page_plan_tasks(
+					Path(handle.name), pages, entries, {}, {}, "", "prefix", {"title": "Trainer"},
+					{1: MARKER_DROPPED_TWIN_PAGE})
+		self.assertEqual(ai.call_count, 4)
+		self.assertEqual(vision.call_count, 1)
+		self.assertIn("re-digitized", ai.call_args_list[2].args[0])
+		by_number = {task["number"]: task for task in tasks}
+		band10 = by_number[10]["source_regions"][0]["bbox"]
+		band11 = by_number[11]["source_regions"][0]["bbox"]
+		self.assertNotEqual(tuple(band10), tuple(band11))
+		self.assertLess(band10[1], band11[1])
+		self.assertIn("уравнение один", by_number[10]["source_regions"][0]["text"])
+		self.assertIn("уравнение два", by_number[11]["source_regions"][0]["text"])
+		self.assertIn("[11]", pages[0])
+		self.assertEqual(importer._digitized_band_conflicts(by_number, {}), set())
+
+	def test_persistent_shared_band_fails_with_the_sharing_cause(self):
+		# If the re-digitized transcription still drops the marker, the import
+		# fails naming the shared fragment instead of saving identical crops.
+		opened = make_opened_pdf(["🐾"])
+		entries = [
+			{"number": 10, "question_pages": [1], "context_pages": [], "answer_pages": [1]},
+			{"number": 11, "question_pages": [1], "context_pages": [], "answer_pages": [1]},
+		]
+		pages = ["--- PDF page 1 ---\n" + MARKER_DROPPED_TWIN_PAGE]
+		extraction = [
+			{"tasks": [{"number": 10, "reviewed": True, "question": "Question ten", "answer": "15",
+				"source_regions": [{"page": 1, "start": "[10] Выберите два исходных вещества", "end": "Запишите номера выбранных ответов.", "kind": "task"}]}]},
+			{"tasks": [{"number": 11, "reviewed": True, "question": "Question eleven", "answer": "25",
+				"source_regions": [{"page": 1, "start": "Выберите два исходных вещества, взаимодействию", "end": "Запишите номера выбранных ответов.", "kind": "task"}]}]},
+		]
+		with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
+			handle.write(b"%PDF-fake")
+			handle.flush()
+			with patch.object(importer.pdfplumber, "open", return_value=opened), \
+				patch.object(importer, "_verified_raster_answer", return_value=None), \
+				patch.object(importer, "_page_image_data_url", return_value="data:image/png;base64,AAA"), \
+				patch.object(importer, "_vision_page_text", return_value=MARKER_DROPPED_TWIN_PAGE), \
+				patch.object(importer, "_ai_json", side_effect=extraction * 2) as ai:
+				with self.assertRaises(importer.AIExtractionInvalid) as raised:
+					importer._extract_page_plan_tasks(
+						Path(handle.name), pages, entries, {}, {}, "", "prefix", {"title": "Trainer"},
+						{1: MARKER_DROPPED_TWIN_PAGE})
+		self.assertIn("one PDF fragment", str(raised.exception))
+		self.assertEqual(ai.call_count, 4)
+
+	def test_create_ai_task_crops_rejects_identical_fragment_bytes(self):
+		# Whatever produced them, byte-identical crops for two different
+		# printed tasks mean one question shows the other's fragment; the
+		# crop stage fails closed instead of storing shared images.
+		opened = make_opened_pdf(["🐾"])
+		region = {"page_number": 1, "bbox": (0.0, 0.0, 595.0, 400.0), "page_width": 595.0,
+			"page_height": 842.0, "kind": "task", "text": ""}
+		tasks = [
+			{"number": 10, "source_number": 10, "source_regions": [dict(region)]},
+			{"number": 11, "source_number": 11, "source_regions": [dict(region)]},
+		]
+
+		class SameByteImage:
+			def save(self, path, **kwargs):
+				path.write_bytes(b"identical-crop-bytes")
+
+			def close(self):
+				pass
+
+		with tempfile.TemporaryDirectory() as work:
+			with patch.object(importer.pdfplumber, "open", return_value=opened), \
+				patch.object(importer, "compose_source_regions", return_value=SameByteImage()):
+				with self.assertRaises(frappe.ValidationError) as raised:
+					importer._create_ai_task_crops(Path("scan.pdf"), tasks, Path(work))
+		message = str(raised.exception)
+		self.assertIn("byte-identical", message)
+		self.assertIn("[10]", message)
+		self.assertIn("[11]", message)
+		# A printed number the parser declared repeated is the same printed
+		# task twice, so identical crops for it stay legitimate.
+		repeated = [
+			{"number": 10, "source_number": 7, "source_regions": [dict(region)]},
+			{"number": 11, "source_number": 7, "source_regions": [dict(region)]},
+		]
+		with tempfile.TemporaryDirectory() as work:
+			with patch.object(importer.pdfplumber, "open", return_value=opened), \
+				patch.object(importer, "compose_source_regions", return_value=SameByteImage()):
+				crops = importer._create_ai_task_crops(Path("scan.pdf"), repeated, Path(work))
+		self.assertEqual(sorted(crops), [10, 11])

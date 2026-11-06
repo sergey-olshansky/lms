@@ -720,6 +720,33 @@ def _extract_page_plan_tasks(pdf_path, pages, entries, candidate, accepted, inst
 			))
 		if _task_split_conflicts(accepted, candidate):
 			raise AIExtractionInvalid(_("AI split the printed tasks incorrectly and recovery failed. Validated tasks are kept; retry resumes unfinished tasks."))
+		# Band-distinctness invariant for digitized scans: two different
+		# printed tasks must never share one crop band, or their crop images
+		# would be byte-identical and show one task's fragment under both
+		# questions. Re-extract the affected tasks once, re-digitizing their
+		# pages first when the transcription caused the sharing.
+		if digitized_pages:
+			conflicts = _digitized_band_conflicts(accepted, candidate)
+			if conflicts:
+				pages_to_redigitize = sorted({
+					region["page_number"]
+					for number in conflicts
+					for region in accepted.get(number, {}).get("source_regions", [])
+					if region.get("page_number")
+				})
+				for number in sorted(conflicts):
+					accepted.pop(number, None)
+					_checkpoint_delete(checkpoint, str(number))
+				_redigitize_pages(pdf_path, checkpoint, pages_to_redigitize, digitized_pages, pages)
+				drain(deque(
+					(entry, 1, _(
+						"The page transcription bound one fragment to printed tasks {0} and was re-digitized. "
+						"Quote anchors from the new transcription and keep each task between its own printed marker and the next marker."
+					).format(", ".join(f"[{number}]" for number in sorted(conflicts))))
+					for entry in entries if entry["number"] in conflicts
+				))
+		if digitized_pages and _digitized_band_conflicts(accepted, candidate):
+			raise AIExtractionInvalid(_("AI bound two different printed tasks to one PDF fragment and recovery failed. Validated tasks are kept; retry resumes unfinished tasks."))
 	finally:
 		pool.shutdown(wait=True, cancel_futures=True)
 	return str(plan.get("title") or candidate.get("title") or pdf_path.stem)[:140], [accepted[n] for n in sorted(accepted)]
@@ -1237,6 +1264,7 @@ def _resolve_digitized_region(region: dict, digitized_text: str, page, expected_
 	span = _digitized_slice_span(
 		digitized_text, str(region.get("start") or ""), str(region.get("end") or ""),
 		single_task=region.get("kind") == "task",
+		expected_number=expected_number if region.get("kind") == "task" else None,
 	)
 	if span is None:
 		frappe.throw(
@@ -1271,9 +1299,14 @@ def _digitized_task_band(digitized_text: str, span: tuple[int, int], page, expec
 	if type(expected_number) is int:
 		for index in range(start_line, max(-1, start_line - 4), -1):
 			marker = PRINTED_TASK_MARKER_RE.search(lines[index])
-			if marker and int(marker.group(1)) == expected_number:
+			if not marker:
+				continue
+			if int(marker.group(1)) == expected_number:
 				top_line = index
-				break
+			# Any marker line above the anchor is the attribution boundary: a
+			# foreign marker means the start already sits below another task's
+			# marker, so never scan past it into that task's lines.
+			break
 	bottom_line = end_line
 	# The next printed marker below the slice end bounds the fragment; a
 	# context region therefore ends right before its own task's marker, and
@@ -1342,6 +1375,39 @@ def _task_split_conflicts(accepted: dict, candidate: dict) -> set[int]:
 	return conflicts
 
 
+def _digitized_band_conflicts(accepted: dict, candidate: dict) -> set[int]:
+	"""Tasks whose digitized crop band is shared by two different printed tasks.
+
+	Template scans repeat whole stem lines verbatim, so a mis-anchored region
+	can resolve to a neighbouring task's identical band: byte-identical crop
+	images would then display one task's fragment under another question
+	(observed on the staged scan: pairs 12/13 and 32/35 shared one crop).
+	Mirrors ``_task_split_conflicts``: repeats the recognised parser declared
+	stay exempt, everything else is re-extracted instead of silently shared.
+	"""
+	source_numbers = [task.get("source_number", task["number"]) for task in (candidate or {}).get("tasks", [])]
+	repeated = {number for number in source_numbers if source_numbers.count(number) > 1}
+	by_band: dict[tuple, int] = {}
+	conflicts: set[int] = set()
+	for number, task in accepted.items():
+		for region in task.get("source_regions", []):
+			if region.get("kind") != "task" or "bbox" not in region:
+				continue
+			band = (region["page_number"], tuple(round(float(value), 3) for value in region["bbox"]))
+			if band in by_band and by_band[band] != number:
+				other = accepted.get(by_band[band], {})
+				printed_numbers = {
+					task.get("source_number", task["number"]),
+					other.get("source_number", other.get("number")),
+				}
+				if printed_numbers & repeated:
+					continue
+				conflicts.update({by_band[band], number})
+			else:
+				by_band[band] = number
+	return conflicts
+
+
 def _digitized_norm_word(word: str) -> str:
 	"""Case- and ё/е-insensitive word form for digitized-text anchoring."""
 	return word.replace("ё", "е").replace("Ё", "Е").casefold()
@@ -1402,17 +1468,24 @@ def _digitized_anchor_spans(text: str, anchor: str) -> list[tuple[int, int]]:
 	return [span for span in fallback if len(_printed_numbers_between(text, span[0], span[1])) <= 1]
 
 
-def _digitized_slice_span(text: str, start: str, end: str, single_task: bool = False) -> tuple[int, int] | None:
+def _digitized_slice_span(
+	text: str, start: str, end: str, single_task: bool = False, expected_number: int | None = None,
+) -> tuple[int, int] | None:
 	"""In-order start/end anchor character span over one digitized page.
 
 	The region ends at the FIRST end-anchor occurrence after its start: shared
 	closers such as «Запишите номера выбранных ответов.» repeat after every task
 	on a page, so a later occurrence would swallow whole neighbouring tasks
 	into one region. ``single_task`` additionally rejects a slice that still
-	covers more than one printed task number. Returns character offsets so the
-	caller can also map the slice onto the page's line structure.
+	covers more than one printed task number. With ``expected_number`` the
+	start anchor must stay attributable to that printed task: template scans
+	repeat whole stem lines verbatim, so the first textual occurrence of an
+	anchor can belong to the task printed above. Returns character offsets so
+	the caller can also map the slice onto the page's line structure.
 	"""
 	starts, ends = _digitized_anchor_spans(text, start), _digitized_anchor_spans(text, end)
+	if single_task and type(expected_number) is int:
+		starts = _anchor_spans_in_own_territory(text, starts, expected_number)
 	for start_begin, start_end in starts:
 		following = [span for span in ends if span[0] >= start_end]
 		if following:
@@ -1423,6 +1496,32 @@ def _digitized_slice_span(text: str, start: str, end: str, single_task: bool = F
 	if len(starts) == 1 and start.strip() == end.strip():
 		return (starts[0][0], starts[0][1])
 	return None
+
+
+def _anchor_spans_in_own_territory(text: str, starts: list[tuple[int, int]], expected_number: int) -> list[tuple[int, int]]:
+	"""Start-anchor occurrences attributable to the expected printed task.
+
+	Template-compiled scans repeat identical stem lines under neighbouring
+	printed markers, so an anchor quoted without its own ``[N]`` prefix matches
+	the task above first (observed on the staged scan: task pairs 12/13 and
+	32/35 both bound one another's band that way). An occurrence inside
+	another printed number's territory — that task's marker down to the next
+	marker — belongs to that task and is dropped; occurrences in the expected
+	task's own territory, or above it in no-task land such as a page header,
+	stay. When the transcription dropped the expected marker there is nothing
+	to attribute by, so the original candidates stand and the per-page
+	band-distinctness guard catches any residual sharing.
+	"""
+	matches = list(PRINTED_TASK_MARKER_RE.finditer(text))
+	other = [match for match in matches if int(match.group(1)) != expected_number]
+	if not other or not [match for match in matches if int(match.group(1)) == expected_number]:
+		return starts
+
+	def inside_territory(match, position: int) -> bool:
+		following = [later for later in matches if later.start() >= match.end()]
+		return match.start() <= position < (following[0].start() if following else len(text))
+
+	return [span for span in starts if not any(inside_territory(match, span[0]) for match in other)]
 
 
 def _digitized_anchor_slice(text: str, start: str, end: str, single_task: bool = False) -> str | None:
@@ -1469,8 +1568,8 @@ def _resolve_source_region(pdf, region: dict) -> dict:
 
 
 def _create_ai_task_crops(pdf_path: Path, tasks: list[dict], work_dir: Path) -> dict[int, Path]:
-	"""Render only AI-reviewed source blocks; refuse an unlocatable crop."""
-	crops, page_cache = {}, {}
+	"""Render only AI-reviewed source blocks; refuse an unlocatable or shared crop."""
+	crops, page_cache, digests = {}, {}, {}
 	with pdfplumber.open(pdf_path) as pdf:
 		def get_page(page_number):
 			if page_number not in page_cache:
@@ -1501,7 +1600,21 @@ def _create_ai_task_crops(pdf_path: Path, tasks: list[dict], work_dir: Path) -> 
 				path = work_dir / f"ai-task-{int(task['number']):04d}.png"
 				image.save(path, format="PNG", optimize=True)
 				image.close()
-				crops[int(task["number"])] = path
+				number = int(task["number"])
+				# Fail closed on byte-identical crops for two different printed
+				# tasks: identical bytes mean one question would display the
+				# other task's fragment, whatever produced them. A printed number
+				# the parser declared repeated is the same printed task twice,
+				# so identical crops for it stay legitimate.
+				digest = hashlib.sha256(path.read_bytes()).hexdigest()
+				first = digests.get(digest)
+				if first and first[1] != task.get("source_number", number):
+					frappe.throw(
+						_("Tasks {0} and {1} produced byte-identical source images, so one question would show the other task's fragment. Please retry the import.").format(f"[{first[0]}]", f"[{number}]"),
+						frappe.ValidationError,
+					)
+				digests[digest] = (number, task.get("source_number", number))
+				crops[number] = path
 		finally:
 			for image in page_cache.values():
 				image.close()
