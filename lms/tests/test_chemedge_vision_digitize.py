@@ -268,16 +268,24 @@ class VisionDigitizeTestCase(unittest.TestCase):
 		with patch.object(importer.pdfplumber, "open", return_value=opened):
 			importer._bind_digitized_regions(task, Path("scan.pdf"), {1: MARKDOWN_DIGITIZED_PAGE})
 		bound = task["source_regions"][0]
-		self.assertEqual(bound["bbox"], (0.0, 0.0, 595.0, 842.0))
+		# Per-task vertical band: from the task's own marker line down to the
+		# next printed marker, not the whole page.
+		line_height = 842.0 / 21
+		self.assertEqual(bound["bbox"][0], 0.0)
+		self.assertEqual(bound["bbox"][2], 595.0)
+		self.assertAlmostEqual(bound["bbox"][1], 2 * line_height - 12.0, places=4)
+		self.assertAlmostEqual(bound["bbox"][3], 12 * line_height + 12.0, places=4)
 		self.assertTrue(bound["text"].startswith("10]"))
 		importer._validate_printed_task_number({"number": 10, "source_number": 10}, bound)
 
-	def test_bind_digitized_regions_crops_the_whole_page_and_keeps_the_slice(self):
+	def test_single_line_digitized_page_falls_back_to_the_whole_page(self):
 		opened = make_opened_pdf(["🐾"])
 		task = {"number": 1, "source_regions": [{"page_number": 1, "start": "[1] First words of task", "end": "Last words of task", "kind": "task"}]}
 		with patch.object(importer.pdfplumber, "open", return_value=opened):
 			importer._bind_digitized_regions(task, Path("scan.pdf"), {1: LONG_TASK_TEXT})
 		bound = task["source_regions"][0]
+		# A one-line transcription carries no line structure to distribute, so
+		# the whole page stays the crop instead of failing the import.
 		self.assertEqual(bound["bbox"], (0.0, 0.0, 595.0, 842.0))
 		self.assertEqual(bound["page_height"], 842.0)
 		self.assertTrue(bound["text"].startswith("[1]"))
@@ -286,6 +294,48 @@ class VisionDigitizeTestCase(unittest.TestCase):
 		importer._validate_printed_task_number({"number": 1, "source_number": 1}, bound)
 		with self.assertRaises(frappe.ValidationError):
 			importer._validate_printed_task_number({"number": 2, "source_number": 2}, bound)
+
+	def test_bind_digitized_regions_crops_per_task_vertical_bands(self):
+		opened = make_opened_pdf(["🐾"])
+		line_height = 842.0 / 29
+		bands = {}
+		for number in (10, 11, 12):
+			task = {"number": number, "source_regions": [{
+				"page_number": 1,
+				"start": f"[{number}] Выберите два исходных вещества",
+				"end": "Запишите номера выбранных ответов.",
+				"kind": "task",
+			}]}
+			with patch.object(importer.pdfplumber, "open", return_value=opened):
+				importer._bind_digitized_regions(task, Path("scan.pdf"), {1: MERGED_THREE_TASK_PAGE})
+			bands[number] = task["source_regions"][0]
+			self.assertIn(f"уравнение {'один два три'.split()[number - 10]}", bands[number]["text"])
+		# Each fragment is a horizontal slice of the page bounded by its own
+		# and the next printed marker — never the full page (tester §9).
+		self.assertEqual(bands[10]["bbox"][0], 0.0)
+		self.assertEqual(bands[10]["bbox"][2], 595.0)
+		self.assertAlmostEqual(bands[10]["bbox"][1], 0.0, places=4)
+		self.assertAlmostEqual(bands[10]["bbox"][3], 10 * line_height + 12.0, places=4)
+		self.assertAlmostEqual(bands[11]["bbox"][1], 10 * line_height - 12.0, places=4)
+		self.assertAlmostEqual(bands[11]["bbox"][3], 20 * line_height + 12.0, places=4)
+		self.assertAlmostEqual(bands[12]["bbox"][1], 20 * line_height - 12.0, places=4)
+		self.assertEqual(bands[12]["bbox"][3], 842.0)
+		self.assertLess(bands[10]["bbox"][3], bands[11]["bbox"][3])
+		self.assertLess(bands[11]["bbox"][3], 842.0)
+
+	def test_bind_digitized_regions_gives_context_regions_their_own_band(self):
+		opened = make_opened_pdf(["🐾"])
+		task = {"number": 10, "source_regions": [{
+			"page_number": 1, "start": "Вопрос №14 ОГЭ", "end": "Вопрос №14 ОГЭ", "kind": "context",
+		}]}
+		with patch.object(importer.pdfplumber, "open", return_value=opened):
+			importer._bind_digitized_regions(task, Path("scan.pdf"), {1: MARKDOWN_DIGITIZED_PAGE})
+		bound = task["source_regions"][0]
+		# The shared header ends at the first printed task marker line.
+		line_height = 842.0 / 21
+		self.assertAlmostEqual(bound["bbox"][1], 0.0, places=4)
+		self.assertAlmostEqual(bound["bbox"][3], 2 * line_height + 12.0, places=4)
+		self.assertIn("Вопрос №14 ОГЭ", bound["text"])
 
 	def test_bind_digitized_regions_leaves_text_pages_and_bbox_regions_alone(self):
 		opened = make_opened_pdf(["🐾", "text page"])

@@ -1212,39 +1212,84 @@ def _item_in_column(item, column) -> bool:
 
 
 def _bind_digitized_regions(task, pdf_path, digitized_pages):
-	"""Convert anchor regions on vision-digitized pages to whole-page crops.
+	"""Convert anchor regions on vision-digitized pages to per-task crop bands.
 
 	A scanned page exposes no PDF text coordinates, so the student-facing crop
-	is the full page image while the anchors still locate the task's own text
-	slice for the printed-number check.
+	is bounded vertically from the transcription's own line structure: the
+	task runs from its printed marker line to the next printed marker, mapped
+	onto the page by line distribution. The anchors still locate the task's
+	own text slice for the printed-number check, and unusable line structure
+	falls back to the whole page rather than failing the import.
 	"""
 	with pdfplumber.open(pdf_path) as pdf:
+		expected = task.get("source_number", task.get("number"))
 		for index, region in enumerate(task["source_regions"]):
 			digitized_text = digitized_pages.get(region["page_number"])
 			if digitized_text is None or "bbox" in region:
 				continue
 			task["source_regions"][index] = _resolve_digitized_region(
-				region, digitized_text, pdf.pages[region["page_number"] - 1]
+				region, digitized_text, pdf.pages[region["page_number"] - 1],
+				int(expected) if type(expected) is int else None,
 			)
 
 
-def _resolve_digitized_region(region: dict, digitized_text: str, page) -> dict:
-	text = _digitized_anchor_slice(
+def _resolve_digitized_region(region: dict, digitized_text: str, page, expected_number=None) -> dict:
+	span = _digitized_slice_span(
 		digitized_text, str(region.get("start") or ""), str(region.get("end") or ""),
 		single_task=region.get("kind") == "task",
 	)
-	if text is None:
+	if span is None:
 		frappe.throw(
 			_("AI selected a PDF fragment that could not be located safely. Please retry the import."),
 			frappe.ValidationError,
 		)
+	band = _digitized_task_band(digitized_text, span, page, expected_number)
 	return {
 		**region,
-		"bbox": (0.0, 0.0, float(page.width), float(page.height)),
+		"bbox": band or (0.0, 0.0, float(page.width), float(page.height)),
 		"page_width": float(page.width),
 		"page_height": float(page.height),
-		"text": text,
+		"text": digitized_text[span[0]:span[1]].strip(),
 	}
+
+
+def _digitized_task_band(digitized_text: str, span: tuple[int, int], page, expected_number) -> tuple[float, float, float, float] | None:
+	"""Vertical per-task crop band for one digitized region.
+
+	The transcription preserves the printed line order, so the region's lines
+	(from its own printed marker when present, down to the next printed
+	marker or its anchor end) bound the fragment. Line indexes map onto the
+	page by even distribution; ``None`` keeps the whole-page crop so an
+	unusable line structure never fails the import over trimming.
+	"""
+	lines = digitized_text.rstrip("\n").split("\n")
+	if len(lines) < 2 or not any(line.strip() for line in lines):
+		return None
+	start_line = digitized_text.count("\n", 0, span[0])
+	end_line = digitized_text.count("\n", 0, span[1])
+	top_line = start_line
+	if type(expected_number) is int:
+		for index in range(start_line, max(-1, start_line - 4), -1):
+			marker = PRINTED_TASK_MARKER_RE.search(lines[index])
+			if marker and int(marker.group(1)) == expected_number:
+				top_line = index
+				break
+	bottom_line = end_line
+	# The next printed marker below the slice end bounds the fragment; a
+	# context region therefore ends right before its own task's marker, and
+	# a task region never reaches the next task's first line.
+	for index in range(end_line + 1, len(lines)):
+		if PRINTED_TASK_MARKER_RE.search(lines[index]):
+			if index - 1 >= bottom_line:
+				bottom_line = index - 1
+			break
+	line_height = float(page.height) / len(lines)
+	pad = min(line_height * 0.75, 12.0)
+	top = max(0.0, top_line * line_height - pad)
+	bottom = min(float(page.height), (bottom_line + 1) * line_height + pad)
+	if bottom <= top + 1:
+		return None
+	return (0.0, top, float(page.width), bottom)
 
 
 def _validate_task_split(task):
@@ -1357,26 +1402,33 @@ def _digitized_anchor_spans(text: str, anchor: str) -> list[tuple[int, int]]:
 	return [span for span in fallback if len(_printed_numbers_between(text, span[0], span[1])) <= 1]
 
 
-def _digitized_anchor_slice(text: str, start: str, end: str, single_task: bool = False) -> str | None:
-	"""In-order start/end anchor slice over one digitized page's transcription.
+def _digitized_slice_span(text: str, start: str, end: str, single_task: bool = False) -> tuple[int, int] | None:
+	"""In-order start/end anchor character span over one digitized page.
 
 	The region ends at the FIRST end-anchor occurrence after its start: shared
 	closers such as «Запишите номера выбранных ответов.» repeat after every task
 	on a page, so a later occurrence would swallow whole neighbouring tasks
 	into one region. ``single_task`` additionally rejects a slice that still
-	covers more than one printed task number.
+	covers more than one printed task number. Returns character offsets so the
+	caller can also map the slice onto the page's line structure.
 	"""
 	starts, ends = _digitized_anchor_spans(text, start), _digitized_anchor_spans(text, end)
 	for start_begin, start_end in starts:
 		following = [span for span in ends if span[0] >= start_end]
 		if following:
-			slice_text = text[start_begin : following[0][1]].strip()
-			if not single_task or len(_printed_numbers_in(slice_text)) <= 1:
-				return slice_text
+			slice_begin, slice_close = start_begin, following[0][1]
+			if not single_task or len(_printed_numbers_in(text[slice_begin:slice_close])) <= 1:
+				return (slice_begin, slice_close)
 			return None
 	if len(starts) == 1 and start.strip() == end.strip():
-		return text[starts[0][0] : starts[0][1]].strip()
+		return (starts[0][0], starts[0][1])
 	return None
+
+
+def _digitized_anchor_slice(text: str, start: str, end: str, single_task: bool = False) -> str | None:
+	"""In-order start/end anchor slice over one digitized page's transcription."""
+	span = _digitized_slice_span(text, start, end, single_task)
+	return text[span[0]:span[1]].strip() if span else None
 
 
 def _resolve_source_region(pdf, region: dict) -> dict:
