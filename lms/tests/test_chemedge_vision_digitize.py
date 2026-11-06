@@ -15,6 +15,19 @@ LONG_TASK_TEXT = (
 )
 LONG_KEY_TEXT = "Ключ ответов: [1] 2 [2] 3 [3] 1 и записано достаточно текста для порога распознавания"
 
+# Real digitization artefacts observed on the staged scan (task-42 fix):
+# the vision model decorates markers/headings with Markdown and the
+# extraction model quotes plain anchors back.
+MARKDOWN_DIGITIZED_PAGE = (
+	"# Вопрос №14 ОГЭ\n\n"
+	"**[10]** Выберите два исходных вещества, взаимодействию которых соответствует сокращённое ионное уравнение\n"
+	"1) NaOH\n2) KOH\n3) Ba(OH)₂\n4) BaCO₃\n5) HBr\n6) HNO₂\n\n"
+	"Запишите номера выбранных ответов.\n\n"
+	"**[11]** Выберите два исходных вещества, взаимодействию которых соответствует иное уравнение\n"
+	"1) Cu\n2) Fe\n3) Zn\n4) Mg\n5) Ba\n6) **Al**\n\n"
+	"Запишите номера выбранных ответов.\n"
+)
+
 
 def make_opened_pdf(pages_text, width=595.0, height=842.0):
 	pages = []
@@ -190,6 +203,57 @@ class VisionDigitizeTestCase(unittest.TestCase):
 		self.assertIsNone(importer._digitized_anchor_slice(text, "Missing anchor", "End words"))
 		self.assertIsNone(importer._digitized_anchor_slice(text, "", "End words"))
 		self.assertEqual(importer._digitized_anchor_slice(text, "Second task begins", "Second task begins"), "Second task begins")
+
+	def test_anchor_slice_survives_markdown_marker_decoration(self):
+		slice_text = importer._digitized_anchor_slice(
+			MARKDOWN_DIGITIZED_PAGE,
+			"[10] Выберите два исходных вещества",
+			"Запишите номера выбранных ответов.",
+		)
+		self.assertIsNotNone(slice_text)
+		self.assertIn("Выберите два исходных вещества", slice_text)
+		# The slice keeps the original transcription characters for the safeguard.
+		self.assertTrue(slice_text.startswith("10]"))
+		importer._validate_printed_task_number({"number": 10, "source_number": 10}, {"kind": "task", "text": slice_text})
+		with self.assertRaises(frappe.ValidationError):
+			importer._validate_printed_task_number({"number": 11, "source_number": 11}, {"kind": "task", "text": slice_text})
+
+	def test_anchor_slice_tolerates_decorated_option_and_closer(self):
+		slice_text = importer._digitized_anchor_slice(
+			MARKDOWN_DIGITIZED_PAGE,
+			"[11] Выберите два исходных вещества",
+			"4) Al Запишите номера выбранных ответов.",
+		)
+		self.assertIsNotNone(slice_text)
+		self.assertIn("**Al**", slice_text)
+
+	def test_anchor_slice_normalises_letter_case_and_yo(self):
+		text = "[3] Выберите два исходных вещества, сокращённое уравнение\n6) стирол"
+		slice_text = importer._digitized_anchor_slice(text, "[3] ВЫБЕРИТЕ ДВА исходных вещества", "6) стирол")
+		self.assertIsNotNone(slice_text)
+		self.assertIn("сокращённое", slice_text)
+
+	def test_anchor_slice_rejects_reordered_or_absent_anchor_words(self):
+		# Strict safety: tolerance never invents locations for absent fragments
+		# or accepts words quoted out of their printed order.
+		self.assertIsNone(importer._digitized_anchor_slice(
+			MARKDOWN_DIGITIZED_PAGE, "[12] Выберите два исходных вещества", "Запишите номера выбранных ответов."))
+		self.assertIsNone(importer._digitized_anchor_slice(
+			MARKDOWN_DIGITIZED_PAGE, "вещества исходных два Выберите [10]", "Запишите номера выбранных ответов."))
+		self.assertIsNone(importer._digitized_anchor_slice(
+			MARKDOWN_DIGITIZED_PAGE, "Запишите номера выбранных ответов.", "[10] Выберите два исходных вещества"))
+
+	def test_bind_digitized_regions_locates_markdown_decorated_anchors(self):
+		opened = make_opened_pdf(["🐾"])
+		task = {"number": 10, "source_regions": [
+			{"page_number": 1, "start": "[10] Выберите два исходных вещества", "end": "Запишите номера выбранных ответов.", "kind": "task"},
+		]}
+		with patch.object(importer.pdfplumber, "open", return_value=opened):
+			importer._bind_digitized_regions(task, Path("scan.pdf"), {1: MARKDOWN_DIGITIZED_PAGE})
+		bound = task["source_regions"][0]
+		self.assertEqual(bound["bbox"], (0.0, 0.0, 595.0, 842.0))
+		self.assertTrue(bound["text"].startswith("10]"))
+		importer._validate_printed_task_number({"number": 10, "source_number": 10}, bound)
 
 	def test_bind_digitized_regions_crops_the_whole_page_and_keeps_the_slice(self):
 		opened = make_opened_pdf(["🐾"])
