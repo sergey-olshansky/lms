@@ -28,6 +28,23 @@ MARKDOWN_DIGITIZED_PAGE = (
 	"Запишите номера выбранных ответов.\n"
 )
 
+# The owner-observed wrong-split shape (task 42 fix round 2): three printed
+# tasks share one page, one stem phrasing and one closing instruction, so a
+# loose anchor match can merge all three into a single produced task.
+MERGED_THREE_TASK_PAGE = (
+	"**[10]** Выберите два исходных вещества, взаимодействию которых соответствует уравнение один\n"
+	"1) NaOH\n2) KOH\n3) Ba(OH)₂\n4) BaCO₃\n5) HBr\n6) HNO₂\n\n"
+	"Запишите номера выбранных ответов.\n\n"
+	"**[11]** Выберите два исходных вещества, взаимодействию которых соответствует уравнение два\n"
+	"1) Cu\n2) Fe\n3) Zn\n4) Mg\n5) Ba\n6) Al\n\n"
+	"Запишите номера выбранных ответов.\n\n"
+	"**[12]** Выберите два исходных вещества, взаимодействию которых соответствует уравнение три\n"
+	"1) O₂\n2) S\n3) Se\n4) Te\n5) Po\n6) Lv\n\n"
+	"Запишите номера выбранных ответов.\n"
+)
+
+TASK32_KEY_TEXT = "1) BaO\n2) Ba\n3) BaCl₂\n4) H₃PO₄\n5) BaSO₄\n6) Na₃PO₄"
+
 
 def make_opened_pdf(pages_text, width=595.0, height=842.0):
 	pages = []
@@ -286,3 +303,155 @@ class VisionDigitizeTestCase(unittest.TestCase):
 		with patch.object(importer.pdfplumber, "open", return_value=opened):
 			with self.assertRaises(frappe.ValidationError):
 				importer._bind_digitized_regions(task, Path("scan.pdf"), {1: LONG_TASK_TEXT})
+
+	def test_anchor_slice_ends_at_the_tasks_own_shared_closer(self):
+		# The old slice ran to the LAST shared closer and swallowed tasks
+		# 11–12 into task 10 («3 задания в одном»).
+		slice_text = importer._digitized_anchor_slice(
+			MERGED_THREE_TASK_PAGE,
+			"[10] Выберите два исходных вещества",
+			"Запишите номера выбранных ответов.",
+			single_task=True,
+		)
+		self.assertIsNotNone(slice_text)
+		self.assertIn("уравнение один", slice_text)
+		self.assertNotIn("уравнение два", slice_text)
+		self.assertNotIn("уравнение три", slice_text)
+		self.assertNotIn("[11]", slice_text)
+		self.assertNotIn("[12]", slice_text)
+
+	def test_task_slice_rejects_a_span_covering_three_printed_tasks(self):
+		self.assertIsNone(importer._digitized_anchor_slice(
+			MERGED_THREE_TASK_PAGE,
+			"[10] Выберите два исходных вещества",
+			"уравнение три",
+			single_task=True,
+		))
+		# Without the single-task constraint the merged span exists, which is
+		# exactly why the caller must pass the constraint for task regions.
+		merged = importer._digitized_anchor_slice(
+			MERGED_THREE_TASK_PAGE,
+			"[10] Выберите два исходных вещества",
+			"уравнение три",
+		)
+		self.assertIsNotNone(merged)
+		self.assertIn("[11]", merged)
+
+	def test_fallback_span_cannot_cover_two_printed_task_numbers(self):
+		key_text = "Ключ: [10] 2 [11] 3 [12] 1"
+		self.assertEqual(importer._digitized_anchor_spans(key_text, "10 2 11 3 12"), [])
+		still_bound = importer._digitized_anchor_spans(key_text, "2 11 3")
+		self.assertEqual(len(still_bound), 1)
+
+	def test_validate_task_split_rejects_a_merged_task(self):
+		merged_text = importer._digitized_anchor_slice(
+			MERGED_THREE_TASK_PAGE, "[10] Выберите два исходных вещества", "уравнение три",
+		)
+		merged_task = {
+			"number": 10,
+			"question": "Выберите два исходных вещества",
+			"source_regions": [{"kind": "task", "text": merged_text}],
+		}
+		with self.assertRaises(importer.AIExtractionInvalid):
+			importer._validate_task_split(merged_task)
+		clean_task = {
+			"number": 10,
+			"question": "Выберите два исходных вещества [10]",
+			"source_regions": [{"kind": "task", "text": "10] Выберите два исходных вещества, уравнение один"}],
+		}
+		importer._validate_task_split(clean_task)
+
+	def test_task_split_conflicts_flag_shared_printed_numbers(self):
+		tasks = {
+			5: {"number": 5, "source_number": 5, "source_regions": [{"kind": "task", "text": "[5] Task five"}]},
+			6: {"number": 6, "source_number": 6, "source_regions": [{"kind": "task", "text": "Preamble with [5] again"}]},
+		}
+		self.assertEqual(importer._task_split_conflicts(tasks, {}), {5, 6})
+		compiled = {"tasks": [{"number": 5, "source_number": 7}, {"number": 6, "source_number": 7}]}
+		repeated = {
+			5: {"number": 5, "source_number": 7, "source_regions": [{"kind": "task", "text": "[7] First copy"}]},
+			6: {"number": 6, "source_number": 7, "source_regions": [{"kind": "task", "text": "[7] Second copy"}]},
+		}
+		self.assertEqual(importer._task_split_conflicts(repeated, compiled), set())
+
+	def test_digitized_merge_is_recovered_by_re_extraction(self):
+		opened = make_opened_pdf(["🐾"])
+		entry = {"number": 10, "question_pages": [1], "context_pages": [], "answer_pages": [1]}
+		pages = ["--- PDF page 1 ---\n" + MERGED_THREE_TASK_PAGE]
+		merged = {"tasks": [{"number": 10, "reviewed": True, "question": "Выберите два исходных вещества", "answer": "15",
+			"source_regions": [{"page": 1, "start": "[10] Выберите два исходных вещества", "end": "уравнение три", "kind": "task"}]}]}
+		repaired = {"tasks": [{"number": 10, "reviewed": True, "question": "Выберите два исходных вещества", "answer": "15",
+			"source_regions": [{"page": 1, "start": "[10] Выберите два исходных вещества", "end": "Запишите номера выбранных ответов.", "kind": "task"}]}]}
+		with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
+			handle.write(b"%PDF-fake")
+			handle.flush()
+			with patch.object(importer.pdfplumber, "open", return_value=opened), \
+				patch.object(importer, "_verified_raster_answer", return_value=None), \
+				patch.object(importer, "_ai_json", side_effect=[merged, repaired]) as ai:
+				_title, tasks = importer._extract_page_plan_tasks(
+					Path(handle.name), pages, [entry], {}, {}, "", "prefix", {"title": "Trainer"},
+					{1: MERGED_THREE_TASK_PAGE})
+		self.assertEqual(len(tasks), 1)
+		text = tasks[0]["source_regions"][0]["text"]
+		self.assertIn("уравнение один", text)
+		self.assertNotIn("уравнение два", text)
+		self.assertNotIn("уравнение три", text)
+		self.assertEqual(ai.call_count, 2)
+		self.assertIn("Repair ONLY this task", ai.call_args_list[1].args[0])
+		# The same digits-only key is normalised into Choices on the repaired task.
+		self.assertEqual(tasks[0]["correct_options"], [1, 5])
+		self.assertEqual(len(tasks[0]["options"]), 6)
+
+	def test_binding_failure_redigitizes_the_page_once(self):
+		opened = make_opened_pdf(["🐾"])
+		entry = {"number": 3, "question_pages": [1], "context_pages": [], "answer_pages": [1]}
+		pages = ["--- PDF page 1 ---\nOld transcription without the anchors"]
+		bad = {"tasks": [{"number": 3, "reviewed": True, "question": "Question", "answer": "12",
+			"source_regions": [{"page": 1, "start": "not present anywhere", "end": "still not present", "kind": "task"}]}]}
+		good = {"tasks": [{"number": 3, "reviewed": True, "question": "Question three", "answer": "12",
+			"source_regions": [{"page": 1, "start": "[3] Fresh transcription", "end": "Fresh closer", "kind": "task"}]}]}
+		fresh = "[3] Fresh transcription of task three\n1) A\n2) B\nFresh closer"
+		digitized_pages = {1: "Old transcription without the anchors"}
+		with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
+			handle.write(b"%PDF-fake")
+			handle.flush()
+			with patch.object(importer.pdfplumber, "open", return_value=opened), \
+				patch.object(importer, "_verified_raster_answer", return_value=None), \
+				patch.object(importer, "_page_image_data_url", return_value="data:image/png;base64,AAA") as image, \
+				patch.object(importer, "_vision_page_text", return_value=fresh) as vision, \
+				patch.object(importer, "_ai_json", side_effect=[bad, bad, good]) as ai:
+				_title, tasks = importer._extract_page_plan_tasks(
+					Path(handle.name), pages, [entry], {}, {}, "", "prefix", {"title": "Trainer"}, digitized_pages)
+		self.assertEqual(len(tasks), 1)
+		self.assertTrue(tasks[0]["source_regions"][0]["text"].startswith("[3] Fresh"))
+		self.assertEqual(vision.call_count, 1)
+		self.assertEqual(image.call_count, 1)
+		self.assertEqual(ai.call_count, 3)
+		self.assertIn("re-digitized", ai.call_args_list[2].args[0])
+		self.assertIn("Fresh transcription", pages[0])
+		self.assertEqual(tasks[0]["correct_options"], [1, 2])
+
+	def test_digit_key_normalisation_maps_task32_key_onto_printed_options(self):
+		task = {"number": 32, "question": "Выберите два исходных вещества, которые реагируют с Ba(OH)₂",
+			"answer": "36", "options": [], "correct_options": [],
+			"source_regions": [{"kind": "task", "text": "[32] Выберите два исходных вещества\n" + TASK32_KEY_TEXT}]}
+		self.assertTrue(importer._normalize_digit_key_choices(task))
+		self.assertEqual(task["options"][0], "1) BaO")
+		self.assertEqual(task["options"][2], "3) BaCl₂")
+		self.assertEqual(task["options"][5], "6) Na₃PO₄")
+		self.assertEqual(task["correct_options"], [3, 6])
+		ordered = {"number": 1, "question": "Расположите выбранные элементы в порядке увеличения", "answer": "432",
+			"options": [], "correct_options": [], "source_regions": [{"kind": "task", "text": "1) Si 2) K 3) Ca 4) Zn 5) Be"}]}
+		self.assertFalse(importer._normalize_digit_key_choices(ordered))
+		self.assertEqual(ordered["answer"], "432")
+		self.assertEqual(ordered["options"], [])
+		single_digit = {"number": 2, "question": "Question", "answer": "3", "options": [], "correct_options": [],
+			"source_regions": [{"kind": "task", "text": TASK32_KEY_TEXT}]}
+		self.assertFalse(importer._normalize_digit_key_choices(single_digit))
+		repeated_digit = {"number": 4, "question": "Question", "answer": "33", "options": [], "correct_options": [],
+			"source_regions": [{"kind": "task", "text": TASK32_KEY_TEXT}]}
+		self.assertFalse(importer._normalize_digit_key_choices(repeated_digit))
+		unmappable = {"number": 5, "question": "Question", "answer": "39", "options": [], "correct_options": [],
+			"source_regions": [{"kind": "task", "text": TASK32_KEY_TEXT}]}
+		self.assertFalse(importer._normalize_digit_key_choices(unmappable))
+		self.assertTrue(importer._digit_key_unmappable(unmappable))
