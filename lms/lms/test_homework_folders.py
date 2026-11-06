@@ -40,6 +40,22 @@ def _private_image(filename: str) -> str:
 	return doc.name
 
 
+def _upload_folder_image(folder: str, filename: str) -> str:
+	"""Store one image through the REAL upload path the whitelisted
+	upload_folder_image endpoint uses (task #41 fix regression):
+	_store_folder_image attaches the File to the Course Folder
+	(attached_to_doctype/attached_to_name), which is exactly what makes
+	deleting it a link-integrity decision once a student has opened it.
+	Fixture Files with no attached_to skip the File-deletion branch of
+	delete_folder_image entirely and can never catch that ordering."""
+	result = lms_api._store_folder_image(
+		frappe.get_doc("Course Folder", folder),
+		filename,
+		PNG_HEADER + frappe.generate_hash(length=16).encode(),
+	)
+	return result["file"]["name"]
+
+
 def _create_folder(title: str, chapter: str, course: str) -> str:
 	"""A Course Folder appended to the section's mixed children."""
 	folder = frappe.new_doc("Course Folder")
@@ -389,6 +405,98 @@ class TestFolderDynamics(FolderHomeworkBase):
 		self.assertEqual(row["image_count"], 1)
 		self.assertEqual(row["opened_count"], 1)
 		self.assertEqual(row["status"], "Completed")
+
+	def test_delete_opened_uploaded_image_prunes_credit_and_file(self):
+		"""The tester's exact defect path (task #41 fix, criterion 6): a REAL
+		uploaded File -- attached_to_doctype="Course Folder", exactly as
+		upload_folder_image stores it -- that a student has OPENED must still
+		be deletable by the teacher. The old order deleted the File before the
+		per-image completion rows were pruned, so frappe's link check saw the
+		LMS Homework Folder Image.image Link and refused with LinkExistsError
+		(HTTP 417 on the endpoint). Bench fixtures with attached_to=null skip
+		the File-deletion branch and cannot catch this."""
+		frappe.set_user(self.teacher.name)
+		uploaded = _upload_folder_image(self.folder, "real-upload.png")
+		self.assertEqual(
+			frappe.db.get_value("File", uploaded, "attached_to_doctype"), "Course Folder",
+		)
+		self.assertEqual(frappe.db.get_value("File", uploaded, "attached_to_name"), self.folder)
+
+		self._open_all()  # includes the real uploaded image
+		self.assertEqual(
+			len(
+					frappe.get_all(
+						"LMS Homework Folder Image", {"parent": self.assignment, "image": uploaded}
+					)
+				),
+				1,
+		)
+		self.assertEqual(self.folder_row(self.assignment)["status"], "Completed")
+
+		frappe.set_user(self.teacher.name)
+		# The regression: this call raised frappe.LinkExistsError before the fix.
+		lms_api.delete_folder_image(folder=self.folder, image=uploaded)
+
+		# No stale completion credit survives the deleted image (criterion 6).
+		self.assertEqual(
+				frappe.get_all("LMS Homework Folder Image", {"image": uploaded}, pluck="name"), []
+		)
+		# The real File itself is gone -- deleted, not orphaned.
+		self.assertFalse(frappe.db.exists("File", uploaded))
+		self.assertFalse(
+				frappe.db.exists("Folder Image Reference", {"parent": self.folder, "image": uploaded})
+		)
+		# The image left the denominator: the two remaining openings still
+		# cover the two remaining images, so the row stays Completed 2/2.
+		row = self.folder_row(self.assignment)
+		self.assertEqual(row["image_count"], 2)
+		self.assertEqual(row["opened_count"], 2)
+		self.assertEqual(row["status"], "Completed")
+		self.assertNotIn(uploaded, [item["name"] for item in row["images"]])
+		# The gallery state carries no stale opened entry either: the card sits
+		# in Review, so the state endpoint is inactive with an empty list --
+		# the deleted image must never resurface there.
+		frappe.set_user(self.student.name)
+		self.assertEqual(
+			homework_api.get_folder_homework_state(self.folder), {"active": False, "opened": []}
+		)
+
+	def test_delete_unopened_uploaded_image_still_works(self):
+		"""K1 parity: an uploaded-but-never-opened real File was always
+		deletable; the fix must not disturb that path."""
+		frappe.set_user(self.teacher.name)
+		uploaded = _upload_folder_image(self.folder, "unopened-upload.png")
+		self._open_all()  # only the two fixture images; the upload stays unseen
+		frappe.set_user(self.teacher.name)  # _open_all leaves the student session
+		lms_api.delete_folder_image(folder=self.folder, image=uploaded)
+		self.assertFalse(frappe.db.exists("File", uploaded))
+		self.assertEqual(
+				frappe.get_all("LMS Homework Folder Image", {"image": uploaded}), []
+		)
+		row = self.folder_row(self.assignment)
+		self.assertEqual(row["image_count"], 2)
+		self.assertEqual(row["opened_count"], 2)
+
+	def test_emptied_folder_with_opened_upload_reaches_neutral(self):
+		"""The impact path the defect made unreachable: once any student opens
+		a real upload, emptying the folder through the manage-gallery flow
+		must still work and land on the muted neutral state, never on a 417."""
+		frappe.set_user(self.teacher.name)
+		uploaded = _upload_folder_image(self.folder, "last-real.png")
+		self._open_all()
+		self.assertEqual(self.folder_row(self.assignment)["status"], "Completed")
+		frappe.set_user(self.teacher.name)  # _open_all leaves the student session
+		for image in self.images + [uploaded]:
+			lms_api.delete_folder_image(folder=self.folder, image=image)
+		row = self.folder_row(self.assignment)
+		self.assertTrue(row["folder_empty"])
+		self.assertEqual(row["state_label"], "The folder has no images")
+		self.assertEqual(
+				frappe.get_all("LMS Homework Folder Image", {"parent": self.assignment}), []
+		)
+		detail = homework_api.get_homework_assignment(self.assignment)
+		self.assertEqual(detail["total_requirements"], 0)
+		self.assertEqual(detail["status"], "Review")
 
 	def test_emptied_folder_is_neutral_not_blocking(self):
 		self._open_all()
