@@ -222,7 +222,7 @@ class VisionDigitizeTestCase(unittest.TestCase):
 		slice_text = importer._digitized_anchor_slice(
 			MARKDOWN_DIGITIZED_PAGE,
 			"[11] Выберите два исходных вещества",
-			"4) Al Запишите номера выбранных ответов.",
+			"6) Al Запишите номера выбранных ответов.",
 		)
 		self.assertIsNotNone(slice_text)
 		self.assertIn("**Al**", slice_text)
