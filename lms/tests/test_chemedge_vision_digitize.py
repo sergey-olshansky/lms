@@ -1,0 +1,790 @@
+"""Vision digitization of scanned (textless) PDFs in the AI import pipeline."""
+
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import MagicMock, Mock, patch
+
+import frappe
+from lms.lms import chemedge_pdf_import as importer
+
+LONG_TASK_TEXT = (
+	"[1] First words of task with a complete chemistry condition, a table of "
+	"substances and printed answer options followed by Last words of task"
+)
+LONG_KEY_TEXT = "Ключ ответов: [1] 2 [2] 3 [3] 1 и записано достаточно текста для порога распознавания"
+
+# Real digitization artefacts observed on the staged scan (task-42 fix):
+# the vision model decorates markers/headings with Markdown and the
+# extraction model quotes plain anchors back.
+MARKDOWN_DIGITIZED_PAGE = (
+	"# Вопрос №14 ОГЭ\n\n"
+	"**[10]** Выберите два исходных вещества, взаимодействию которых соответствует сокращённое ионное уравнение\n"
+	"1) NaOH\n2) KOH\n3) Ba(OH)₂\n4) BaCO₃\n5) HBr\n6) HNO₂\n\n"
+	"Запишите номера выбранных ответов.\n\n"
+	"**[11]** Выберите два исходных вещества, взаимодействию которых соответствует иное уравнение\n"
+	"1) Cu\n2) Fe\n3) Zn\n4) Mg\n5) Ba\n6) **Al**\n\n"
+	"Запишите номера выбранных ответов.\n"
+)
+
+# The owner-observed wrong-split shape (task 42 fix round 2): three printed
+# tasks share one page, one stem phrasing and one closing instruction, so a
+# loose anchor match can merge all three into a single produced task.
+MERGED_THREE_TASK_PAGE = (
+	"**[10]** Выберите два исходных вещества, взаимодействию которых соответствует уравнение один\n"
+	"1) NaOH\n2) KOH\n3) Ba(OH)₂\n4) BaCO₃\n5) HBr\n6) HNO₂\n\n"
+	"Запишите номера выбранных ответов.\n\n"
+	"**[11]** Выберите два исходных вещества, взаимодействию которых соответствует уравнение два\n"
+	"1) Cu\n2) Fe\n3) Zn\n4) Mg\n5) Ba\n6) Al\n\n"
+	"Запишите номера выбранных ответов.\n\n"
+	"**[12]** Выберите два исходных вещества, взаимодействию которых соответствует уравнение три\n"
+	"1) O₂\n2) S\n3) Se\n4) Te\n5) Po\n6) Lv\n\n"
+	"Запишите номера выбранных ответов.\n"
+)
+
+# The owner-observed byte-identical fragment pairs (task 42 fix round 3):
+# template twins repeat the whole stem line verbatim under neighbouring
+# markers, and the extraction model quoted task 13/35 anchors WITHOUT their
+# own marker prefix — so the first textual occurrence belonged to the task
+# printed above and both questions shared one crop.
+TEMPLATE_TWIN_PAGE_4 = (
+	"Страница 4\n"
+	"\n"
+	"[12] Выберите два исходных вещества, взаимодействию которых соответствует сокращённое ионное уравнение реакции\n"
+	"Ca²⁺ + SO₃²⁻ = CaSO₃\n"
+	"1) CaO\n2) Ca\n3) CaCl₂\n4) Ag₂SO₃\n5) MgSO₃\n6) Na₂SO₃\n"
+	"Запишите номера выбранных ответов.\n"
+	"\n"
+	"\n"
+	"[13] Выберите два исходных вещества, взаимодействию которых соответствует сокращённое ионное уравнение реакции\n"
+	"3Ba²⁺ + 2PO₄³⁻ = Ba₃(PO₄)₂\n"
+	"1) BaSiO₃\n2) Ca₃(PO₄)₂\n3) BaO\n4) BaI₂\n5) Na₃PO₄\n6) Li₃PO₄\n"
+	"Запишите номера выбранных ответов.\n"
+	"\n"
+	"\n"
+	"[14] Из предложенного перечня выберите названия двух веществ\n"
+	"1) Барий\n2) Оксид бария\n3) Гидроксид бария\n"
+	"Запишите номера выбранных ответов.\n"
+)
+
+TEMPLATE_TWIN_PAGE_9 = (
+	"Страница 9\n"
+	"\n"
+	"[32] Выберите два исходных вещества, взаимодействию которых соответствует сокращённое ионное уравнение реакции\n"
+	"3Ba²⁺ + 2PO₄³⁻ = Ba₃(PO₄)₂\n"
+	"1) BaO\n2) Ba\n3) BaCl₂\n4) H₃PO₄\n5) BaSO₄\n6) Na₃PO₄\n"
+	"Запишите номера выбранных ответов.\n"
+	"□□\n"
+	"\n"
+	"[33] Выберите два исходных вещества, взаимодействию которых соответствует сокращённое ионное уравнение реакции\n"
+	"3Ba²⁺ + 2PO₄³⁻ = Ba₃(PO₄)₂\n"
+	"1) Ba\n2) BaO\n3) Ba(NO₃)₂\n4) H₃PO₄\n5) Na₃PO₄\n6) BaCO₃\n"
+	"Запишите номера выбранных ответов.\n"
+	"\n"
+	"[35] Выберите два исходных вещества, взаимодействию которых соответствует сокращённое ионное уравнение реакции\n"
+	"Fe²⁺ + CO₃²⁻ = FeCO₃\n"
+	"1) Fe(NO₃)₂\n2) CO₂\n3) BaCO₃\n4) FeCl₃\n5) K₂CO₃\n6) Fe\n"
+	"Запишите номера выбранных ответов\n"
+	"□□\n"
+	"\n"
+	"Школа химии | Наш банк заданий | ОГЭ с Химическим котом\n"
+)
+
+# The residual class the distinctness guard must catch: the vision model
+# dropped task 11's own marker, so its anchor can only match the twin above.
+MARKER_DROPPED_TWIN_PAGE = (
+	"[10] Выберите два исходных вещества, взаимодействию которых соответствует уравнение один\n"
+	"1) NaOH 2) KOH 3) Ba(OH)₂ 4) BaCO₃ 5) HBr 6) HNO₂\n"
+	"Запишите номера выбранных ответов.\n"
+	"\n"
+	"Выберите два исходных вещества, взаимодействию которых соответствует уравнение два\n"
+	"1) Cu 2) Fe 3) Zn 4) Mg 5) Ba 6) Al\n"
+	"Запишите номера выбранных ответов.\n"
+)
+
+MARKER_PRESENT_TWIN_PAGE = (
+	"[10] Выберите два исходных вещества, взаимодействию которых соответствует уравнение один\n"
+	"1) NaOH 2) KOH 3) Ba(OH)₂ 4) BaCO₃ 5) HBr 6) HNO₂\n"
+	"Запишите номера выбранных ответов.\n"
+	"\n"
+	"[11] Выберите два исходных вещества, взаимодействию которых соответствует уравнение два\n"
+	"1) Cu 2) Fe 3) Zn 4) Mg 5) Ba 6) Al\n"
+	"Запишите номера выбранных ответов.\n"
+)
+
+TASK32_KEY_TEXT = "1) BaO\n2) Ba\n3) BaCl₂\n4) H₃PO₄\n5) BaSO₄\n6) Na₃PO₄"
+
+
+def make_opened_pdf(pages_text, width=595.0, height=842.0):
+	pages = []
+	for text in pages_text:
+		page = Mock()
+		page.extract_text.return_value = text
+		page.width, page.height = width, height
+		pages.append(page)
+	pdf = Mock()
+	pdf.pages = pages
+	opened = MagicMock()
+	opened.__enter__.return_value = pdf
+	return opened
+
+
+def stream_response(*deltas):
+	response = Mock()
+	response.iter_lines.return_value = iter(
+		[b"data: " + json.dumps({"choices": [{"delta": {"content": part}}]}).encode() for part in deltas]
+		+ [b"data: " + json.dumps({"choices": [{"delta": {}, "finish_reason": "stop"}]}).encode(), b"data: [DONE]"]
+	)
+	return response
+
+
+class VisionDigitizeTestCase(unittest.TestCase):
+	def setUp(self):
+		self.cache = {}
+
+		def zai_setting(name, config_name=None, default=""):
+			return {"ZAI_VISION_MODEL": "glm-5.3-flash", "LMS_PDF_AI_CONCURRENCY": "2"}.get(name, default)
+
+		patches = [
+			patch.object(importer, "_", side_effect=lambda text: text),
+			patch.object(importer, "_ai_settings", return_value={"api_key": "test-key", "model": "glm-5.3", "url": "https://zai.example/chat/completions"}),
+			patch.object(importer, "_zai_setting", side_effect=zai_setting),
+			patch.object(importer, "_checkpoint_get", side_effect=lambda prefix, suffix: self.cache.get((prefix, suffix))),
+			patch.object(importer, "_checkpoint_set", side_effect=lambda prefix, suffix, value: self.cache.__setitem__((prefix, suffix), value)),
+			patch("lms.lms.pdf_trainer_jobs.report_progress"),
+		]
+		for item in patches:
+			item.start()
+			self.addCleanup(item.stop)
+
+	def test_text_layer_pdf_skips_vision_digitization(self):
+		opened = make_opened_pdf(["Real printed task text with enough characters to pass the threshold. " * 3])
+		with patch.object(importer.pdfplumber, "open", return_value=opened), patch.object(importer, "_digitize_pdf_pages") as digitize:
+			pages = importer._pdf_pages_as_text(Path("trainer.pdf"))
+		digitize.assert_not_called()
+		self.assertIn("Real printed task text", pages[0])
+
+	def test_emoji_only_text_layer_triggers_digitization(self):
+		opened = make_opened_pdf(["🐾", "🐾"])
+		with patch.object(importer.pdfplumber, "open", return_value=opened), patch.object(importer, "_digitize_pdf_pages", return_value=["[1] digitized", "[2] key"]) as digitize:
+			pages = importer._pdf_pages_as_text(Path("trainer.pdf"), "prefix")
+		digitize.assert_called_once()
+		self.assertIn("[1] digitized", pages[0])
+		self.assertIn("--- PDF page 2 ---", pages[1])
+		self.assertIn("[2] key", pages[1])
+
+	def test_digitize_uses_vision_model_and_checkpoints_the_result(self):
+		opened = make_opened_pdf(["", ""])
+		with patch.object(importer.pdfplumber, "open", return_value=opened), \
+			patch.object(importer, "_page_image_data_url", side_effect=lambda pdf, index: f"data:image/png;base64,page{index}"), \
+			patch.object(importer, "_vision_page_text", side_effect=[LONG_TASK_TEXT, LONG_KEY_TEXT]) as vision:
+			pages = importer._digitize_pdf_pages(Path("scan.pdf"), ["", ""], "prefix")
+		self.assertEqual(pages, [LONG_TASK_TEXT, LONG_KEY_TEXT])
+		self.assertEqual(vision.call_count, 2)
+		self.assertEqual(vision.call_args.args[3]["model"], "glm-5.3-flash")
+		self.assertEqual(self.cache[("prefix", "digitized:glm-5.3-flash")], [LONG_TASK_TEXT, LONG_KEY_TEXT])
+
+	def test_digitize_resume_reuses_checkpoint_without_new_vision_calls(self):
+		self.cache[("prefix", "digitized:glm-5.3-flash")] = [LONG_TASK_TEXT, LONG_KEY_TEXT]
+		with patch.object(importer, "_vision_page_text", side_effect=AssertionError("vision must not run again")):
+			pages = importer._digitize_pdf_pages(Path("scan.pdf"), ["", ""], "prefix")
+		self.assertEqual(pages, [LONG_TASK_TEXT, LONG_KEY_TEXT])
+
+	def test_unusable_digitization_names_the_cause(self):
+		opened = make_opened_pdf(["", ""])
+		with patch.object(importer.pdfplumber, "open", return_value=opened), \
+			patch.object(importer, "_page_image_data_url", return_value="data:image/png;base64,AAA"), \
+			patch.object(importer, "_vision_page_text", return_value=""):
+			with self.assertRaises(frappe.ValidationError) as raised:
+				importer._digitize_pdf_pages(Path("scan.pdf"), ["", ""], "prefix")
+		message = str(raised.exception)
+		self.assertIn("no selectable text layer", message)
+		self.assertIn("OCR failed", message)
+		self.assertNotIn("invalid PDF page plan", message)
+
+	def test_vision_outage_is_wrapped_with_the_no_text_layer_cause(self):
+		opened = make_opened_pdf(["", ""])
+		with patch.object(importer.pdfplumber, "open", return_value=opened), \
+			patch.object(importer, "_page_image_data_url", return_value="data:image/png;base64,AAA"), \
+			patch.object(importer, "_vision_page_text", side_effect=importer.AIUnavailable("provider 500")):
+			with self.assertRaises(importer.AIUnavailable) as raised:
+				importer._digitize_pdf_pages(Path("scan.pdf"), ["", ""], "prefix")
+		message = str(raised.exception)
+		self.assertIn("no selectable text layer", message)
+		self.assertIn("vision", message)
+
+	def test_digitized_plan_failure_never_reports_the_bare_page_plan_error(self):
+		opened = make_opened_pdf(["🐾"])
+		with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
+			handle.write(b"%PDF-fake")
+			handle.flush()
+			with patch.object(importer.pdfplumber, "open", return_value=opened), \
+				patch.object(importer, "_checkpoint_prefix", return_value="prefix"), \
+				patch.object(importer, "_page_image_data_url", return_value="data:image/png;base64,AAA"), \
+				patch.object(importer, "_vision_page_text", return_value=LONG_TASK_TEXT), \
+				patch.object(importer, "_ai_json", return_value={"title": "Broken", "total_tasks": 0, "tasks": []}):
+				with self.assertRaises(frappe.ValidationError) as raised:
+					importer._extract_trainer_with_ai(Path(handle.name), Path(tempfile.gettempdir()), candidate={"parsed_ok": False})
+		message = str(raised.exception)
+		self.assertIn("digitized", message)
+		self.assertIn("no text layer", message)
+		self.assertNotIn("invalid PDF page plan", message)
+
+	def test_digitized_success_flows_through_planning_and_extraction(self):
+		opened = make_opened_pdf(["🐾", "🐾"])
+		plan = {"title": "Trainer", "total_tasks": 1, "tasks": [{"number": 1, "question_pages": [1], "context_pages": [], "answer_pages": [2]}]}
+		extraction = {"tasks": [{"number": 1, "reviewed": True, "question": "Question", "answer": "2", "source_regions": [{"page": 1, "start": "[1] First words of task", "end": "Last words of task", "kind": "task"}]}]}
+		with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
+			handle.write(b"%PDF-fake")
+			handle.flush()
+			with patch.object(importer.pdfplumber, "open", return_value=opened), \
+				patch.object(importer, "_checkpoint_prefix", return_value="prefix"), \
+				patch.object(importer, "_page_image_data_url", return_value="data:image/png;base64,AAA"), \
+				patch.object(importer, "_vision_page_text", side_effect=[LONG_TASK_TEXT, LONG_KEY_TEXT]), \
+				patch.object(importer, "_verified_raster_answer", return_value=None), \
+				patch.object(importer, "_resolve_extracted_task", side_effect=lambda task, path: task), \
+				patch.object(importer, "_ai_json", side_effect=[plan, extraction]) as ai:
+				title, tasks = importer._extract_trainer_with_ai(Path(handle.name), Path(tempfile.gettempdir()), candidate={"parsed_ok": False})
+		self.assertEqual(title, "Trainer")
+		self.assertEqual(tasks[0]["answer"], "2")
+		self.assertIn("transcribed from scanned page images", ai.call_args_list[0].args[0])
+		self.assertIn(LONG_TASK_TEXT, ai.call_args_list[1].args[1])
+		bound = tasks[0]["source_regions"][0]
+		self.assertEqual(bound["bbox"], (0.0, 0.0, 595.0, 842.0))
+		self.assertEqual(bound["page_width"], 595.0)
+		self.assertTrue(bound["text"].startswith("[1]"))
+
+	def test_vision_payload_sends_image_parts_without_json_mode(self):
+		settings = {"api_key": "test-key", "model": "glm-5.3-flash", "url": "https://zai.example/chat/completions"}
+		messages = [{"role": "user", "content": [
+			{"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}},
+			{"type": "text", "text": "Transcribe"},
+		]}]
+		with patch.object(importer.requests, "post", return_value=stream_response("transcription")) as request:
+			text = importer._ai_chat(messages, settings, vision=True)
+		self.assertEqual(text, "transcription")
+		payload = request.call_args.kwargs["json"]
+		self.assertEqual(payload["model"], "glm-5.3-flash")
+		self.assertIs(payload["messages"], messages)
+		self.assertNotIn("response_format", payload)
+		self.assertNotIn("thinking", payload)
+		self.assertNotIn("reasoning_effort", payload)
+
+	def test_text_payload_keeps_the_audited_json_shape(self):
+		settings = {"api_key": "test-key", "model": "glm-5.3", "url": "https://zai.example/chat/completions"}
+		messages = [{"role": "system", "content": "system prompt"}, {"role": "user", "content": "user content"}]
+		with patch.object(importer.requests, "post", return_value=stream_response("{}")) as request:
+			importer._ai_chat(messages, settings)
+		payload = request.call_args.kwargs["json"]
+		self.assertEqual(payload["model"], "glm-5.3")
+		self.assertEqual(payload["response_format"], {"type": "json_object"})
+		self.assertEqual(payload["thinking"], {"type": "enabled"})
+		self.assertEqual(payload["reasoning_effort"], "max")
+		self.assertEqual(payload["messages"], messages)
+		self.assertTrue(request.call_args.kwargs["stream"])
+
+	def test_digitized_anchor_slice_locates_in_order_slices(self):
+		text = "[1] First task words here\nMore lines follow\n[2] Second task begins now\nEnd words close it"
+		self.assertEqual(importer._digitized_anchor_slice(text, "First task words", "More lines"), "First task words here\nMore lines")
+		self.assertIsNone(importer._digitized_anchor_slice(text, "Missing anchor", "End words"))
+		self.assertIsNone(importer._digitized_anchor_slice(text, "", "End words"))
+		self.assertEqual(importer._digitized_anchor_slice(text, "Second task begins", "Second task begins"), "Second task begins")
+
+	def test_anchor_slice_survives_markdown_marker_decoration(self):
+		slice_text = importer._digitized_anchor_slice(
+			MARKDOWN_DIGITIZED_PAGE,
+			"[10] Выберите два исходных вещества",
+			"Запишите номера выбранных ответов.",
+		)
+		self.assertIsNotNone(slice_text)
+		self.assertIn("Выберите два исходных вещества", slice_text)
+		# The slice keeps the original transcription characters for the safeguard.
+		self.assertTrue(slice_text.startswith("10]"))
+		importer._validate_printed_task_number({"number": 10, "source_number": 10}, {"kind": "task", "text": slice_text})
+		with self.assertRaises(frappe.ValidationError):
+			importer._validate_printed_task_number({"number": 11, "source_number": 11}, {"kind": "task", "text": slice_text})
+
+	def test_anchor_slice_tolerates_decorated_option_and_closer(self):
+		slice_text = importer._digitized_anchor_slice(
+			MARKDOWN_DIGITIZED_PAGE,
+			"[11] Выберите два исходных вещества",
+			"6) Al Запишите номера выбранных ответов.",
+		)
+		self.assertIsNotNone(slice_text)
+		self.assertIn("**Al**", slice_text)
+
+	def test_anchor_slice_normalises_letter_case_and_yo(self):
+		text = "[3] Выберите два исходных вещества, сокращённое уравнение\n6) стирол"
+		slice_text = importer._digitized_anchor_slice(text, "[3] ВЫБЕРИТЕ ДВА исходных вещества", "6) стирол")
+		self.assertIsNotNone(slice_text)
+		self.assertIn("сокращённое", slice_text)
+
+	def test_anchor_slice_rejects_reordered_or_absent_anchor_words(self):
+		# Strict safety: tolerance never invents locations for absent fragments
+		# or accepts words quoted out of their printed order.
+		self.assertIsNone(importer._digitized_anchor_slice(
+			MARKDOWN_DIGITIZED_PAGE, "[12] Выберите два исходных вещества", "Запишите номера выбранных ответов."))
+		self.assertIsNone(importer._digitized_anchor_slice(
+			MARKDOWN_DIGITIZED_PAGE, "вещества исходных два Выберите [10]", "Запишите номера выбранных ответов."))
+		self.assertIsNone(importer._digitized_anchor_slice(
+			MARKDOWN_DIGITIZED_PAGE, "Запишите номера выбранных ответов.", "[10] Выберите два исходных вещества"))
+
+	def test_bind_digitized_regions_locates_markdown_decorated_anchors(self):
+		opened = make_opened_pdf(["🐾"])
+		task = {"number": 10, "source_regions": [
+			{"page_number": 1, "start": "[10] Выберите два исходных вещества", "end": "Запишите номера выбранных ответов.", "kind": "task"},
+		]}
+		with patch.object(importer.pdfplumber, "open", return_value=opened):
+			importer._bind_digitized_regions(task, Path("scan.pdf"), {1: MARKDOWN_DIGITIZED_PAGE})
+		bound = task["source_regions"][0]
+		# Per-task vertical band: from the task's own marker line down to the
+		# next printed marker, not the whole page.
+		line_height = 842.0 / 21
+		self.assertEqual(bound["bbox"][0], 0.0)
+		self.assertEqual(bound["bbox"][2], 595.0)
+		self.assertAlmostEqual(bound["bbox"][1], 2 * line_height - 12.0, places=4)
+		self.assertAlmostEqual(bound["bbox"][3], 12 * line_height + 12.0, places=4)
+		self.assertTrue(bound["text"].startswith("10]"))
+		importer._validate_printed_task_number({"number": 10, "source_number": 10}, bound)
+
+	def test_single_line_digitized_page_falls_back_to_the_whole_page(self):
+		opened = make_opened_pdf(["🐾"])
+		task = {"number": 1, "source_regions": [{"page_number": 1, "start": "[1] First words of task", "end": "Last words of task", "kind": "task"}]}
+		with patch.object(importer.pdfplumber, "open", return_value=opened):
+			importer._bind_digitized_regions(task, Path("scan.pdf"), {1: LONG_TASK_TEXT})
+		bound = task["source_regions"][0]
+		# A one-line transcription carries no line structure to distribute, so
+		# the whole page stays the crop instead of failing the import.
+		self.assertEqual(bound["bbox"], (0.0, 0.0, 595.0, 842.0))
+		self.assertEqual(bound["page_height"], 842.0)
+		self.assertTrue(bound["text"].startswith("[1]"))
+		self.assertTrue(bound["text"].endswith("Last words of task"))
+		# The printed-number safeguard still applies to digitized slices.
+		importer._validate_printed_task_number({"number": 1, "source_number": 1}, bound)
+		with self.assertRaises(frappe.ValidationError):
+			importer._validate_printed_task_number({"number": 2, "source_number": 2}, bound)
+
+	def test_bind_digitized_regions_crops_per_task_vertical_bands(self):
+		opened = make_opened_pdf(["🐾"])
+		line_height = 842.0 / 29
+		bands = {}
+		for number in (10, 11, 12):
+			task = {"number": number, "source_regions": [{
+				"page_number": 1,
+				"start": f"[{number}] Выберите два исходных вещества",
+				"end": "Запишите номера выбранных ответов.",
+				"kind": "task",
+			}]}
+			with patch.object(importer.pdfplumber, "open", return_value=opened):
+				importer._bind_digitized_regions(task, Path("scan.pdf"), {1: MERGED_THREE_TASK_PAGE})
+			bands[number] = task["source_regions"][0]
+			self.assertIn(f"уравнение {'один два три'.split()[number - 10]}", bands[number]["text"])
+		# Each fragment is a horizontal slice of the page bounded by its own
+		# and the next printed marker — never the full page (tester §9).
+		self.assertEqual(bands[10]["bbox"][0], 0.0)
+		self.assertEqual(bands[10]["bbox"][2], 595.0)
+		self.assertAlmostEqual(bands[10]["bbox"][1], 0.0, places=4)
+		self.assertAlmostEqual(bands[10]["bbox"][3], 10 * line_height + 12.0, places=4)
+		self.assertAlmostEqual(bands[11]["bbox"][1], 10 * line_height - 12.0, places=4)
+		self.assertAlmostEqual(bands[11]["bbox"][3], 20 * line_height + 12.0, places=4)
+		self.assertAlmostEqual(bands[12]["bbox"][1], 20 * line_height - 12.0, places=4)
+		self.assertEqual(bands[12]["bbox"][3], 842.0)
+		self.assertLess(bands[10]["bbox"][3], bands[11]["bbox"][3])
+		self.assertLess(bands[11]["bbox"][3], 842.0)
+
+	def test_bind_digitized_regions_gives_context_regions_their_own_band(self):
+		opened = make_opened_pdf(["🐾"])
+		task = {"number": 10, "source_regions": [{
+			"page_number": 1, "start": "Вопрос №14 ОГЭ", "end": "Вопрос №14 ОГЭ", "kind": "context",
+		}]}
+		with patch.object(importer.pdfplumber, "open", return_value=opened):
+			importer._bind_digitized_regions(task, Path("scan.pdf"), {1: MARKDOWN_DIGITIZED_PAGE})
+		bound = task["source_regions"][0]
+		# The shared header ends at the first printed task marker line.
+		line_height = 842.0 / 21
+		self.assertAlmostEqual(bound["bbox"][1], 0.0, places=4)
+		self.assertAlmostEqual(bound["bbox"][3], 2 * line_height + 12.0, places=4)
+		self.assertIn("Вопрос №14 ОГЭ", bound["text"])
+
+	def test_bind_digitized_regions_leaves_text_pages_and_bbox_regions_alone(self):
+		opened = make_opened_pdf(["🐾", "text page"])
+		with_bbox = {"page_number": 1, "bbox": [1, 2, 3, 4], "kind": "task"}
+		text_page = {"page_number": 2, "start": "anchor", "end": "anchor", "kind": "task"}
+		task = {"source_regions": [with_bbox, text_page]}
+		with patch.object(importer.pdfplumber, "open", return_value=opened):
+			importer._bind_digitized_regions(task, Path("scan.pdf"), {1: LONG_TASK_TEXT})
+		self.assertIs(task["source_regions"][0], with_bbox)
+		self.assertEqual(task["source_regions"][1], text_page)
+
+	def test_bind_digitized_regions_rejects_unlocatable_anchors(self):
+		opened = make_opened_pdf(["🐾"])
+		task = {"source_regions": [{"page_number": 1, "start": "not present", "end": "not present", "kind": "task"}]}
+		with patch.object(importer.pdfplumber, "open", return_value=opened):
+			with self.assertRaises(frappe.ValidationError):
+				importer._bind_digitized_regions(task, Path("scan.pdf"), {1: LONG_TASK_TEXT})
+
+	def test_anchor_slice_ends_at_the_tasks_own_shared_closer(self):
+		# The old slice ran to the LAST shared closer and swallowed tasks
+		# 11–12 into task 10 («3 задания в одном»).
+		slice_text = importer._digitized_anchor_slice(
+			MERGED_THREE_TASK_PAGE,
+			"[10] Выберите два исходных вещества",
+			"Запишите номера выбранных ответов.",
+			single_task=True,
+		)
+		self.assertIsNotNone(slice_text)
+		self.assertIn("уравнение один", slice_text)
+		self.assertNotIn("уравнение два", slice_text)
+		self.assertNotIn("уравнение три", slice_text)
+		self.assertNotIn("[11]", slice_text)
+		self.assertNotIn("[12]", slice_text)
+
+	def test_task_slice_rejects_a_span_covering_three_printed_tasks(self):
+		self.assertIsNone(importer._digitized_anchor_slice(
+			MERGED_THREE_TASK_PAGE,
+			"[10] Выберите два исходных вещества",
+			"уравнение три",
+			single_task=True,
+		))
+		# Without the single-task constraint the merged span exists, which is
+		# exactly why the caller must pass the constraint for task regions.
+		merged = importer._digitized_anchor_slice(
+			MERGED_THREE_TASK_PAGE,
+			"[10] Выберите два исходных вещества",
+			"уравнение три",
+		)
+		self.assertIsNotNone(merged)
+		self.assertIn("[11]", merged)
+
+	def test_fallback_span_cannot_cover_two_printed_task_numbers(self):
+		key_text = "Ключ: [10] 2 [11] 3 [12] 1"
+		self.assertEqual(importer._digitized_anchor_spans(key_text, "10 2 11 3 12"), [])
+		still_bound = importer._digitized_anchor_spans(key_text, "2 11 3")
+		self.assertEqual(len(still_bound), 1)
+
+	def test_validate_task_split_rejects_a_merged_task(self):
+		merged_text = importer._digitized_anchor_slice(
+			MERGED_THREE_TASK_PAGE, "[10] Выберите два исходных вещества", "уравнение три",
+		)
+		merged_task = {
+			"number": 10,
+			"question": "Выберите два исходных вещества",
+			"source_regions": [{"kind": "task", "text": merged_text}],
+		}
+		with self.assertRaises(importer.AIExtractionInvalid):
+			importer._validate_task_split(merged_task)
+		clean_task = {
+			"number": 10,
+			"question": "Выберите два исходных вещества [10]",
+			"source_regions": [{"kind": "task", "text": "10] Выберите два исходных вещества, уравнение один"}],
+		}
+		importer._validate_task_split(clean_task)
+
+	def test_task_split_conflicts_flag_shared_printed_numbers(self):
+		tasks = {
+			5: {"number": 5, "source_number": 5, "source_regions": [{"kind": "task", "text": "[5] Task five"}]},
+			6: {"number": 6, "source_number": 6, "source_regions": [{"kind": "task", "text": "Preamble with [5] again"}]},
+		}
+		self.assertEqual(importer._task_split_conflicts(tasks, {}), {5, 6})
+		compiled = {"tasks": [{"number": 5, "source_number": 7}, {"number": 6, "source_number": 7}]}
+		repeated = {
+			5: {"number": 5, "source_number": 7, "source_regions": [{"kind": "task", "text": "[7] First copy"}]},
+			6: {"number": 6, "source_number": 7, "source_regions": [{"kind": "task", "text": "[7] Second copy"}]},
+		}
+		self.assertEqual(importer._task_split_conflicts(repeated, compiled), set())
+
+	def test_digitized_merge_is_recovered_by_re_extraction(self):
+		opened = make_opened_pdf(["🐾"])
+		entry = {"number": 10, "question_pages": [1], "context_pages": [], "answer_pages": [1]}
+		pages = ["--- PDF page 1 ---\n" + MERGED_THREE_TASK_PAGE]
+		merged = {"tasks": [{"number": 10, "reviewed": True, "question": "Выберите два исходных вещества", "answer": "15",
+			"source_regions": [{"page": 1, "start": "[10] Выберите два исходных вещества", "end": "уравнение три", "kind": "task"}]}]}
+		repaired = {"tasks": [{"number": 10, "reviewed": True, "question": "Выберите два исходных вещества", "answer": "15",
+			"source_regions": [{"page": 1, "start": "[10] Выберите два исходных вещества", "end": "Запишите номера выбранных ответов.", "kind": "task"}]}]}
+		with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
+			handle.write(b"%PDF-fake")
+			handle.flush()
+			with patch.object(importer.pdfplumber, "open", return_value=opened), \
+				patch.object(importer, "_verified_raster_answer", return_value=None), \
+				patch.object(importer, "_ai_json", side_effect=[merged, repaired]) as ai:
+				_title, tasks = importer._extract_page_plan_tasks(
+					Path(handle.name), pages, [entry], {}, {}, "", "prefix", {"title": "Trainer"},
+					{1: MERGED_THREE_TASK_PAGE})
+		self.assertEqual(len(tasks), 1)
+		text = tasks[0]["source_regions"][0]["text"]
+		self.assertIn("уравнение один", text)
+		self.assertNotIn("уравнение два", text)
+		self.assertNotIn("уравнение три", text)
+		self.assertEqual(ai.call_count, 2)
+		self.assertIn("Repair ONLY this task", ai.call_args_list[1].args[0])
+		# The same digits-only key is normalised into Choices on the repaired task.
+		self.assertEqual(tasks[0]["correct_options"], [1, 5])
+		self.assertEqual(len(tasks[0]["options"]), 6)
+
+	def test_binding_failure_redigitizes_the_page_once(self):
+		opened = make_opened_pdf(["🐾"])
+		entry = {"number": 3, "question_pages": [1], "context_pages": [], "answer_pages": [1]}
+		pages = ["--- PDF page 1 ---\nOld transcription without the anchors"]
+		bad = {"tasks": [{"number": 3, "reviewed": True, "question": "Question", "answer": "12",
+			"source_regions": [{"page": 1, "start": "not present anywhere", "end": "still not present", "kind": "task"}]}]}
+		good = {"tasks": [{"number": 3, "reviewed": True, "question": "Question three", "answer": "12",
+			"source_regions": [{"page": 1, "start": "[3] Fresh transcription", "end": "Fresh closer", "kind": "task"}]}]}
+		fresh = "[3] Fresh transcription of task three\n1) A\n2) B\nFresh closer"
+		digitized_pages = {1: "Old transcription without the anchors"}
+		with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
+			handle.write(b"%PDF-fake")
+			handle.flush()
+			with patch.object(importer.pdfplumber, "open", return_value=opened), \
+				patch.object(importer, "_verified_raster_answer", return_value=None), \
+				patch.object(importer, "_page_image_data_url", return_value="data:image/png;base64,AAA") as image, \
+				patch.object(importer, "_vision_page_text", return_value=fresh) as vision, \
+				patch.object(importer, "_ai_json", side_effect=[bad, bad, good]) as ai:
+				_title, tasks = importer._extract_page_plan_tasks(
+					Path(handle.name), pages, [entry], {}, {}, "", "prefix", {"title": "Trainer"}, digitized_pages)
+		self.assertEqual(len(tasks), 1)
+		self.assertTrue(tasks[0]["source_regions"][0]["text"].startswith("[3] Fresh"))
+		self.assertEqual(vision.call_count, 1)
+		self.assertEqual(image.call_count, 1)
+		self.assertEqual(ai.call_count, 3)
+		self.assertIn("re-digitized", ai.call_args_list[2].args[0])
+		self.assertIn("Fresh transcription", pages[0])
+		self.assertEqual(tasks[0]["correct_options"], [1, 2])
+
+	def test_digit_key_normalisation_maps_task32_key_onto_printed_options(self):
+		task = {"number": 32, "question": "Выберите два исходных вещества, которые реагируют с Ba(OH)₂",
+			"answer": "36", "options": [], "correct_options": [],
+			"source_regions": [{"kind": "task", "text": "[32] Выберите два исходных вещества\n" + TASK32_KEY_TEXT}]}
+		self.assertTrue(importer._normalize_digit_key_choices(task))
+		self.assertEqual(task["options"][0], "1) BaO")
+		self.assertEqual(task["options"][2], "3) BaCl₂")
+		self.assertEqual(task["options"][5], "6) Na₃PO₄")
+		self.assertEqual(task["correct_options"], [3, 6])
+		ordered = {"number": 1, "question": "Расположите выбранные элементы в порядке увеличения", "answer": "432",
+			"options": [], "correct_options": [], "source_regions": [{"kind": "task", "text": "1) Si 2) K 3) Ca 4) Zn 5) Be"}]}
+		self.assertFalse(importer._normalize_digit_key_choices(ordered))
+		self.assertEqual(ordered["answer"], "432")
+		self.assertEqual(ordered["options"], [])
+		single_digit = {"number": 2, "question": "Question", "answer": "3", "options": [], "correct_options": [],
+			"source_regions": [{"kind": "task", "text": TASK32_KEY_TEXT}]}
+		self.assertFalse(importer._normalize_digit_key_choices(single_digit))
+		repeated_digit = {"number": 4, "question": "Question", "answer": "33", "options": [], "correct_options": [],
+			"source_regions": [{"kind": "task", "text": TASK32_KEY_TEXT}]}
+		self.assertFalse(importer._normalize_digit_key_choices(repeated_digit))
+		unmappable = {"number": 5, "question": "Question", "answer": "39", "options": [], "correct_options": [],
+			"source_regions": [{"kind": "task", "text": TASK32_KEY_TEXT}]}
+		self.assertFalse(importer._normalize_digit_key_choices(unmappable))
+		self.assertTrue(importer._digit_key_unmappable(unmappable))
+
+	def test_bind_digitized_regions_distinguishes_template_twin_pair_12_13(self):
+		# Round-3 build blocker: tasks 12 and 13 shared chemedge-task-001278adec.png
+		# because 13's marker-less anchor matched 12's identical stem line first.
+		opened = make_opened_pdf(["🐾"] * 4)
+		digitized = {4: TEMPLATE_TWIN_PAGE_4}
+		bands = {}
+		for number, start in (
+			(12, "[12] Выберите два исходных вещества"),
+			(13, "Выберите два исходных вещества, взаимодействию"),
+		):
+			task = {"number": number, "source_number": number, "source_regions": [{
+				"page_number": 4, "start": start, "end": "Запишите номера выбранных ответов.", "kind": "task",
+			}]}
+			with patch.object(importer.pdfplumber, "open", return_value=opened):
+				importer._bind_digitized_regions(task, Path("scan.pdf"), digitized)
+			bands[number] = task["source_regions"][0]
+		self.assertNotEqual(tuple(bands[12]["bbox"]), tuple(bands[13]["bbox"]))
+		# Bands stay distinct with their own content even though the crop
+		# padding around each task's own lines overlaps by design.
+		self.assertLess(bands[12]["bbox"][1], bands[13]["bbox"][1])
+		self.assertLess(bands[12]["bbox"][3], bands[13]["bbox"][3])
+		self.assertIn("CaCl₂", bands[12]["text"])
+		self.assertNotIn("CaCl₂", bands[13]["text"])
+		self.assertIn("BaI₂", bands[13]["text"])
+		self.assertNotIn("[12]", bands[13]["text"])
+		self.assertEqual(
+			importer._digitized_band_conflicts({12: bands[12], 13: bands[13]}, {}), set())
+
+	def test_bind_digitized_regions_distinguishes_template_twin_pair_32_35(self):
+		# Round-3 build blocker: tasks 32 and 35 shared chemedge-task-0032fa4c31.png;
+		# 35's marker-less anchor matched 32's stem line 33 lines above its own.
+		opened = make_opened_pdf(["🐾"] * 9)
+		digitized = {9: TEMPLATE_TWIN_PAGE_9}
+		bands = {}
+		for number, start in (
+			(32, "[32] Выберите два исходных вещества"),
+			(35, "Выберите два исходных вещества, взаимодействию которых соответствует сокращённое"),
+		):
+			task = {"number": number, "source_number": number, "source_regions": [{
+				"page_number": 9, "start": start,
+				"end": "Запишите номера выбранных ответов", "kind": "task",
+			}]}
+			with patch.object(importer.pdfplumber, "open", return_value=opened):
+				importer._bind_digitized_regions(task, Path("scan.pdf"), digitized)
+			bands[number] = task["source_regions"][0]
+		self.assertNotEqual(tuple(bands[32]["bbox"]), tuple(bands[35]["bbox"]))
+		self.assertLess(bands[32]["bbox"][1], bands[35]["bbox"][1])
+		self.assertLess(bands[32]["bbox"][3], bands[35]["bbox"][3])
+		self.assertIn("BaCl₂", bands[32]["text"])
+		self.assertNotIn("BaCl₂", bands[35]["text"])
+		self.assertIn("Fe(NO₃)₂", bands[35]["text"])
+		self.assertEqual(
+			importer._digitized_band_conflicts({32: bands[32], 35: bands[35]}, {}), set())
+
+	def test_task_anchor_outside_its_own_territory_fails_closed(self):
+		# The anchor exists on the page but only inside task 10's lines: binding
+		# it to task 11 would display 10's fragment under question 11, so the
+		# task is re-extracted instead of silently mis-bound.
+		opened = make_opened_pdf(["🐾"])
+		task = {"number": 11, "source_number": 11, "source_regions": [{
+			"page_number": 1, "start": "уравнение один", "end": "Запишите номера выбранных ответов.", "kind": "task",
+		}]}
+		with patch.object(importer.pdfplumber, "open", return_value=opened):
+			with self.assertRaises(frappe.ValidationError):
+				importer._bind_digitized_regions(task, Path("scan.pdf"), {1: MARKER_PRESENT_TWIN_PAGE})
+
+	def test_digitized_band_conflicts_flag_shared_crop_bands(self):
+		shared_bbox = (0.0, 24.0, 595.32, 244.0)
+		tasks = {
+			10: {"number": 10, "source_number": 10, "source_regions": [
+				{"kind": "context", "page_number": 1, "bbox": shared_bbox},
+				{"kind": "task", "page_number": 1, "bbox": shared_bbox},
+			]},
+			11: {"number": 11, "source_number": 11, "source_regions": [
+				{"kind": "task", "page_number": 1, "bbox": shared_bbox},
+			]},
+		}
+		self.assertEqual(importer._digitized_band_conflicts(tasks, {}), {10, 11})
+		distinct = {
+			10: tasks[10],
+			11: {"number": 11, "source_number": 11, "source_regions": [
+				{"kind": "task", "page_number": 1, "bbox": (0.0, 244.0, 595.32, 440.0)},
+			]},
+		}
+		self.assertEqual(importer._digitized_band_conflicts(distinct, {}), set())
+		# Context bands are legitimately shared between tasks and never conflict.
+		context_only = {
+			10: {"number": 10, "source_regions": [{"kind": "context", "page_number": 1, "bbox": shared_bbox}]},
+			11: {"number": 11, "source_regions": [{"kind": "context", "page_number": 1, "bbox": shared_bbox}]},
+		}
+		self.assertEqual(importer._digitized_band_conflicts(context_only, {}), set())
+		# Repeats the recognised parser declared stay exempt.
+		compiled = {"tasks": [{"number": 10, "source_number": 7}, {"number": 11, "source_number": 7}]}
+		repeated = {
+			10: {"number": 10, "source_number": 7, "source_regions": [
+				{"kind": "task", "page_number": 1, "bbox": shared_bbox},
+			]},
+			11: {"number": 11, "source_number": 7, "source_regions": [
+				{"kind": "task", "page_number": 1, "bbox": shared_bbox},
+			]},
+		}
+		self.assertEqual(importer._digitized_band_conflicts(repeated, compiled), set())
+
+	def test_shared_band_is_recovered_by_page_redigitization(self):
+		# A dropped marker leaves no territory to pin task 11's anchor to, so
+		# both twins bind one band; the repair re-digitizes the page once and
+		# re-extracts both tasks onto their own bands.
+		opened = make_opened_pdf(["🐾"])
+		entries = [
+			{"number": 10, "question_pages": [1], "context_pages": [], "answer_pages": [1]},
+			{"number": 11, "question_pages": [1], "context_pages": [], "answer_pages": [1]},
+		]
+		pages = ["--- PDF page 1 ---\n" + MARKER_DROPPED_TWIN_PAGE]
+		extraction = [
+			{"tasks": [{"number": 10, "reviewed": True, "question": "Question ten", "answer": "15",
+				"source_regions": [{"page": 1, "start": "[10] Выберите два исходных вещества", "end": "Запишите номера выбранных ответов.", "kind": "task"}]}]},
+			{"tasks": [{"number": 11, "reviewed": True, "question": "Question eleven", "answer": "25",
+				"source_regions": [{"page": 1, "start": "Выберите два исходных вещества, взаимодействию", "end": "Запишите номера выбранных ответов.", "kind": "task"}]}]},
+		]
+		with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
+			handle.write(b"%PDF-fake")
+			handle.flush()
+			with patch.object(importer.pdfplumber, "open", return_value=opened), \
+				patch.object(importer, "_verified_raster_answer", return_value=None), \
+				patch.object(importer, "_page_image_data_url", return_value="data:image/png;base64,AAA"), \
+				patch.object(importer, "_vision_page_text", return_value=MARKER_PRESENT_TWIN_PAGE) as vision, \
+				patch.object(importer, "_ai_json", side_effect=extraction * 2) as ai:
+				_title, tasks = importer._extract_page_plan_tasks(
+					Path(handle.name), pages, entries, {}, {}, "", "prefix", {"title": "Trainer"},
+					{1: MARKER_DROPPED_TWIN_PAGE})
+		self.assertEqual(ai.call_count, 4)
+		self.assertEqual(vision.call_count, 1)
+		self.assertIn("re-digitized", ai.call_args_list[2].args[0])
+		by_number = {task["number"]: task for task in tasks}
+		band10 = by_number[10]["source_regions"][0]["bbox"]
+		band11 = by_number[11]["source_regions"][0]["bbox"]
+		self.assertNotEqual(tuple(band10), tuple(band11))
+		self.assertLess(band10[1], band11[1])
+		self.assertIn("уравнение один", by_number[10]["source_regions"][0]["text"])
+		self.assertIn("уравнение два", by_number[11]["source_regions"][0]["text"])
+		self.assertIn("[11]", pages[0])
+		self.assertEqual(importer._digitized_band_conflicts(by_number, {}), set())
+
+	def test_persistent_shared_band_fails_with_the_sharing_cause(self):
+		# If the re-digitized transcription still drops the marker, the import
+		# fails naming the shared fragment instead of saving identical crops.
+		opened = make_opened_pdf(["🐾"])
+		entries = [
+			{"number": 10, "question_pages": [1], "context_pages": [], "answer_pages": [1]},
+			{"number": 11, "question_pages": [1], "context_pages": [], "answer_pages": [1]},
+		]
+		pages = ["--- PDF page 1 ---\n" + MARKER_DROPPED_TWIN_PAGE]
+		extraction = [
+			{"tasks": [{"number": 10, "reviewed": True, "question": "Question ten", "answer": "15",
+				"source_regions": [{"page": 1, "start": "[10] Выберите два исходных вещества", "end": "Запишите номера выбранных ответов.", "kind": "task"}]}]},
+			{"tasks": [{"number": 11, "reviewed": True, "question": "Question eleven", "answer": "25",
+				"source_regions": [{"page": 1, "start": "Выберите два исходных вещества, взаимодействию", "end": "Запишите номера выбранных ответов.", "kind": "task"}]}]},
+		]
+		with tempfile.NamedTemporaryFile(suffix=".pdf") as handle:
+			handle.write(b"%PDF-fake")
+			handle.flush()
+			with patch.object(importer.pdfplumber, "open", return_value=opened), \
+				patch.object(importer, "_verified_raster_answer", return_value=None), \
+				patch.object(importer, "_page_image_data_url", return_value="data:image/png;base64,AAA"), \
+				patch.object(importer, "_vision_page_text", return_value=MARKER_DROPPED_TWIN_PAGE), \
+				patch.object(importer, "_ai_json", side_effect=extraction * 2) as ai:
+				with self.assertRaises(importer.AIExtractionInvalid) as raised:
+					importer._extract_page_plan_tasks(
+						Path(handle.name), pages, entries, {}, {}, "", "prefix", {"title": "Trainer"},
+						{1: MARKER_DROPPED_TWIN_PAGE})
+		self.assertIn("one PDF fragment", str(raised.exception))
+		self.assertEqual(ai.call_count, 4)
+
+	def test_create_ai_task_crops_rejects_identical_fragment_bytes(self):
+		# Whatever produced them, byte-identical crops for two different
+		# printed tasks mean one question shows the other's fragment; the
+		# crop stage fails closed instead of storing shared images.
+		opened = make_opened_pdf(["🐾"])
+		region = {"page_number": 1, "bbox": (0.0, 0.0, 595.0, 400.0), "page_width": 595.0,
+			"page_height": 842.0, "kind": "task", "text": ""}
+		tasks = [
+			{"number": 10, "source_number": 10, "source_regions": [dict(region)]},
+			{"number": 11, "source_number": 11, "source_regions": [dict(region)]},
+		]
+
+		class SameByteImage:
+			def save(self, path, **kwargs):
+				path.write_bytes(b"identical-crop-bytes")
+
+			def close(self):
+				pass
+
+		with tempfile.TemporaryDirectory() as work:
+			with patch.object(importer.pdfplumber, "open", return_value=opened), \
+				patch.object(importer, "compose_source_regions", return_value=SameByteImage()):
+				with self.assertRaises(frappe.ValidationError) as raised:
+					importer._create_ai_task_crops(Path("scan.pdf"), tasks, Path(work))
+		message = str(raised.exception)
+		self.assertIn("byte-identical", message)
+		self.assertIn("[10]", message)
+		self.assertIn("[11]", message)
+		# A printed number the parser declared repeated is the same printed
+		# task twice, so identical crops for it stay legitimate.
+		repeated = [
+			{"number": 10, "source_number": 7, "source_regions": [dict(region)]},
+			{"number": 11, "source_number": 7, "source_regions": [dict(region)]},
+		]
+		with tempfile.TemporaryDirectory() as work:
+			with patch.object(importer.pdfplumber, "open", return_value=opened), \
+				patch.object(importer, "compose_source_regions", return_value=SameByteImage()):
+				crops = importer._create_ai_task_crops(Path("scan.pdf"), repeated, Path(work))
+		self.assertEqual(sorted(crops), [10, 11])
