@@ -340,7 +340,13 @@ watch(
 const itemToKey = (item) => {
 	const type = String(item.source_type || 'Lesson').toLowerCase()
 	return `${
-		type === 'quiz' ? 'quiz' : type === 'assignment' ? 'assignment' : 'lesson'
+		type === 'quiz'
+			? 'quiz'
+			: type === 'assignment'
+				? 'assignment'
+				: type === 'folder'
+					? 'folder'
+					: 'lesson'
 	}:${item.name}`
 }
 

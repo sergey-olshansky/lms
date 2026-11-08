@@ -1565,6 +1565,11 @@ def _store_folder_image(folder: frappe._dict, file_name: str, content) -> dict:
 	)
 	row.insert()
 
+	# Task #41: the folder's image set just grew -- homework cards carrying it
+	# catch up in the same request, so a card In Review with a new unchecked
+	# image is returned to the student immediately, never silently stale.
+	_recompute_folder_homework(folder.name)
+
 	return {
 		"status": "uploaded",
 		"file": {
@@ -1574,6 +1579,16 @@ def _store_folder_image(folder: frappe._dict, file_name: str, content) -> dict:
 			"file_size": stored.file_size,
 		},
 	}
+
+
+def _recompute_folder_homework(folder_name: str) -> None:
+	"""Task #41: a folder's image set just changed through the real upload and
+	delete endpoints -- bring the homework cards carrying an Open Folder row on
+	it back in step (denominators, statuses, counters, auto-review). Targeted
+	through the requirement rows; inert for folders no homework references."""
+	from lms.lms.homework_service import recompute_folder_requirements
+
+	recompute_folder_requirements(folder_name)
 
 
 @frappe.whitelist(methods=["POST"])
@@ -1594,6 +1609,35 @@ def delete_folder_image(folder: str, image: str):
 		frappe.throw(_("Image {0} not found in this folder.").format(image), frappe.DoesNotExistError)
 
 	frappe.db.delete("Folder Image Reference", row.name)
+
+	# Task #41 fix: prune the per-image completion rows crediting THIS image
+	# BEFORE the File doc goes. Every card a student worked on holds "LMS
+	# Homework Folder Image" children whose image Link points at the File, and
+	# frappe's link integrity checks those links when the File is deleted --
+	# deleting the File first turned a legitimate manage-gallery remove into
+	# HTTP 417 LinkExistsError the moment any student had opened the image
+	# (unopened images deleted fine, which is why fixture Files with no
+	# attached_to never caught it). The rows are stale by definition here: the
+	# image is leaving the folder, so its openings leave with it (criterion 6:
+	# deleted images drop from the denominator without stale checkmarks).
+	# Pruned by image across every card, cancelled included -- the File is
+	# going away, so no orphan credit may survive it anywhere.
+	frappe.db.delete("LMS Homework Folder Image", {"image": image})
+
+	remaining = frappe.get_all(
+		"Folder Image Reference", {"parent": doc.name}, ["name"], order_by="idx"
+	)
+	for position, remaining_row in enumerate(remaining, start=1):
+		frappe.db.set_value("Folder Image Reference", remaining_row.name, "idx", position)
+
+	# Task #41: the image left the folder -- it leaves every denominator too,
+	# without a stale check and without blocking completion. This runs BEFORE
+	# the File delete on purpose: the recompute re-reads the folder's current
+	# rows and each card's remaining openings, so statuses, counters and the
+	# auto-review transition settle while the File still exists -- and by the
+	# time it is deleted no Link references it anymore.
+	_recompute_folder_homework(doc.name)
+
 	if frappe.db.exists("File", image):
 		owner = frappe.db.get_value(
 			"File", image, ["attached_to_doctype", "attached_to_name"], as_dict=True
@@ -1605,12 +1649,6 @@ def delete_folder_image(folder: str, image: str):
 		):
 			# nosemgrep: lms-unjustified-ignore-permissions - folder image delete; access checked via can_modify_course
 			frappe.delete_doc("File", image, ignore_permissions=True)
-
-	remaining = frappe.get_all(
-		"Folder Image Reference", {"parent": doc.name}, ["name"], order_by="idx"
-	)
-	for position, remaining_row in enumerate(remaining, start=1):
-		frappe.db.set_value("Folder Image Reference", remaining_row.name, "idx", position)
 
 
 # Matches SETTINGS_PAGE_LENGTH in the frontend, which pages `start` by this.

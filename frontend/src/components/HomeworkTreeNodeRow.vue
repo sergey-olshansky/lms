@@ -28,6 +28,11 @@
 				:disabled="leafCount === 0"
 				:data-testid="`tree-check-${node.key}`"
 				:aria-label="node.title"
+				:aria-describedby="
+					node.type === 'folder' && !node.image_count
+						? `folder-empty-${node.key}`
+						: undefined
+				"
 				@update:model-value="
 					(value) => emit('toggle', { node, checked: value })
 				"
@@ -37,7 +42,11 @@
 				type="button"
 				class="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-start disabled:cursor-not-allowed"
 				:disabled="leafCount === 0"
-				:title="node.title"
+				:title="
+					node.type === 'folder' && !node.image_count
+						? __('The folder has no images')
+						: node.title
+				"
 				@click="emit('toggle', { node, checked: state !== 'checked' })"
 			>
 				<span class="min-w-0 flex-1 truncate text-sm text-ink-gray-9">
@@ -61,7 +70,24 @@
 				>
 					{{ __('Assignment') }}
 				</span>
+				<span
+					v-else-if="node.type === 'folder'"
+					class="shrink-0 rounded-4 bg-surface-gray-2 px-1.5 py-0.5 text-xs text-ink-gray-6"
+					:data-testid="`folder-count-${node.name}`"
+				>
+					{{ __('Images: {0}').format(String(node.image_count ?? 0)) }}
+				</span>
 			</button>
+			<!-- Task #41: an empty folder stays visible with its reason announced
+			     (the checkbox is disabled above); it becomes selectable the next
+			     time the picker builds its tree, once images exist. -->
+			<span
+				v-if="node.type === 'folder' && !node.image_count"
+				:id="`folder-empty-${node.key}`"
+				class="sr-only"
+			>
+				{{ __('The folder has no images') }}
+			</span>
 		</div>
 
 		<div v-if="node.type === 'chapter' && isExpanded">
@@ -107,6 +133,9 @@ const iconClass = computed(() => {
 	if (props.node.type === 'lesson') return 'lucide-file-text'
 	if (props.node.type === 'quiz') return 'lucide-circle-help'
 	if (props.node.type === 'assignment') return 'lucide-pencil'
+	// Task #41: an image folder leaf carries the images icon -- the plain
+	// folder stays the fallback of unknown rows, never the folder itself.
+	if (props.node.type === 'folder') return 'lucide-images'
 	return 'lucide-folder'
 })
 </script>

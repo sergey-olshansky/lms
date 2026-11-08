@@ -19,6 +19,7 @@ SOURCE_FIELDS = {
 	"Lesson": "lesson",
 	"Quiz": "quiz",
 	"Assignment": "assignment",
+	"Folder": "folder",
 }
 
 

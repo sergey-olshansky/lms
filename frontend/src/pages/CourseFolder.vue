@@ -25,6 +25,16 @@
 		class="mx-auto w-full max-w-screen-lg px-5 pb-16 pt-6"
 		data-testid="folder-page"
 	>
+		<!-- Task #41: silent per-image completion (design §2) -- a polite sr-only
+		     status, never a toast; browsing must not nag. -->
+		<span
+			class="sr-only"
+			role="status"
+			aria-live="polite"
+			data-testid="folder-credit-announcer"
+		>
+			{{ creditAnnouncement }}
+		</span>
 		<div class="mb-4 flex flex-wrap items-center justify-between gap-2">
 			<h1 class="text-2xl-semibold text-ink-gray-9" :title="folder!.title">
 				{{ folder!.title }}
@@ -72,18 +82,32 @@
 			data-testid="folder-gallery"
 		>
 			<div v-for="(image, index) in images" :key="image.name" class="group relative">
-				<img
-					:src="safeUrl(image.file_url)"
-					:alt="image.file_name"
-					class="aspect-square w-full cursor-zoom-in rounded-4 border border-outline-gray-2 object-cover"
-					loading="lazy"
-					data-testid="folder-image"
+				<button
+					type="button"
+					class="block w-full cursor-zoom-in rounded-4 text-start"
+					:aria-label="image.file_name"
+					:data-testid="`folder-image-tile-${image.name}`"
 					@click="lightboxIndex = index"
-				/>
+				>
+					<img
+						:src="safeUrl(image.file_url)"
+						:alt="image.file_name"
+						class="aspect-square w-full rounded-4 border border-outline-gray-2 object-cover"
+						loading="lazy"
+						data-testid="folder-image"
+					/>
+				</button>
 				<span
 					class="absolute start-1 top-1 rounded-3 bg-surface-gray-7/80 px-1.5 py-0.5 text-xs text-white"
 				>
 					{{ index + 1 }}
+				</span>
+				<span
+					v-if="homeworkActive && isOpened(image.name)"
+					class="absolute end-1 bottom-1 inline-flex size-5 items-center justify-center rounded-3 bg-surface-green-2/90 text-ink-green-6"
+					:data-testid="`folder-opened-${image.name}`"
+				>
+					<span class="lucide-check size-3.5" aria-hidden="true" />
 				</span>
 				<button
 					v-if="allowEdit"
@@ -213,10 +237,10 @@
 </template>
 
 <script setup lang="ts">
-import { Button, createResource, toast, usePageMeta } from 'frappe-ui'
+import { Button, call, createResource, toast, usePageMeta } from 'frappe-ui'
 import type { FrappeResourceError } from 'frappe-ui'
 import { computed, getCurrentInstance, inject, onBeforeUnmount, ref, watch } from 'vue'
-import { onBeforeRouteLeave, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import PageHeader from '@/components/Layouts/pages/PageHeader.vue'
 import { sessionStore } from '@/stores/session'
 import { resourceErrorMessage } from '@/utils/resource'
@@ -258,6 +282,7 @@ const { $dialog } = getCurrentInstance()!.appContext.config.globalProperties as 
 }
 
 const router = useRouter()
+const route = useRoute()
 const { brand } = sessionStore()
 const user = inject<SessionUser>('$user')
 
@@ -327,6 +352,80 @@ const failedCount = computed<number>(
 // Seed the gallery when the folder arrives (or the route param changes);
 // local edits afterwards keep their own state until the page is left, so an
 // in-flight upload queue is never clobbered by a background outline refresh.
+// Task #41 (Sergey #1521): the student's active homework on THIS folder.
+// Teachers and students without a matching assignment keep the gallery
+// exactly as task #39 released it -- no badges, no recording, no errors.
+// Declared BEFORE the seeding watch below: that watch runs immediately at
+// setup and already asks for the badge state.
+const homeworkActive = ref(false)
+const openedImages = ref(new Set<string>())
+const creditAnnouncement = ref('')
+const announcedCredits = new Set<string>()
+
+async function loadHomeworkState() {
+	homeworkActive.value = false
+	openedImages.value = new Set()
+	announcedCredits.clear()
+	if (!user?.data?.name || user.data.name === 'Guest' || !props.folderName) return
+	try {
+		const state = await call('lms.lms.homework_api.get_folder_homework_state', {
+			folder: props.folderName,
+		})
+		if (state?.active) {
+			homeworkActive.value = true
+			openedImages.value = new Set(state.opened || [])
+		}
+	} catch {
+		// Quiet by design: the gallery itself never depends on homework state.
+	}
+}
+
+const isOpened = (name: string) => openedImages.value.has(name)
+
+async function recordImageOpened(image: OutlineFolderImage | undefined) {
+	if (!homeworkActive.value || !image?.name) return
+	try {
+		const response = await call('lms.lms.homework_api.record_folder_image_opened', {
+			folder: props.folderName,
+			image: image.name,
+		})
+		if (!homeworkActive.value) return
+		if (!openedImages.value.has(image.name)) {
+			openedImages.value = new Set([...openedImages.value, image.name])
+		}
+		// Silent completion (design §2): a polite sr-only status, no toast --
+		// browsing must not nag -- announced once per image per visit.
+		if (response?.updated && !announcedCredits.has(image.name)) {
+			announcedCredits.add(image.name)
+			creditAnnouncement.value = __('Image credited')
+		}
+	} catch {
+		// Quiet: the sub-row stays unchecked and the next opening retries.
+	}
+}
+
+watch(lightboxIndex, (index) => {
+	// Opening the lightbox on an image IS opening that image -- click, deep
+	// link or arrow-key navigation all land here and all count the same way.
+	if (index === null) return
+	recordImageOpened(images.value[index])
+})
+
+watch(
+	() => [images.value, route.query.image],
+	() => {
+		// The checklist's deep link (?image=<File name>) opens the lightbox on
+		// exactly that image, which records its own completion above.
+		if (lightboxIndex.value !== null || !images.value.length) return
+		const raw = route.query.image
+		const target = Array.isArray(raw) ? raw[0] : raw
+		if (!target) return
+		const index = images.value.findIndex((image) => image.name === target)
+		if (index >= 0) lightboxIndex.value = index
+	},
+	{ immediate: true }
+)
+
 watch(
 	found,
 	(lookup, previous) => {
@@ -335,6 +434,7 @@ watch(
 		images.value = [...(lookup.folder.images ?? [])]
 		queue.value = []
 		lightboxIndex.value = null
+		loadHomeworkState()
 	},
 	{ immediate: true }
 )

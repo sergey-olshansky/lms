@@ -9,6 +9,7 @@
   "lesson",
   "quiz",
   "assignment",
+  "folder",
   "course",
   "label",
   "path"
@@ -20,7 +21,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Source Type",
-   "options": "Lesson\nQuiz\nAssignment"
+   "options": "Lesson\nQuiz\nAssignment\nFolder"
   },
   {
    "depends_on": "eval:doc.source_type == 'Lesson'",
@@ -43,6 +44,13 @@
    "fieldtype": "Link",
    "label": "Assignment",
    "options": "LMS Assignment"
+  },
+  {
+   "depends_on": "eval:doc.source_type == 'Folder'",
+   "fieldname": "folder",
+   "fieldtype": "Link",
+   "label": "Folder",
+   "options": "Course Folder"
   },
   {
    "fieldname": "course",

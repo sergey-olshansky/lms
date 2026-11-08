@@ -11,6 +11,7 @@
   "lesson",
   "lesson_snapshot",
   "quiz",
+  "folder",
   "label",
   "path",
   "column_break_0",
@@ -26,7 +27,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Requirement Type",
-   "options": "Open Lesson\nPass Quiz\nOpen Assignment\nReference"
+   "options": "Open Lesson\nPass Quiz\nOpen Assignment\nOpen Folder\nReference"
   },
   {
    "fieldname": "course",
@@ -71,6 +72,14 @@
    "fieldtype": "Link",
    "label": "Reference Assignment",
    "options": "LMS Assignment"
+  },
+  {
+   "depends_on": "eval:doc.requirement_type == 'Open Folder'",
+   "fieldname": "folder",
+   "fieldtype": "Link",
+   "label": "Folder",
+   "options": "Course Folder",
+   "search_index": 1
   },
   {
    "fieldname": "label",
