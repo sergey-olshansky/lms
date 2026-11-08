@@ -747,6 +747,36 @@ def _extract_page_plan_tasks(pdf_path, pages, entries, candidate, accepted, inst
 				))
 		if digitized_pages and _digitized_band_conflicts(accepted, candidate):
 			raise AIExtractionInvalid(_("AI bound two different printed tasks to one PDF fragment and recovery failed. Validated tasks are kept; retry resumes unfinished tasks."))
+		# Quiz↔transcription validation: the produced quiz must still match the
+		# page transcription it was built from. Vision transcription varies
+		# between runs (quiz 14, 2026-11-07): option lists and anchor slices that
+		# no longer cover the transcribed task block pass every structural guard,
+		# so the affected tasks are re-extracted once with a visible warning; a
+		# persistent mismatch fails cause-named instead of importing defective
+		# fragments silently.
+		if digitized_pages:
+			for _repair in range(1):
+				violations = _transcription_validation_violations(accepted, digitized_pages)
+				if not violations:
+					break
+				for number in sorted(violations):
+					report_progress(_("AI: task {0} does not match its page transcription ({1}); re-extracting it").format(number, violations[number]))
+					accepted.pop(number, None)
+					_checkpoint_delete(checkpoint, str(number))
+				drain(deque(
+					(entry, 1, _("The produced task did not match its page transcription: {0} Quote the start anchor from the task's own printed marker line, the end anchor at the task's closing line, and copy every printed option verbatim.").format(violations[entry["number"]]))
+					for entry in entries if entry["number"] in violations
+				))
+			violations = _transcription_validation_violations(accepted, digitized_pages)
+			if violations:
+				raise AIExtractionInvalid(
+					_("The extracted tasks did not match the digitized page transcription: {0}. Validated tasks are kept; retry resumes unfinished tasks.").format("; ".join(f"task {number}: {violations[number]}" for number in sorted(violations)))
+				)
+		missing = [entry["number"] for entry in entries if entry["number"] not in accepted]
+		if missing:
+			raise AIExtractionInvalid(
+				_("The page plan listed {0} tasks but only {1} were extracted ({2}). Validated tasks are kept; retry resumes unfinished tasks.").format(len(entries), len(accepted), ", ".join(f"[{number}]" for number in missing))
+			)
 	finally:
 		pool.shutdown(wait=True, cancel_futures=True)
 	return str(plan.get("title") or candidate.get("title") or pdf_path.stem)[:140], [accepted[n] for n in sorted(accepted)]
@@ -957,6 +987,10 @@ def _validate_ai_tasks(result, pdf_path, candidate, require_review=True, allow_e
 				options = [f"{match.group(1)}) " + text[match.end() : matches[index + 1].start() if index + 1 < len(matches) else len(text)].strip() for index, match in enumerate(matches)]
 				raw_correct_options = [int(digit) for digit in answer_digits]
 				break
+		# Deterministic option hygiene: vision transcription of scanned option
+		# rows can leak the printed «1) …» numbering into copied texts, which the
+		# quiz UI would then duplicate (quiz 14, 2026-11-07: tasks 6/22/32).
+		options = _strip_leaked_option_numbering(options)
 		if options and (
 			len(options) < 2 or len(options) > 10
 			or any(not option or len(option) > 2000 for option in options)
@@ -978,6 +1012,11 @@ def _validate_ai_tasks(result, pdf_path, candidate, require_review=True, allow_e
 			frappe.throw(
 				_("AI did not find a usable set of questions and answers in this PDF."),
 				frappe.ValidationError,
+			)
+		placeholders = _placeholder_literals_in(question, *options)
+		if placeholders:
+			raise AIExtractionInvalid(
+				_("AI returned placeholder text ({0}) instead of printed content for task {1}.").format(", ".join(placeholders), number)
 			)
 		seen_numbers.add(number)
 		validated.append({
@@ -1408,12 +1447,131 @@ def _digitized_band_conflicts(accepted: dict, candidate: dict) -> set[int]:
 	return conflicts
 
 
+def _strip_leaked_option_numbering(options: list[str]) -> list[str]:
+	"""Drop printed option numbering that duplicates the option's own index.
+
+	Vision transcription of a scanned option row can leak the printed
+	«1) …» … «6) …» numbering into the copied option text (quiz 14, 2026-11-07:
+	tasks 6/22/32 stored «1) Сероводород»), duplicating the numbering the quiz
+	UI itself renders. The prefix is removed deterministically only when its
+	number equals the option's position, so content is never invented,
+	reordered or emptied.
+	"""
+	stripped: list[str] = []
+	for index, option in enumerate(options, start=1):
+		text = str(option or "")
+		match = LEAKED_OPTION_NUMBER_RE.match(text)
+		if match and int(match.group(1)) == index and text[match.end():].strip():
+			stripped.append(text[match.end():].strip())
+		else:
+			stripped.append(text.strip())
+	return stripped
+
+
+def _placeholder_literals_in(*texts) -> list[str]:
+	"""Placeholder literals (dummy5, dummy6 …) found in the given texts.
+
+	Intermittent vision output sometimes substitutes untranscribed option
+	rows with placeholder tokens, which then leak into question texts, options
+	and the stored image alt (quiz 14, 2026-11-07: task 29 alt contained
+	«dummy5) Li₂SO₃»). Any hit is a defect, never printable content.
+	"""
+	found: set[str] = set()
+	for text in texts:
+		found.update(match.group(0).lower() for match in PLACEHOLDER_LITERAL_RE.finditer(str(text or "")))
+	return sorted(found)
+
+
+def _printed_option_list(text) -> list | None:
+	"""A source-proven printed option list ``1) … N)`` inside one text span."""
+	matches = list(re.finditer(r"(?<!\w)([1-9])\)\s*", str(text or "")))
+	if len(matches) < 2 or [int(match.group(1)) for match in matches] != list(range(1, len(matches) + 1)):
+		return None
+	return matches
+
+
+def _transcription_band_expectation(digitized_text: str, region: dict, expected_number: int):
+	"""Transcription-derived full-block band for one digitized task region.
+
+	The task's own printed block runs from its ``[N]`` marker line down to the
+	line before the next printed marker. Mapping those line indexes with the
+	same even line distribution the crop binder uses yields the fragment the
+	transcription itself says the task occupies. ``None`` when the
+	transcription carries no usable block structure (single line, no own
+	marker, no following marker); a missing expectation never fails an import.
+	"""
+	lines = digitized_text.rstrip("\n").split("\n")
+	if len(lines) < 2 or not any(line.strip() for line in lines):
+		return None
+	marker_line = next((
+		index for index, line in enumerate(lines)
+		if (marker := PRINTED_TASK_MARKER_RE.search(line)) and int(marker.group(1)) == expected_number
+	), None)
+	if marker_line is None:
+		return None
+	next_marker_line = next((
+		index for index in range(marker_line + 1, len(lines))
+		if PRINTED_TASK_MARKER_RE.search(lines[index])
+	), None)
+	if next_marker_line is None:
+		return None
+	page_height = float(region.get("page_height") or 0.0)
+	if page_height <= 0:
+		return None
+	line_height = page_height / len(lines)
+	pad = min(line_height * 0.75, 12.0)
+	return (max(0.0, marker_line * line_height - pad), min(page_height, next_marker_line * line_height + pad))
+
+
+def _transcription_validation_violations(accepted: dict, digitized_pages: dict) -> dict[int, str]:
+	"""Per-task inconsistencies between the produced quiz and its transcription.
+
+	Structural guards already validate printed numbers and crop distinctness;
+	this catches the run-specific vision variance they cannot see (quiz 14,
+	2026-11-07): extracted option lists that no longer match the transcribed
+	printed options, and fragment bands that no longer cover the
+	transcription's own task block (cut-off tops, drifted boundaries).
+	Returns ``{import number: cause}``; a task without a derivable expectation
+	is never reported, so content is never invented to repair one.
+	"""
+	violations: dict[int, str] = {}
+	for number, task in accepted.items():
+		printed = int(task.get("source_number", number))
+		if task.get("options"):
+			for region in task.get("source_regions", []):
+				if region.get("kind") != "task":
+					continue
+				matches = _printed_option_list(region.get("text"))
+				if matches and len(matches) != len(task["options"]):
+					violations[number] = _("task {0} prints {1} answer options but {2} were extracted").format(f"[{printed}]", len(matches), len(task["options"]))
+					break
+		if number in violations:
+			continue
+		for region in task.get("source_regions", []):
+			if region.get("kind") != "task" or "bbox" not in region:
+				continue
+			page_text = digitized_pages.get(region.get("page_number"))
+			if page_text is None:
+				continue
+			expectation = _transcription_band_expectation(str(page_text), region, printed)
+			if not expectation:
+				continue
+			line_height = float(region.get("page_height") or 0.0) / len(str(page_text).rstrip("\n").split("\n"))
+			actual = float(region["bbox"][3]) - float(region["bbox"][1])
+			if abs(actual - (expectation[1] - expectation[0])) > max(6.0, line_height * 0.5):
+				violations[number] = _("task {0}: its fragment band does not cover the transcribed task block").format(f"[{printed}]")
+				break
+	return violations
+
+
 def _digitized_norm_word(word: str) -> str:
 	"""Case- and ё/е-insensitive word form for digitized-text anchoring."""
 	return word.replace("ё", "е").replace("Ё", "Е").casefold()
 
 
 PRINTED_TASK_MARKER_RE = re.compile(r"\*{0,2}\[(\d{1,4})\]\*{0,2}")
+LEAKED_OPTION_NUMBER_RE = re.compile(r"^\s*(\d{1,2})\)\s*")
+PLACEHOLDER_LITERAL_RE = re.compile(r"\bdummy\d+\b", re.IGNORECASE)
 
 
 def _printed_numbers_in(text) -> set[int]:
@@ -1945,15 +2103,26 @@ def import_pdf_trainer(
 		quiz = _create_quiz({"header": header}, source_folder, task_number_range, show_answers)
 		quiz_name = quiz.name
 		for task in tasks:
+			# Final hygiene gate: validation already strips leaked option numbering
+			# and rejects placeholder literals, but a reused checkpoint from an
+			# earlier defective run can still carry them, so the saved quiz is
+			# guarded once more at the last point before writing (quiz 14, 2026-11-07).
+			placeholders = _placeholder_literals_in(task.get("question"), *(task.get("options") or []))
+			if placeholders:
+				frappe.throw(
+					_("The imported quiz would contain AI placeholder text ({0}). Nothing was imported; please retry the import.").format(", ".join(placeholders)),
+					frappe.ValidationError,
+				)
+			options = _strip_leaked_option_numbering([str(option) for option in (task.get("options") or [])])
 			image_file = _store_task_image(crops[int(task["number"])], quiz.name, int(task["number"]))
 			created_file_names.append(image_file.name)
 			question_data = {
 				"doctype": "LMS Question", "question": _ai_question_html(task, image_file.file_url),
-				"type": "Choices" if task["options"] else "User Input",
+				"type": "Choices" if options else "User Input",
 			}
-			if task["options"]:
+			if options:
 				question_data["multiple"] = int(len(task["correct_options"]) > 1)
-				for index, option in enumerate(task["options"], start=1):
+				for index, option in enumerate(options, start=1):
 					question_data[f"option_{index}"] = option
 					question_data[f"is_correct_{index}"] = int(index in task["correct_options"])
 			else:
