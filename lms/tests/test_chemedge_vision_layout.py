@@ -1,12 +1,15 @@
-"""Vision-anchored crop layouts for digitized scans (task 44 fix round 2).
+"""Crop layouts for digitized scans (task 44; fix round 3: deterministic ink alignment).
 
 Reproduces the owner-observed mis-cuts (Telegram #1702, 2026-11-08: «все
-задания нарезаны неправильно»): transcription-line arithmetic drifts whenever
-the model's line structure does not match the rendered page. The layout
-anchors cut between real ink rows instead, fall back to the arithmetic with
-a visible warning when untrustworthy, and a fallback crop that fails the
-vision sanity check fails the import cause-named. Fixtures are synthetic;
-the private source PDF is never copied.
+задания нарезаны неправильно»): transcription-line arithmetic drifted, and
+the round-2 vision anchoring still sliced ~15% of crops per cold import
+because the vision layout is nondeterministic — an anchor off by one text
+line snapped to the neighbouring ink row inside the ~52 px window and
+passed every structural check. Fix round 3 sources bands from the ink
+census deterministically (task blocks + transcription marker alignment);
+vision is only a twice-read, sub-line-snapped, per-edge-verified fallback,
+and every digitized crop gets the final vision check. Fixtures are
+synthetic; the private source PDF is never copied.
 """
 
 import tempfile
@@ -74,6 +77,42 @@ RAW_ANCHORS = [
 	{"number": 7, "top": 560 / HEIGHT_PX, "x0": 0.06},
 ]
 
+# Realistic single-column scan page (staged ОГЭ-14 geometry scaled onto the
+# synthetic 1000×1400 canvas): a corner page number, four 11-row task blocks
+# (8 px gaps inside a task, 40 px between tasks, marker lines at the 100 px
+# text margin) and a one-row footer. The transcription carries 10 non-empty
+# lines per task — the wrapped stem merges, exactly the round-3 invariant
+# (block rows − transcribed lines ∈ [0, 2]).
+def _scan_task_rows(top):
+	rows, start = [], top
+	for _index in range(11):
+		rows.append([start, start + 12, 100, 620])
+		start += 20
+	return rows
+
+SCAN_ROWS = [[10, 30, 800, 950]]
+for _block_top in (100, 360, 620, 880):
+	SCAN_ROWS.extend(_scan_task_rows(_block_top))
+SCAN_ROWS.append([1200, 1250, 110, 900])
+
+def _scan_task_lines(number):
+	return [
+		f"[{number}] Выберите два исходных вещества — сокращённое ионное уравнение",
+		"Ba²⁺ + SO₄²⁻ = BaSO₄",
+		"1) Вещество один", "2) Вещество два", "3) Вещество три",
+		"4) Вещество четыре", "5) Вещество пять", "6) Вещество шесть",
+		"Запишите номера выбранных ответов.",
+		"|  |  |",
+	]
+
+SCAN_TEXT = "\n".join(
+	["Страница 2", ""]
+	+ [line for number in (4, 5, 6, 7) for line in _scan_task_lines(number) + [""]]
+	+ ["Школа химии", "и Андрея Степенина"]
+)
+SCAN_ANCHORS = {4: 100, 5: 360, 6: 620, 7: 880}
+SCAN_BAND_5 = (0.0, 360 * 0.5 - importer.LAYOUT_ANCHOR_PAD_PT, 500.0, (572 + importer.LAYOUT_ANCHOR_PAD_PT / 0.5) * 0.5)
+
 # Anchor band expectations (pt): task 6 runs from its marker row (100 px)
 # down to the printed answer cells (530 px); task 7 stops before the page
 # footer at the block's closing whitespace gap.
@@ -87,6 +126,9 @@ class _FakeBox:
 
 	def getbbox(self):
 		return self._bbox
+
+	def save(self, buffer, **kwargs):
+		buffer.write(b"fake-strip-bytes")
 
 
 class FakeInkImage:
@@ -284,16 +326,23 @@ class VisionLayoutTestCase(unittest.TestCase):
 
 	# --- layout fetch: vision outage and garbage fall back with a warning --
 
-	def page_layouts_for(self, raw, render_rows=INK_ROWS, text=DIGITIZED_PAGE):
+	def page_layouts_for(self, raw, render_rows=INK_ROWS, text=DIGITIZED_PAGE, edge_side_effect=None):
 		"""Fetch layouts with a controlled vision payload (a list means "always return this")."""
 		if isinstance(raw, list):
 			side = lambda *args, **kwargs: raw  # noqa: E731
 		else:
 			side = raw
+		if edge_side_effect is None:
+			edge = lambda *args, **kwargs: (True, "")  # noqa: E731
+		elif isinstance(edge_side_effect, tuple):
+			edge = lambda *args, **kwargs: edge_side_effect  # a tuple is a constant verdict
+		else:
+			edge = edge_side_effect
 		opened = make_opened_pdf()
 		with patch.object(importer.pdfplumber, "open", return_value=opened), \
 			patch.object(importer, "_page_render", return_value=FakeInkImage(render_rows)), \
-			patch.object(importer, "_vision_page_layout", side_effect=side) as vision:
+			patch.object(importer, "_vision_page_layout", side_effect=side) as vision, \
+			patch.object(importer, "_vision_band_edge_verdict", side_effect=edge):
 			layouts = importer._digitized_page_layouts(Path("scan.pdf"), {1: text}, "prefix")
 			cached_call_count = vision.call_count
 			again = importer._digitized_page_layouts(Path("scan.pdf"), {1: text}, "prefix")
@@ -301,7 +350,7 @@ class VisionLayoutTestCase(unittest.TestCase):
 
 	def test_digitized_page_layouts_build_and_cache_a_valid_layout(self):
 		layouts, again, calls = self.page_layouts_for(RAW_ANCHORS)
-		self.assertEqual(calls, 1)
+		self.assertEqual(calls, 2)  # the layout is read twice and both reads must agree
 		self.assertIsNotNone(layouts[1])
 		self.assertEqual(again, layouts)  # checkpointed: no new vision calls
 		self.assertFalse(any("fall back to transcription line estimates" in message for message in self.warnings()))
@@ -323,6 +372,113 @@ class VisionLayoutTestCase(unittest.TestCase):
 		layouts, _again, _calls = self.page_layouts_for([], render_rows=[[156, 479, 215, 1163]], text="Ключ ответов | 1 | 2 | 3 | без печатных заданий")
 		self.assertEqual(layouts, {1: None})
 		self.assertFalse(any("fall back to transcription line estimates" in message for message in self.warnings()))
+
+	# --- deterministic ink alignment sources the bands (fix round 3) -------
+
+	def deterministic_scan_layout(self, rows=SCAN_ROWS, text=SCAN_TEXT):
+		"""Deterministic layout for the scan fixture — no vision involved."""
+		return importer._deterministic_page_layout(rows, text, PAGE_WIDTH, PAGE_HEIGHT, WIDTH_PX, HEIGHT_PX)
+
+	def test_deterministic_ink_alignment_sources_bands_without_vision(self):
+		# The root-cause regression: the vision layout moved between runs and
+		# sliced text; the ink census + transcription markers are exact.
+		layout = self.deterministic_scan_layout()
+		self.assertIsNotNone(layout)
+		self.assertEqual(layout["source"], "ink-census")
+		anchors = {anchor["number"]: anchor["row_top"] for column in layout["columns"] for anchor in column["anchors"]}
+		self.assertEqual(anchors, SCAN_ANCHORS)
+		self.assertTrue(importer._is_page_layout(layout))
+
+	def test_vision_layout_is_not_consulted_when_ink_alignment_succeeds(self):
+		# Vision becomes a cross-check only: an off-by-one-line report cannot
+		# move a band once the ink census aligned the page (census-vs-anchor
+		# conflicts resolve for the deterministic source).
+		opened = make_opened_pdf()
+		with patch.object(importer.pdfplumber, "open", return_value=opened), \
+			patch.object(importer, "_page_render", return_value=FakeInkImage(SCAN_ROWS)), \
+			patch.object(importer, "_vision_page_layout", side_effect=AssertionError("vision must not be called")):
+			layouts = importer._digitized_page_layouts(Path("scan.pdf"), {1: SCAN_TEXT}, "prefix")
+		self.assertIsNotNone(layouts[1])
+		self.assertEqual(layouts[1]["source"], "ink-census")
+		anchors = {anchor["number"]: anchor["row_top"] for column in layouts[1]["columns"] for anchor in column["anchors"]}
+		self.assertEqual(anchors, SCAN_ANCHORS)
+		self.assertFalse(any("fall back to transcription line estimates" in message for message in self.warnings()))
+
+	def test_deterministic_bands_cut_between_real_task_blocks(self):
+		bound = self.bind(5, "[5] Выберите два исходных вещества", "Запишите номера выбранных ответов.", self.deterministic_scan_layout(), text=SCAN_TEXT)
+		self.assertEqual(bound["band_source"], "layout")
+		self.assertEqual(tuple(round(value, 4) for value in bound["bbox"]), tuple(round(value, 4) for value in SCAN_BAND_5))
+		# The crop edges sit inside the whitespace around task 5's own block:
+		# above, task 4's last ink row ends at 312 and task 5's marker starts at
+		# 360; below, task 5's last ink ends at 572 and task 6's marker starts
+		# at 620 — no foreign row can be sliced by either edge.
+		self.assertGreaterEqual(bound["bbox"][1] * 2, 312)
+		self.assertLessEqual(bound["bbox"][1] * 2, 360)
+		self.assertGreaterEqual(bound["bbox"][3] * 2, 572)
+		self.assertLessEqual(bound["bbox"][3] * 2, 620)
+
+	def test_deterministic_alignment_rejects_count_mismatches(self):
+		# A transcription marker set that disagrees with the ink blocks must
+		# never guess: the page falls back (fail-closed).
+		self.assertIsNone(self.deterministic_scan_layout(text=SCAN_TEXT.replace("[6] Выберите", "Выберите")))
+
+	def test_answer_table_rows_are_not_marker_lines(self):
+		self.assertEqual(importer._transcription_marker_lines("[1] | [2] | [3] | [4] | [5]\n35 | 15 | 15 | 46 | 36"), [])
+		self.assertIsNone(self.deterministic_scan_layout(text="[1] | [2] | [3]\n35 | 15 | 46"))
+
+	def test_nondeterministic_vision_reads_disagree_and_fall_back(self):
+		# Double-call agreement: two reads of the same page moving by a whole
+		# line cannot pick one; the page keeps the arithmetic fallback whose
+		# crops then get the per-crop vision check.
+		opened = make_opened_pdf()
+		shifted = [{"number": 6, "top": 140 / HEIGHT_PX, "x0": 0.06}, {"number": 7, "top": 560 / HEIGHT_PX, "x0": 0.06}]
+		with patch.object(importer.pdfplumber, "open", return_value=opened), \
+			patch.object(importer, "_page_render", return_value=FakeInkImage(INK_ROWS)), \
+			patch.object(importer, "_vision_page_layout", side_effect=[RAW_ANCHORS, shifted]), \
+			patch.object(importer, "_vision_band_edge_verdict", side_effect=AssertionError("no layout should survive")):
+			layouts = importer._digitized_page_layouts(Path("scan.pdf"), {1: DIGITIZED_PAGE}, "prefix")
+		self.assertEqual(layouts, {1: None})
+		self.assertTrue(any("disagreed" in message for message in self.warnings()))
+
+	def test_snap_onto_an_indented_row_is_rejected(self):
+		# An anchor one line off snapping onto an indented (options) row is
+		# not a marker row: the margin shape check rejects the whole layout.
+		rows = [row[:] for row in INK_ROWS]
+		rows[2] = [140, 170, 260, 930]  # the row below the marker is indented
+		self.assertIsNone(self.layout(raw=[
+			{"number": 6, "top": 140 / HEIGHT_PX, "x0": 0.06},
+			{"number": 7, "top": 560 / HEIGHT_PX, "x0": 0.06},
+		], rows=rows))
+
+	def test_negative_edge_verdict_rejects_the_vision_layout(self):
+		# Per-band-edge verification: a boundary verdict that stays negative
+		# drops the layout; the page falls back to the checked arithmetic.
+		layouts, _again, _calls = self.page_layouts_for(RAW_ANCHORS, edge_side_effect=(False, "boundary slices the marker line"))
+		self.assertEqual(layouts, {1: None})
+		self.assertTrue(any("fall back to transcription line estimates" in message for message in self.warnings()))
+
+	def test_negative_edge_verdict_resnaps_to_the_true_marker_row(self):
+		edge_calls = [(False, "no [6] marker at the boundary"), (True, ""), (True, ""), (True, "")]
+		layouts, _again, _calls = self.page_layouts_for(
+			[{"number": 6, "top": 140 / HEIGHT_PX, "x0": 0.06}, {"number": 7, "top": 560 / HEIGHT_PX, "x0": 0.06}],
+			edge_side_effect=edge_calls,
+		)
+		self.assertIsNotNone(layouts[1])
+		anchors = {anchor["number"]: anchor["row_top"] for column in layouts[1]["columns"] for anchor in column["anchors"]}
+		self.assertEqual(anchors, {6: 100, 7: 560})
+
+	def test_revalidation_realigns_or_drops_an_ink_census_layout(self):
+		layout = self.deterministic_scan_layout()
+		page_layouts = {1: layout}
+		# A fresh transcription losing a marker cannot re-align: dropped.
+		importer._revalidate_page_layouts(page_layouts, {1: SCAN_TEXT.replace("[6] Выберите", "Выберите")}, [1])
+		self.assertIsNone(page_layouts[1])
+		self.assertTrue(any("re-digitized transcription" in message for message in self.warnings()))
+		# A benign re-digitization re-aligns to the same anchors and keeps them.
+		fresh = {1: self.deterministic_scan_layout()}
+		importer._revalidate_page_layouts(fresh, {1: SCAN_TEXT.replace("Вещество один", "Вещество первое")}, [1])
+		self.assertIsNotNone(fresh[1])
+		self.assertEqual(fresh[1]["source"], "ink-census")
 
 	def test_revalidation_after_redigitize_drops_a_stale_layout(self):
 		layout = self.layout()
@@ -361,28 +517,40 @@ class VisionLayoutTestCase(unittest.TestCase):
 			handle.flush()
 			with patch.object(importer, "_vision_crop_verdict", return_value=(False, "the last option row is cut off")) as verdict:
 				with self.assertRaises(importer.AIExtractionInvalid) as raised:
-					importer._verify_unanchored_digitized_crops([self.crop_task("transcription-lines")], {6: Path(handle.name)})
-		verdict.assert_called_once()
+					importer._verify_digitized_task_crops([self.crop_task("transcription-lines")], {6: Path(handle.name)})
+		self.assertEqual(verdict.call_count, 2)  # one negative is retried; two agree on the defect
 		message = str(raised.exception)
 		self.assertIn("[6]", message)
 		self.assertIn("last option row is cut off", message)
 		self.assertIn("Nothing was imported", message)
 
-	def test_clean_crop_verdict_and_anchored_crops_are_not_verified(self):
+	def test_clean_crops_and_anchored_bands_are_verified_once(self):
+		# Fix round 3: every digitized crop is verified — anchored bands too;
+		# no band source is above the final check.
 		with tempfile.NamedTemporaryFile(suffix=".png") as handle:
 			handle.write(b"crop-bytes")
 			handle.flush()
 			with patch.object(importer, "_vision_crop_verdict", return_value=(True, "")) as verdict:
-				importer._verify_unanchored_digitized_crops([self.crop_task("transcription-lines")], {6: Path(handle.name)})
-				importer._verify_unanchored_digitized_crops([self.crop_task("layout")], {6: Path(handle.name)})
-		self.assertEqual(verdict.call_count, 1)
+				importer._verify_digitized_task_crops(
+					[self.crop_task("layout"), self.crop_task("transcription-lines")],
+					{6: Path(handle.name), 7: Path(handle.name)},
+				)
+		self.assertEqual(verdict.call_count, 2)
+
+	def test_transient_negative_verdict_is_retried_before_proceeding(self):
+		with tempfile.NamedTemporaryFile(suffix=".png") as handle:
+			handle.write(b"crop-bytes")
+			handle.flush()
+			with patch.object(importer, "_vision_crop_verdict", side_effect=[(False, "noise"), (True, "")]) as verdict:
+				importer._verify_digitized_task_crops([self.crop_task("layout")], {6: Path(handle.name)})
+		self.assertEqual(verdict.call_count, 2)
 
 	def test_verification_outage_warns_but_never_guesses(self):
 		with tempfile.NamedTemporaryFile(suffix=".png") as handle:
 			handle.write(b"crop-bytes")
 			handle.flush()
 			with patch.object(importer, "_vision_crop_verdict", side_effect=importer.AIUnavailable("offline")):
-				importer._verify_unanchored_digitized_crops([self.crop_task("transcription-lines")], {6: Path(handle.name)})
+				importer._verify_digitized_task_crops([self.crop_task("transcription-lines")], {6: Path(handle.name)})
 		self.assertTrue(any("could not be verified" in message for message in self.warnings()))
 
 	# --- end to end: the drain binds anchored bands -------------------------
