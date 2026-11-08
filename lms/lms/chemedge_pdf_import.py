@@ -604,18 +604,24 @@ def _digitized_page_layouts(pdf_path: Path, digitized_pages: dict, checkpoint) -
 						raw = future.result()
 					except AIUnavailable:
 						raw = None
-					layout = None
-					if raw is not None:
-						try:
-							page = pdf.pages[number - 1]
-							layout = _validated_page_layout(raw, rows, str(digitized_pages.get(number) or ""), float(page.width), float(page.height), int(width_px), int(height_px))
-						except Exception:
-							layout = None
-					cached[number] = layout
-					if raw is None:
-						report_progress(_("AI: page {0} task anchors could not be read from the scan ({1}); its crops fall back to transcription line estimates").format(number, "vision unavailable"))
-					elif layout is None:
-						report_progress(_("AI: page {0} task anchors did not match the printed page; its crops fall back to transcription line estimates").format(number))
+					page_text = str(digitized_pages.get(number) or "")
+					if raw is not None and not raw and not _printed_numbers_in(page_text):
+						# A marker-less page (answer tables, covers) has nothing
+						# to anchor and no crops to cut: no fallback warning.
+						cached[number] = None
+					else:
+						layout = None
+						if raw is not None:
+							try:
+								page = pdf.pages[number - 1]
+								layout = _validated_page_layout(raw, rows, page_text, float(page.width), float(page.height), int(width_px), int(height_px))
+							except Exception:
+								layout = None
+						cached[number] = layout
+						if raw is None:
+							report_progress(_("AI: page {0} task anchors could not be read from the scan ({1}); its crops fall back to transcription line estimates").format(number, "vision unavailable"))
+						elif layout is None:
+							report_progress(_("AI: page {0} task anchors did not match the printed page; its crops fall back to transcription line estimates").format(number))
 					report_progress(_("AI: anchoring scanned page task layouts"), sum(1 for page in digitized_pages if page in cached), len(digitized_pages))
 		for number in digitized_pages:
 			value = cached.get(number)

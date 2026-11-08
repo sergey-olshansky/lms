@@ -284,7 +284,7 @@ class VisionLayoutTestCase(unittest.TestCase):
 
 	# --- layout fetch: vision outage and garbage fall back with a warning --
 
-	def page_layouts_for(self, raw, render_rows=INK_ROWS):
+	def page_layouts_for(self, raw, render_rows=INK_ROWS, text=DIGITIZED_PAGE):
 		"""Fetch layouts with a controlled vision payload (a list means "always return this")."""
 		if isinstance(raw, list):
 			side = lambda *args, **kwargs: raw  # noqa: E731
@@ -294,9 +294,9 @@ class VisionLayoutTestCase(unittest.TestCase):
 		with patch.object(importer.pdfplumber, "open", return_value=opened), \
 			patch.object(importer, "_page_render", return_value=FakeInkImage(render_rows)), \
 			patch.object(importer, "_vision_page_layout", side_effect=side) as vision:
-			layouts = importer._digitized_page_layouts(Path("scan.pdf"), {1: DIGITIZED_PAGE}, "prefix")
+			layouts = importer._digitized_page_layouts(Path("scan.pdf"), {1: text}, "prefix")
 			cached_call_count = vision.call_count
-			again = importer._digitized_page_layouts(Path("scan.pdf"), {1: DIGITIZED_PAGE}, "prefix")
+			again = importer._digitized_page_layouts(Path("scan.pdf"), {1: text}, "prefix")
 		return layouts, again, cached_call_count
 
 	def test_digitized_page_layouts_build_and_cache_a_valid_layout(self):
@@ -317,6 +317,12 @@ class VisionLayoutTestCase(unittest.TestCase):
 		layouts, _again, _calls = self.page_layouts_for([{"number": 6, "top": 0.08}])
 		self.assertEqual(layouts, {1: None})
 		self.assertTrue(any("did not match the printed page" in message for message in self.warnings()))
+
+	def test_marker_less_page_needs_no_anchors_and_no_warning(self):
+		# The answer-key table page: no printed task markers, nothing to crop.
+		layouts, _again, _calls = self.page_layouts_for([], render_rows=[[156, 479, 215, 1163]], text="Ключ ответов | 1 | 2 | 3 | без печатных заданий")
+		self.assertEqual(layouts, {1: None})
+		self.assertFalse(any("fall back to transcription line estimates" in message for message in self.warnings()))
 
 	def test_revalidation_after_redigitize_drops_a_stale_layout(self):
 		layout = self.layout()
