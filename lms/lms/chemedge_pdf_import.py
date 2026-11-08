@@ -861,7 +861,11 @@ def _digitized_page_layouts(pdf_path: Path, digitized_pages: dict, checkpoint) -
 			report_progress(_("AI: anchoring scanned page task layouts"), anchored_so_far(), len(digitized_pages))
 
 	# Phase B — twice-read, sub-line-snapped, edge-verified vision fallback.
-	def read_vision_page(number: int) -> None:
+	# Workers never touch frappe state: frappe.local is thread-local and not
+	# bound on pool threads (report_progress there raises "object is not
+	# bound"), so a worker returns its outcome and the owning thread settles
+	# the cache entry and reports progress.
+	def read_vision_page(number: int):
 		page_text = str(digitized_pages.get(number) or "")
 		raw, layout = None, None
 		failure = "vision unavailable"
@@ -888,7 +892,12 @@ def _digitized_page_layouts(pdf_path: Path, digitized_pages: dict, checkpoint) -
 			raw, layout = None, None
 		except Exception:
 			layout = None
-		if raw is not None and not raw and not _printed_numbers_in(page_text):
+		quiet = raw is not None and not raw and not _printed_numbers_in(page_text)
+		return layout, quiet, failure
+
+	def settle_vision_page(number: int, result) -> None:
+		layout, quiet, failure = result
+		if quiet:
 			# A marker-less page (answer tables, covers) has nothing to
 			# anchor and no crops to cut: no fallback warning.
 			cached[number] = None
@@ -912,8 +921,8 @@ def _digitized_page_layouts(pdf_path: Path, digitized_pages: dict, checkpoint) -
 					index += 1
 				done, _waiting = wait(futures, return_when=FIRST_COMPLETED)
 				for future in done:
-					futures.pop(future)
-					future.result()
+					number = futures.pop(future)
+					settle_vision_page(number, future.result())
 		finally:
 			pool.shutdown(wait=True, cancel_futures=True)
 	for number in digitized_pages:
