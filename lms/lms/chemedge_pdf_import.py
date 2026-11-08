@@ -1986,6 +1986,55 @@ def _bind_digitized_regions(task, pdf_path, digitized_pages, page_layouts=None):
 			)
 
 
+def _band_inside_foreign_blocks(band: tuple[float, float, float, float], layout: dict, own_number) -> tuple[float, float, float, float] | None:
+	"""Trim a band so it crosses no foreign anchored marker's printed block.
+
+	Context regions keep the transcription arithmetic band, but that band is
+	line-approximate: quoting a neighbouring task's stem can map its rows into
+	the crop (observed in fix-round-3 run 2: task [2]'s context region leaked
+	task [1]'s rows and the final crop verdict failed the import). On a page
+	with a trusted layout every anchored marker row is physical truth, so any
+	band is clipped at the foreign block boundaries — a context region can then
+	never include another task's printed rows. ``None`` when nothing survives.
+	"""
+	try:
+		scale = float(layout["page_height"]) / float(layout["height_px"])
+	except (KeyError, TypeError, ZeroDivisionError, ValueError):
+		return band
+	anchors = sorted(
+		((int(anchor["number"]), int(anchor["row_top"])) for column in layout.get("columns") or [] for anchor in column.get("anchors") or []),
+		key=lambda item: item[1],
+	)
+	if not anchors:
+		return band
+	rows = layout.get("rows") or []
+	tops = [row_top for _number, row_top in anchors]
+	top, bottom = float(band[1]), float(band[3])
+	original_center = (top + bottom) / 2
+	last_block_top = None
+	for number, row_top in anchors:
+		if number == own_number:
+			continue
+		following = [later for later in tops if later > row_top]
+		limit = min(following) if following else (max((row[1] for row in rows), default=row_top + 1) + 1)
+		block_rows = [row for row in rows if row_top <= row[0] < limit]
+		block_bottom = (max((row[1] for row in block_rows), default=row_top + 1)) * scale
+		block_top = row_top * scale
+		if top < block_bottom and bottom > block_top:
+			last_block_top = block_top
+			if original_center >= (block_top + block_bottom) / 2:
+				top = max(top, block_bottom + 1.0)
+			else:
+				bottom = min(bottom, block_top - 1.0)
+	if bottom <= top + 1.0:
+		# The band sat entirely inside a foreign task's block: the region
+		# quotes only another task's content and contributes nothing — an
+		# empty strip in the neighbouring whitespace keeps the crop clean.
+		strip_top = max(0.0, (last_block_top if last_block_top is not None else float(band[1])) - 2.0)
+		top, bottom = strip_top, strip_top + 1.0
+	return (band[0], top, band[2], bottom)
+
+
 def _resolve_digitized_region(region: dict, digitized_text: str, page, expected_number=None, layout=None) -> dict:
 	span = _digitized_slice_span(
 		digitized_text, str(region.get("start") or ""), str(region.get("end") or ""),
@@ -2005,6 +2054,11 @@ def _resolve_digitized_region(region: dict, digitized_text: str, page, expected_
 	if band is None:
 		band = _digitized_task_band(digitized_text, span, page, expected_number)
 		band_source = "transcription-lines"
+	if band is not None and layout is not None and (region.get("kind") != "task" or type(expected_number) is int):
+		# No composed crop may cross another task's printed block (fix round 3:
+		# a context region quoting task [1] leaked its rows into task [2]'s crop
+		# and the final verdict failed the import — now the clip is structural).
+		band = _band_inside_foreign_blocks(band, layout, expected_number if region.get("kind") == "task" else None)
 	return {
 		**region,
 		"bbox": band or (0.0, 0.0, float(page.width), float(page.height)),

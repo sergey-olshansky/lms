@@ -417,6 +417,28 @@ class VisionLayoutTestCase(unittest.TestCase):
 		self.assertGreaterEqual(bound["bbox"][3] * 2, 572)
 		self.assertLessEqual(bound["bbox"][3] * 2, 620)
 
+	def test_context_region_inside_its_corridor_keeps_its_band(self):
+		layout = self.deterministic_scan_layout()
+		bound = self.bind(4, "Страница 2", "Страница 2", layout, kind="context", text=SCAN_TEXT)
+		self.assertEqual(bound["band_source"], "transcription-lines")
+		self.assertAlmostEqual(bound["bbox"][1], 0.0, places=4)
+		self.assertLess(bound["bbox"][3], 100 * 0.5)  # stays above task 4's marker row
+
+	def test_context_region_quoting_a_foreign_task_contributes_nothing(self):
+		# Fix round 3, run-2 incident: a context region quoting the previous
+		# task's option lines mapped that task's rows into the crop and the
+		# final verdict failed the import. On a layout page the context band is
+		# clipped into the whitespace corridor between the foreign block and
+		# the next marker, so the composed crop contains no foreign rows.
+		layout = self.deterministic_scan_layout()
+		bound = self.bind(5, "1) Вещество один", "3) Вещество три", layout, kind="context", text=SCAN_TEXT)
+		self.assertEqual(bound["band_source"], "transcription-lines")
+		# Task 4's block ends at 312 px = 156 pt; task 5's marker row starts at
+		# 360 px = 180 pt — the band lives strictly inside that empty corridor.
+		self.assertGreaterEqual(bound["bbox"][1], 312 * 0.5)
+		self.assertLessEqual(bound["bbox"][3], 360 * 0.5)
+		self.assertLess(bound["bbox"][3] - bound["bbox"][1], 360 * 0.5 - 312 * 0.5)
+
 	def test_deterministic_alignment_rejects_count_mismatches(self):
 		# A transcription marker set that disagrees with the ink blocks must
 		# never guess: the page falls back (fail-closed).
