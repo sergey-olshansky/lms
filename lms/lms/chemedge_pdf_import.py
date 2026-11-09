@@ -1,4 +1,7 @@
-"""Audit parsed trainers, then plan page-scoped AI extraction when needed."""
+"""Audit parsed trainers, then plan page-scoped AI extraction when needed.
+
+Release marker: task idea-oge14-split-fix (pipeline-tag consistency; code identical to f026a9b5).
+"""
 
 from __future__ import annotations
 
