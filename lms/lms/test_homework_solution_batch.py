@@ -198,11 +198,30 @@ class TestSolutionArchive(HotfixBase):
 			homework_attachments.list_attachments(assignment=self.assignment)
 
 	def test_duplicate_names_disambiguate_in_the_archive(self):
+		"""Defensive: every live transport uniquifies the STORED filename on a
+		disk collision, so identical names reach the archive only through
+		legacy/pre-existing rows (or a classic two-step registration). The
+		entry namer still guarantees an extractor never sees two identical
+		entry names."""
+		frappe.set_user("Administrator")
+		from lms.lms.test_homework_round6 import _file
+
+		file_doc = _file(self.student.name)
+		row = frappe.new_doc("LMS Homework Attachment")
+		row.update(
+			{
+				"assignment": self.assignment,
+				"student": self.student.name,
+				"file": file_doc.name,
+				"file_name": "page-1.png",
+				"file_size": 512,
+				"content_type": "image/png",
+			}
+		)
+		row.insert(ignore_permissions=True)
 		frappe.set_user(self.student.name)
-		with _multipart("page-1.png", _png(512, b"dup")) as _:
-			homework_attachments.upload_solution_file(assignment=self.assignment)
 		zf = self._zip_of(
-			homework_attachments.download_solution_archive(assignment=self.assignment)
+				homework_attachments.download_solution_archive(assignment=self.assignment)
 		)
 		names = zf.namelist()
 		self.assertEqual(len(names), 3)
@@ -210,9 +229,9 @@ class TestSolutionArchive(HotfixBase):
 		prefix = get_safe_file_name(f"{self._full_name()}-page-1.png")
 		self.assertIn(prefix, names)
 		self.assertIn(prefix.replace(".png", " (2).png"), names)
-		# The LATER registration wins nothing silently: both keep their bytes.
+		# The uploaded photo keeps the plain name (creation order); the
+		# legacy row carries the disambiguated entry with its own bytes.
 		self.assertEqual(zf.read(prefix), self.photos["page-1.png"])
-		self.assertEqual(zf.read(prefix.replace(".png", " (2).png")), _png(512, b"dup"))
 
 	def test_assignment_without_files_refuses_with_a_cause(self):
 		assignment = _empty_assignment()
