@@ -33,18 +33,29 @@ straight to ``upload_solution_file`` (single request: private storage,
 verification and quota registration commit together, and frappe's
 website-user mime allowlist on the generic endpoint stops gating homework
 solutions).
+
+Card #45 (batch + archive): the same transport now carries a BATCH of phone
+photos -- the uploader posts the picked files sequentially, ONE request per
+file, so every per-file verdict (ownership, container, quota) stays atomic
+and a mid-batch quota overflow leaves the files that already fit registered.
+Teachers and privileged staff additionally get ``download_solution_archive``:
+one streamed zip of the assignment's solution attachments, entry-named
+``<student_name>-<original filename>``.
 """
 
 from __future__ import annotations
 
 import mimetypes
 import os
+import shutil
+import tempfile
 import zipfile
 
 import frappe
 from frappe import _
 from frappe.core.doctype.file.utils import get_safe_file_name
 from frappe.utils import cint
+from werkzeug.wrappers import Response
 
 # E03.3: one number, one meaning -- 100 * 1024 * 1024 bytes, total per
 # solution (card #45: raised from 20 MiB so a batch of phone photos fits).
@@ -430,6 +441,118 @@ def delete_attachment(attachment: str) -> dict:
 		if not frappe.flags.in_test:
 			frappe.db.commit()
 	return {"deleted": True, "state": _public_state(row.assignment)}
+
+# --- Solution photo archive (card #45) -------------------------------------------
+#
+# One ZIP of every attachment row of the assignment, for the same readers the
+# panel serves (the assignment's student, its teacher, and privileged staff).
+# The archive is a VIEW over the stored bytes, never a new quota: its total is
+# the quota that already gated every registration. The ZIP is assembled into a
+# disk-backed spool and streamed as a werkzeug Response (frappe v16 passes a
+# Response returned by a whitelisted method straight through), so the worker's
+# memory stays bounded no matter how close the solution sits to 100 MiB.
+
+_ARCHIVE_CHUNK = 1024 * 1024
+_SPOOL_MEM_LIMIT = 1024 * 1024
+
+
+def _archive_entry_name(student_name: str, file_name: str, used: set) -> str:
+	"""`<student_name>-<original filename>`, disambiguated when the same
+	student uploaded two files with the same name (an extractor must never
+	face two identical entry names)."""
+	base = get_safe_file_name(f"{student_name}-{file_name or 'file'}") or "file"
+	if base not in used:
+		used.add(base)
+		return base
+	stem, dot, ext = base.rpartition(".")
+	if not dot:
+		stem, ext = base, ""
+	index = 2
+	while True:
+		candidate = f"{stem} ({index}){dot}{ext}" if ext else f"{stem} ({index})"
+		if candidate not in used:
+			used.add(candidate)
+			return candidate
+		index += 1
+
+
+def _copy_into_zip(zf: zipfile.ZipFile, entry: str, file_doc) -> None:
+	"""Write ONE file's bytes into the archive without holding them (or the
+	whole archive) in memory: the on-disk private file streams chunk-by-chunk;
+	files whose bytes are not on disk (defensive path) fall back to the
+	platform's own reader."""
+	disk_path = None
+	try:
+		disk_path = file_doc.get_full_path()
+	except Exception:
+		disk_path = None
+	if disk_path and os.path.isfile(disk_path):
+		with zf.open(entry, "w") as dst, open(disk_path, "rb") as src:
+			shutil.copyfileobj(src, dst, _ARCHIVE_CHUNK)
+	else:
+		content = file_doc.get_content()
+		if isinstance(content, str):
+			content = content.encode("utf-8", "surrogateescape")
+		zf.writestr(entry, content)
+
+
+@frappe.whitelist()
+def download_solution_archive(assignment: str | None = None) -> Response:
+	"""Stream every solution attachment of the assignment as ONE zip.
+
+	Gate: the assignment's own student, its teacher, or privileged staff --
+	exactly the readers `list_attachments` serves (the row hooks keep guarding
+	the private bytes underneath). Entries are named
+	`<student_name>-<original filename>` so a teacher downloading several
+	solutions can tell them apart."""
+	doc = _assignment_for_student(assignment or "")
+	state = _quota_state(assignment)
+	if not state["rows"]:
+		frappe.throw(
+			_("This solution has no attached files to archive."), frappe.ValidationError
+		)
+	student_name = frappe.utils.get_fullname(doc.student) or doc.student
+	files = frappe.get_all(
+		"File",
+		filters={"name": ("in", [row.file for row in state["rows"]] or ["__none__"])},
+		fields=["name", "file_name", "file_url", "is_private"],
+	)
+	by_name = {row.name: frappe.get_doc("File", row.name) for row in files}
+
+	spool = tempfile.SpooledTemporaryFile(max_size=_SPOOL_MEM_LIMIT)
+	try:
+		with zipfile.ZipFile(spool, "w", zipfile.ZIP_STORED) as zf:
+			used_names: set = set()
+			for row in state["rows"]:
+				file_doc = by_name.get(row.file)
+				if not file_doc:
+					continue
+				entry = _archive_entry_name(student_name, row.file_name or file_doc.file_name or "file", used_names)
+				_copy_into_zip(zf, entry, file_doc)
+		spool.seek(0)
+
+		def _chunks():
+			try:
+				while True:
+					chunk = spool.read(_ARCHIVE_CHUNK)
+					if not chunk:
+						break
+					yield chunk
+			finally:
+				spool.close()
+
+		title = (getattr(doc, "title", None) or assignment or "homework")
+		filename = get_safe_file_name(f"{title} - {student_name}.zip") or "solution.zip"
+		response = Response(_chunks(), mimetype="application/zip")
+		response.headers.add("Content-Disposition", "attachment", filename=filename)
+		# The archive is a view over already-quota-gated bytes: no new budget.
+		response.headers.add("X-Homework-Solution-Archive", assignment)
+		# If the stream is closed early or never iterated, the spool still dies.
+		response.call_on_close(spool.close)
+		return response
+	except Exception:
+		spool.close()
+		raise
 
 
 def _public_state(assignment: str) -> dict:

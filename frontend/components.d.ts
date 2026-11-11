@@ -186,6 +186,7 @@ declare module 'vue' {
     SidebarSection: typeof import('./src/components/SidebarSection.vue')['default']
     SidebarSettings: typeof import('./src/components/Settings/Sidebar/SidebarSettings.vue')['default']
     SkeletonLoader: typeof import('./src/components/SkeletonLoader.vue')['default']
+    SolutionBatchUploader: typeof import('./src/components/SolutionBatchUploader.vue')['default']
     StudentLessonSidebar: typeof import('./src/components/StudentLessonSidebar.vue')['default']
     SubmissionsPage: typeof import('./src/components/Submissions/SubmissionsPage.vue')['default']
     TabbedDetailPage: typeof import('./src/components/Layouts/pages/TabbedDetailPage.vue')['default']

@@ -158,6 +158,7 @@ const UPLOADER_TAGS = [
 	'<RichTextEditor',
 	'<ImageUploader',
 	'<ImageUploadField',
+	'<SolutionBatchUploader',
 ]
 
 /**
@@ -165,7 +166,13 @@ const UPLOADER_TAGS = [
  * privacy, each forwards the caller's `is_private`. Their call sites are
  * scanned too, read off `is_private` instead of `uploadArgs`.
  */
-const FORWARDING_TAGS = ['<ImageUploader', '<ImageUploadField']
+// SolutionBatchUploader (card #45) forwards its caller's is-private into the
+// FileUploadHandler transport exactly like the two image controls.
+const FORWARDING_TAGS = [
+	'<ImageUploader',
+	'<ImageUploadField',
+	'<SolutionBatchUploader',
+]
 
 const openingTags = (source: string): string[] =>
 	UPLOADER_TAGS.flatMap((marker) => openingTagsFor(source, marker))
