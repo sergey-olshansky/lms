@@ -1,6 +1,6 @@
 <template>
 	<!-- Task #35 (E03): the student's image/document solution files for THIS
-	     assignment, up to 20 MB TOGETHER. The server re-checks ownership,
+	     assignment, up to 100 MB TOGETHER (card #45). The server re-checks ownership,
 	     privateness, supported type and quota on every registration. -->
 	<section
 		v-if="detail.data?.name"

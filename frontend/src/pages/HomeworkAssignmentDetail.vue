@@ -731,7 +731,7 @@ const nextStepHint = computed(() => {
 				)
 	return data.require_solution
 		? __(
-				'Complete the checklist, attach your solution files below and press Send for review. All solution files together may use up to 20 MB.'
+				'Complete the checklist, attach your solution files below and press Send for review. All solution files together may use up to 100 MB.'
 			)
 		: __(
 				'Open each material and pass the required tests. When every item is complete, the work is sent to the teacher automatically.'

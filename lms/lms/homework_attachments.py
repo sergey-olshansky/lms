@@ -6,7 +6,8 @@ R01-R03, R05, R08-R10; hotfix 2026-10-25 after the first production release).
 
 A student may attach common image, document, PDF, and text formats to THEIR
 assignment -- bound to the (assignment, student) pair, never to the shared
-template, with a quota of 20 MiB TOTAL across every file of that solution.
+template, with a quota of 100 MiB TOTAL across every file of that solution
+(raised from 20 MiB by owner directive, card #45).
 Supported extensions are explicitly listed; known containers are checked
 against their real signatures, so a renamed mismatch is refused.
 
@@ -45,8 +46,9 @@ from frappe import _
 from frappe.core.doctype.file.utils import get_safe_file_name
 from frappe.utils import cint
 
-# E03.3: one number, one meaning -- 20 * 1024 * 1024 bytes, total per solution.
-ATTACHMENT_QUOTA_BYTES = 20 * 1024 * 1024
+# E03.3: one number, one meaning -- 100 * 1024 * 1024 bytes, total per
+# solution (card #45: raised from 20 MiB so a batch of phone photos fits).
+ATTACHMENT_QUOTA_BYTES = 100 * 1024 * 1024
 
 # Homework solutions accept common image, document, and text formats. Unknown
 # extensions (especially executable formats) are refused. Known containers
