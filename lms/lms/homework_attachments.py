@@ -8,6 +8,8 @@ A student may attach common image, document, PDF, and text formats to THEIR
 assignment -- bound to the (assignment, student) pair, never to the shared
 template, with a quota of 100 MiB TOTAL across every file of that solution
 (raised from 20 MiB by owner directive, card #45).
+Release marker 2026-11-12 (card #45): docs-only line minting a fresh build
+revision; no product behavior changed.
 Supported extensions are explicitly listed; known containers are checked
 against their real signatures, so a renamed mismatch is refused.
 
