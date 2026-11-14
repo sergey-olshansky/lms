@@ -206,7 +206,7 @@
 				v-if="rightPanel === 'bank' && doc?.name"
 				ref="bankPanel"
 				:quizName="quizDetails.doc.name"
-				:initialType="hasOpenEnded ? 'Open Ended' : ''"
+				:initialType="''"
 				:inQuizQuestionNames="questions.map((r) => r.question)"
 				:allowedTypes="allowedQuestionTypesFor(typeRows)"
 				@added="addQuestionsFromBank"

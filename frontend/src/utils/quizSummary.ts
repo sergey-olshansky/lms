@@ -1,4 +1,42 @@
-import type { QuizAttemptRowStatus, QuizQuestionType } from '@/types/quiz'
+import type {
+	QuizAttemptRowStatus,
+	QuizQuestionType,
+	QuizReviewStatus,
+	QuizResultRow,
+} from '@/types/quiz'
+
+// Card #47: the attempt's place in the two-pass review, resolved the way the
+// server's report renderer resolves it. A stored status wins; attempts sat
+// before the field existed derive it honestly from their rows (an open
+// answer without a recorded verdict still awaits one); an attempt with no
+// open-answer question never awaited anyone, so it has no chip to show.
+export const submissionReviewStatus = (
+	doc: { review_status?: string | null; result?: QuizResultRow[] } | null | undefined
+): QuizReviewStatus | null => {
+	if (!doc) return null
+	const rows = doc.result || []
+	const openRows = rows.filter((row) => row.question_type == 'Open Ended')
+	if (!openRows.length) return null
+	if (doc.review_status === 'pending_review' || doc.review_status === 'final') {
+		return doc.review_status
+	}
+	return openRows.every((row) => row.graded) ? 'final' : 'pending_review'
+}
+
+// The chip label carries the state in words, so the colour is never the only
+// cue — the same wording the PDF/email header line uses (#33/#34).
+export const reviewStatusLabel = (status: QuizReviewStatus): string =>
+	status === 'final'
+		? __('Checked by teacher')
+		: __('Awaiting teacher review')
+
+// The one-line banner under the chip on the learner's result screen: the
+// preliminary figure is explicitly preliminary, and the teacher's pass is
+// what makes it final.
+export const reviewStatusBanner = (status: QuizReviewStatus): string =>
+	status === 'final'
+		? __('Your teacher has checked this submission. The result is final.')
+		: __('Preliminary result — the open-answer part awaits your teacher\u2019s review.')
 
 // The quiz card's header line, shared by the learner card and the lesson
 // editor's preview so the two always agree.

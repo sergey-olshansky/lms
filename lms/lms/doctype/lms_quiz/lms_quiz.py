@@ -99,18 +99,17 @@ class LMSQuiz(AuthoredDocument, Document):
 			self.total_marks = sum(cint(question.marks) for question in self.questions)
 
 	def validate_open_ended_questions(self):
-		types = [question.type for question in self.questions]
-		types = set(types)
-
+		"""Two-part quizzes (card #47): Open Ended questions may freely mix
+		with Choices / User Input in one quiz -- the two logical parts are a
+		presentation grouping, not two entities. The one rule that survives the
+		mixing lift is the pre-existing one: live per-answer checking
+		(``show_answers``) is force-disabled whenever the quiz asks an open
+		question, because a written answer has no machine verdict to reveal and
+		the verdicts of the auto part wait for the teacher's second pass anyway.
+		The post-submit report still shows every saved verdict (#27)."""
+		types = {question.type for question in self.questions}
 		if "Open Ended" in types:
-			if len(types) > 1:
-				frappe.throw(
-					_(
-						"If you want open ended questions then make sure each question in the quiz is of open ended type."
-					)
-				)
-			else:
-				self.show_answers = 0
+			self.show_answers = 0
 
 	def autoname(self):
 		if not self.name:
@@ -276,12 +275,30 @@ def submit_quiz(
 	_save_violation_events(submission.name, proctoring["events"])
 	_attach_answer_files(data["answer_files"], submission.name)
 
+	# The solution files the learner staged during the attempt (card #47) ride
+	# along as one bundle bound to the submission. Best effort, exactly like the
+	# violation log above: the graded attempt is already saved, and a binding
+	# hiccup must not cost the learner the attempt.
+	attachment_count = _bind_submission_attachments(quiz, submission.name)
+
 	# The attempt report email (#34) is a side effect of completion, never of
 	# grading: it rides after commit so the queued job reads a submission that
 	# exists, and its failure can never cost the learner their attempt.
 	from lms.lms.doctype.lms_quiz.quiz_attempt_report import enqueue_attempt_report_email
 
 	enqueue_attempt_report_email(submission.name)
+
+	# The auto-checked part's own preliminary figure (card #47): the overall
+	# score/percentage already includes the open part's denominator (its marks
+	# enter the total per the owner decision), while the open rows themselves
+	# earn nothing until the teacher's second pass. The result screen shows this
+	# pair beside the overall line so "preliminary" reads as "part 1 so far".
+	auto_score = 0
+	auto_score_out_of = 0
+	for row in submission.result:
+		if row.question_type != "Open Ended":
+			auto_score += cint(row.marks)
+			auto_score_out_of += cint(row.marks_out_of)
 
 	return {
 		"score": submission.score,
@@ -290,7 +307,29 @@ def submit_quiz(
 		"pass": percentage >= quiz_details.passing_percentage,
 		"percentage": percentage,
 		"is_open_ended": is_open_ended,
+		"review_status": submission.review_status or "",
+		"auto_score": auto_score,
+		"auto_score_out_of": auto_score_out_of,
+		"attachment_count": attachment_count,
 	}
+
+
+def _bind_submission_attachments(quiz: str, submission: str) -> int:
+	"""Bind the member's staged solution files to the attempt that consumed them.
+
+	card #47: files are one optional bundle per submission, uploaded while the
+	attempt is being sat. Binding only stamps the submission link -- the rows,
+	their quota verdicts and their private Files already exist -- so a failure
+	here is logged and the attempt stands, with the files still listed in the
+	member's draft pane for the next try.
+	"""
+	try:
+		from lms.lms.quiz_submission_attachments import bind_draft_attachments
+
+		return bind_draft_attachments(quiz, frappe.session.user, submission)
+	except Exception:
+		frappe.log_error(title=f"Could not bind quiz submission files for {submission}")
+		return 0
 
 
 def _attach_answer_files(file_names: list[str], submission: str) -> None:
@@ -535,8 +574,15 @@ def is_open_ended_submission(submission: str) -> bool:
 	quiz = frappe.db.get_value("LMS Quiz Submission", submission, "quiz")
 	if not quiz:
 		return False
-	question_type = frappe.db.get_value("LMS Quiz Question", {"parent": quiz}, "type")
-	return question_type == "Open Ended"
+	# Any open question makes the attempt wait for a teacher's verdict (card
+	# #47): a mixed quiz's first row is often an auto-checked one, so the
+	# first-row read that served open-ended-only quizzes would clear the
+	# pending flag of a two-part attempt the moment it was sat.
+	return bool(
+		frappe.db.exists(
+			"LMS Quiz Question", {"parent": quiz, "parenttype": "LMS Quiz", "type": "Open Ended"}
+		)
+	)
 
 
 @frappe.whitelist()

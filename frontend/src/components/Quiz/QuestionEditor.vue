@@ -4,10 +4,7 @@
 		:class="padded ? 'px-4 pt-4 pb-1' : ''"
 	>
 		<div class="flex items-center gap-2">
-			<span v-if="typeLocked" :id="typeLockHintId" class="sr-only">
-				{{ typeLockReason }}
-			</span>
-			<Dropdown v-if="!typeLocked" :options="typeMenu">
+			<Dropdown :options="typeMenu">
 				<Button variant="outline">
 					<template #prefix
 						><span :class="[currentType.icon, 'size-4']"
@@ -18,19 +15,6 @@
 					/></template>
 				</Button>
 			</Dropdown>
-			<Button
-				v-else
-				variant="outline"
-				disabled
-				:aria-describedby="typeLockHintId"
-				:title="typeLockReason"
-			>
-				<template #prefix
-					><span :class="[currentType.icon, 'size-4']"
-				/></template>
-				{{ currentType.label }}
-				<template #suffix><span class="lucide-lock size-4" /></template>
-			</Button>
 			<div v-if="marksCustom" ref="marksBoxRef" class="marks-input w-28">
 				<FormControl
 					type="number"
@@ -173,12 +157,9 @@ const allowedTypes = computed(() => {
 	const filtered = QUESTION_TYPES.filter((t) => allowed.includes(t.value))
 	return filtered.length ? filtered : QUESTION_TYPES
 })
-const typeLocked = computed(() => allowedTypes.value.length === 1)
-const typeLockReason = computed(() =>
-	__('A quiz cannot mix Open Ended questions with other question types.')
-)
-// A disabled control fires no tooltip, so the reason is sr-only and tied on with aria-describedby.
-const typeLockHintId = computed(() => `question-type-lock-${props.idPrefix}`)
+// Card #47: every question type is always offered (the two parts of a
+// two-part quiz live in one document), so the type control is a plain
+// menu and there is no lock state left to describe.
 const typeMenu = computed(() =>
 	allowedTypes.value.map((t) => ({
 		label: t.label,

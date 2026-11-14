@@ -95,6 +95,12 @@ vi.mock('frappe-ui', () => {
 		Button: { template: '<button type="button"><slot /></button>' },
 		Breadcrumbs: { template: '<nav />' },
 		Popover: { template: '<div><slot /></div>' },
+		// Card #47: the finish-review confirmation rides the same frappe-ui
+		// Dialog the app uses everywhere; the suite never opens it.
+		Dialog: {
+			props: ['open', 'title', 'actions'],
+			template: '<div v-if="open"><slot /></div>',
+		},
 		Skeleton: { template: '<div><slot /></div>' },
 		Avatar: {
 			props: ['label'],
@@ -126,6 +132,11 @@ vi.mock('@/components/HeaderButton.vue', () => ({
 		template:
 			'<button type="button" data-testid="header-button" @click="$emit(\'click\')">{{ label }}</button>',
 	},
+}))
+// Card #47: the solution-files pane is sidebar furniture for this suite -
+// its own upload flow is covered by its own component contract elsewhere.
+vi.mock('@/components/Assessment/QuizFileAttachments.vue', () => ({
+	default: { template: '<div data-testid="quiz-files-stub" />' },
 }))
 vi.mock('@/components/ShortcutTooltip.vue', () => ({
 	default: { template: '<span><slot /></span>' },
@@ -250,20 +261,28 @@ describe('Quiz submission review', () => {
 		wrapper.unmount()
 	})
 
-	it('keeps the grader hand: pending marks editable, verdicts strict', async () => {
+	it('keeps the grader hand: every row editable, verdicts strict', async () => {
 		const wrapper = render()
 		const inputs = wrapper.findAll('input[type="number"]')
-		// Only the open-ended answer awaits a grade; the checked ones are
-		// figures, not fields.
-		expect(inputs).toHaveLength(1)
-		await inputs[0].setValue('2')
+		// Card #47: a two-part attempt gives the reviewer a field on EVERY
+		// row — the two auto-checked figures of part 1 included, because the
+		// second pass may correct any score, not only the open answer's.
+		expect(inputs).toHaveLength(3)
+		// The open-ended row is part 2's only row; its typed verdict keeps
+		// the task #35 contract (a typed value IS the verdict, 0 included).
+		await inputs[2].setValue('2')
 		expect(state.result[2].marks).toBe('2')
-		// D01: the typed verdict commits through the narrow grading action
-		// once the debounced save fires on unmount.
+		// An auto row's edit is the teacher's override (card #47): the payload
+		// carries the re-derived verdict with it, full marks reading correct.
+		await inputs[1].setValue('1')
+		expect(state.result[1].marks).toBe('1')
+		// D01: the typed verdicts commit through the narrow grading action
+		// once the debounced save fires on unmount — in the order typed.
 		wrapper.unmount()
 		expect(state.grades?.submission).toBe('SUBM-1')
 		expect(state.grades?.grades).toEqual([
 			{ name: state.result[2].name, marks: '2', graded: 1 },
+			{ name: state.result[1].name, marks: '1', graded: 1, is_correct: 1 },
 		])
 	})
 
