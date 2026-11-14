@@ -130,31 +130,25 @@ export function isChoice(uiValue) {
 	return uiValue === 'single' || uiValue === 'multiple'
 }
 
-// The backend rejects a quiz that mixes Open Ended with any other type (LMS
-// Quiz's validate_open_ended_questions). Once a quiz has one, every question
-// added afterward must also be Open Ended, or the very next save throws.
+// The new-question default. Card #47 lifted the old rule that a quiz holding
+// an Open Ended question could take no other type: the two parts of a
+// two-part test live in ONE quiz, so a new row starts on the auto-checked
+// shape and the author switches it to Open Ended where needed.
 export function nextQuestionUiType(existingRows) {
-	const hasOpenEnded = existingRows.some(
-		(row) => toUiType(row) === 'open_ended'
-	)
-	return hasOpenEnded ? 'open_ended' : 'single'
+	return 'single'
 }
 
-// Which types one card may still offer, given the same mixing rule. Only the
-// OTHER rows constrain it: a quiz of one question is always free, because
-// re-typing the single row it has cannot produce a mix.
+// Which types one card may offer. Card #47: every type is always offered --
+// mixing Open Ended (part 2, teacher-checked) with Choices / User Input
+// (part 1, auto-checked) is exactly the two-part quiz format. Kept as a
+// function because the cards, the bank panel and the dialog all still ask
+// the same question of the same rows.
 export function allowedUiTypesFor(rows, editingRowName) {
-	const values = QUESTION_TYPES.map((t) => t.value)
-	const others = (rows || []).filter((row) => row?.name !== editingRowName)
-	if (!others.length) return values
-	const hasOpenEnded = others.some((row) => toUiType(row) === 'open_ended')
-	if (hasOpenEnded) return ['open_ended']
-	return values.filter((value) => value !== 'open_ended')
+	return QUESTION_TYPES.map((t) => t.value)
 }
 
-// The backend `type` values a question may have to be addable to `rows`. The bank
-// filters on that column, and an unfiltered bank stages a row that makes every
-// later save fail.
+// The backend `type` values a question may have to be addable to `rows`. With
+// the mixing rule lifted the bank offers every type for any quiz.
 export function allowedQuestionTypesFor(rows) {
 	return [
 		...new Set(

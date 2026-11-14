@@ -14,7 +14,8 @@
   "marks",
   "marks_out_of",
   "graded",
-  "is_correct"
+  "is_correct",
+  "teacher_override"
  ],
  "fields": [
   {
@@ -77,6 +78,14 @@
    "fieldname": "graded",
    "fieldtype": "Check",
    "label": "Graded"
+  },
+  {
+   "default": "0",
+   "fieldname": "teacher_override",
+   "fieldtype": "Check",
+   "label": "Teacher Override",
+   "read_only": 1,
+   "description": "Card #47: the teacher's second pass overrode the automatic verdict of this row (marks and/or is_correct). Untouched auto rows keep their preliminary marks unchanged."
   }
  ],
  "index_web_pages_for_search": 1,

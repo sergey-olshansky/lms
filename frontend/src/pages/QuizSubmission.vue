@@ -48,6 +48,15 @@
 				</span>
 			</template>
 			<template v-else>
+				<!-- Card #47: the second pass ends here. Pending while any open
+				     answer has no recorded verdict - the endpoint re-checks
+				     that, and the reviewer's authority, server-side. -->
+				<HeaderButton
+					v-if="reviewStatus === 'pending_review'"
+					:label="__('Finish Review')"
+					icon="lucide-check-check"
+					@click="showFinishReview = true"
+				/>
 				<Badge
 					v-if="submissionDetails.isDirty"
 					:label="__('Not Saved')"
@@ -96,7 +105,123 @@
 				     grader's hand: pending marks are editable in place, and the strict
 				     verdicts of the attempt's grading stay exactly as stored. -->
 				<div class="px-5 pb-5 lg:pe-10">
+					<!-- Card #47: the submission's solution-file bundle, exactly
+					     what the open part is graded against. One bundle for the
+					     whole submission; the ZIP rides the reviewer-only
+					     archive endpoint. -->
+					<QuizFileAttachments
+						v-if="hasOpenQuestions"
+						:submission="props.submission"
+						can-archive
+						class="mb-4"
+					/>
+
+					<!-- Card #47: one list of every question, grouped by the two
+					     parts of the test. The teacher sees each task, the
+					     learner's answer and the files together, and may
+					     override the score of ANY row - the auto-checked part
+					     included. Untouched auto rows keep their preliminary
+					     marks; overridden rows are marked in words. -->
+					<template v-if="hasOpenQuestions">
+						<h2 class="mb-2 text-sm-semibold text-ink-gray-7">
+							{{ __('Part 1 · Auto-checked questions') }}
+							<span class="ms-1 font-normal text-ink-gray-5">
+								({{ __('preliminary scores; adjust where needed') }})
+							</span>
+						</h2>
+						<QuizAttemptReport
+							:results="autoRows"
+							:questions-by-name="questionsByName"
+							:can-view-correct-answers="true"
+							:correct-answers="correctAnswers"
+						>
+							<template #marks="{ row, resultRow }">
+								<div class="ms-auto flex shrink-0 items-center gap-1.5">
+									<span
+										v-if="resultRow.teacher_override"
+										class="text-xs font-medium text-ink-amber-6"
+									>
+										{{ __('Adjusted by teacher') }}
+									</span>
+									<span
+										class="text-xs font-medium uppercase tracking-wide text-ink-gray-4 lg:hidden"
+									>
+										{{ __('Marks:') }}
+									</span>
+									<FormControl
+										v-if="!isOwnSubmission"
+										v-model="resultRow.marks"
+										type="number"
+										class="w-20"
+										@update:model-value="() => markAutoRowDirty(resultRow)"
+									/>
+									<span
+										v-else
+										class="text-sm font-medium text-ink-gray-7 lg:w-20 lg:text-end"
+									>
+										{{ row.marks }}
+									</span>
+									<span class="text-sm text-ink-gray-5">
+										/ {{ row.marks_out_of }}
+									</span>
+								</div>
+							</template>
+						</QuizAttemptReport>
+
+						<h2 class="mb-2 mt-6 text-sm-semibold text-ink-gray-7">
+							{{ __('Part 2 · Open-answer tasks') }}
+							<span class="ms-1 font-normal text-ink-gray-5">
+								({{ __('checked by you; a recorded zero is allowed') }})
+							</span>
+						</h2>
+						<QuizAttemptReport
+							:results="openRows"
+							:questions-by-name="questionsByName"
+							:can-view-correct-answers="true"
+							:correct-answers="correctAnswers"
+							include-skipped-open
+						>
+							<template #marks="{ row, resultRow }">
+								<div class="ms-auto flex shrink-0 items-center gap-1.5">
+									<span
+										class="text-xs font-medium uppercase tracking-wide text-ink-gray-4 lg:hidden"
+									>
+										{{ __('Marks:') }}
+									</span>
+									<!-- Task #35 (C01): a typed value IS the verdict --
+									     including a deliberate 0 -- and writes the row's
+									     graded flag in the same edit; clearing the input
+									     takes the verdict back. Card #47: an unanswered
+									     open task stays in this list, because it still
+									     needs the teacher's verdict (a zero included). -->
+									<FormControl
+										v-if="!isOwnSubmission"
+										v-model="resultRow.marks"
+										type="number"
+										class="w-20"
+										@update:model-value="
+											(value) => {
+												resultRow.graded =
+													value === null || value === '' ? 0 : 1
+												markRowDirty(resultRow)
+											}
+										"
+									/>
+									<span
+										v-else
+										class="text-sm font-medium text-ink-gray-7 lg:w-20 lg:text-end"
+									>
+										{{ row.marks }}
+									</span>
+									<span class="text-sm text-ink-gray-5">
+										/ {{ row.marks_out_of }}
+									</span>
+								</div>
+							</template>
+						</QuizAttemptReport>
+					</template>
 					<QuizAttemptReport
+						v-else
 						:results="submissionDetails.doc.result || []"
 						:questions-by-name="questionsByName"
 						:can-view-correct-answers="true"
@@ -109,22 +234,6 @@
 								>
 									{{ __('Marks:') }}
 								</span>
-								<!-- Task #35 (C01): a typed value IS the verdict --
-								     including a deliberate 0 -- and writes the row's
-								     graded flag in the same edit; clearing the input
-								     takes the verdict back. The flag survives the Int
-								     serialization that stores an ungraded answer as 0.
-								     Task #35 (D01): grades travel through the narrow
-								     save_submission_grades action -- plain Course
-								     Creators hold no write on the doctype, so the
-								     generic document save answers them with 403.
-								     R06: the editor is tied to the ROW TYPE, not the
-								     computed verdict -- a typed verdict flips the
-								     chip to correct/incorrect at once, and the field
-								     must survive that to stay editable. Only an
-								     answered open question shows a field (skipped
-								     rows are filtered out of the report); the
-								     grader's own preview submission stays static. -->
 								<FormControl
 									v-if="
 										resultRow.question_type === 'Open Ended' &&
@@ -179,6 +288,37 @@
 						</div>
 						<div class="mt-0.5 text-xs text-ink-gray-5">
 							{{ formatDate(submissionDetails.doc.creation) }}
+						</div>
+						<!-- Card #47: the attempt's review state, in words - the
+						     same chip the learner's surfaces carry, so both sides
+						     read one status. -->
+						<div v-if="reviewStatus" class="mt-1.5">
+							<span
+								class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium"
+								:class="
+									reviewStatus === 'final'
+										? 'bg-surface-green-6 text-ink-green-1'
+										: 'bg-surface-amber-1 text-ink-amber-6'
+								"
+								data-testid="submission-review-status"
+							>
+								<span
+									class="me-1 size-3"
+									:class="
+										reviewStatus === 'final'
+											? 'lucide-check-check'
+											: 'lucide-clock'
+									"
+									aria-hidden="true"
+								/>
+								{{ reviewStatusLabel(reviewStatus) }}
+							</span>
+							<div
+								v-if="reviewStatus === 'final' && submissionDetails.doc.reviewed_on"
+								class="mt-1 text-xs text-ink-gray-5"
+							>
+								{{ formatDate(submissionDetails.doc.reviewed_on) }}
+							</div>
 						</div>
 					</div>
 				</div>
@@ -336,6 +476,59 @@
 			</aside>
 		</div>
 	</PageBody>
+
+	<!-- Card #47: finishing the second pass fixes the final result. The
+	     confirmation names what it means in counts, and the endpoint still
+	     re-validates that every open answer carries a recorded verdict. -->
+	<Dialog
+		v-model:open="showFinishReview"
+		:title="__('Finish review?')"
+		:actions="[
+			{
+				size: 'sm',
+				label: __('Back'),
+				onClick() {
+					showFinishReview = false
+				},
+			},
+			{
+				size: 'sm',
+				label: __('Finish Review'),
+				variant: 'solid',
+				onClick() {
+					finishReview()
+				},
+			},
+		]"
+	>
+		<template #default>
+			<div class="space-y-2" role="status" aria-live="polite">
+				<p class="text-base text-ink-gray-6 leading-5">
+					{{
+						__('Adjusted by hand: {0}. Keeping their preliminary score: {1}.').format(
+							overrideCount,
+							Math.max(autoRows.length - overrideCount, 0)
+						)
+					}}
+				</p>
+				<p class="text-base text-ink-gray-6 leading-5">
+					{{
+						__('Open-answer tasks graded: {0} of {1}.').format(
+							openRows.length - openUngradedCount,
+							openRows.length
+						)
+					}}
+				</p>
+				<p class="text-base text-ink-gray-6 leading-5">
+					{{
+						__(
+							'The result will be fixed as final for the learner. The review cannot be reopened from here.'
+						)
+					}}
+				</p>
+			</div>
+		</template>
+	</Dialog>
 </template>
 
 <script setup>
@@ -345,6 +538,7 @@ import {
 	FormControl,
 	Badge,
 	Avatar,
+	Dialog,
 	Popover,
 	usePageMeta,
 	toast,
@@ -358,12 +552,17 @@ import PageBody from '@/components/Layouts/pages/PageBody.vue'
 import HeaderButton from '@/components/HeaderButton.vue'
 import ShortcutTooltip from '@/components/ShortcutTooltip.vue'
 import QuizAttemptReport from '@/components/Assessment/QuizAttemptReport.vue'
+import QuizFileAttachments from '@/components/Assessment/QuizFileAttachments.vue'
 import {
 	useKeyboardShortcuts,
 	saveShortcut,
 } from '@/composables/useKeyboardShortcuts'
 import { useRouter } from 'vue-router'
 import { sessionStore } from '@/stores/session'
+import {
+	reviewStatusLabel,
+	submissionReviewStatus,
+} from '@/utils/quizSummary'
 
 const { brand } = sessionStore()
 const router = useRouter()
@@ -546,6 +745,75 @@ const isOwnSubmission = computed(
 		submissionDetails.doc?.member === user.data?.name
 )
 
+// --- Card #47: the two-part review of this attempt --------------------------------
+// The review state resolves the way the server's report renderer does: the
+// stored status first, an honest derivation from the rows for attempts sat
+// before the field existed. Null when the attempt never awaited a teacher.
+const reviewStatus = computed(() => submissionReviewStatus(submissionDetails.doc))
+
+const resultRows = computed(() => submissionDetails.doc?.result || [])
+const hasOpenQuestions = computed(() =>
+	resultRows.value.some((row) => row.question_type == 'Open Ended')
+)
+const autoRows = computed(() =>
+	resultRows.value.filter((row) => row.question_type != 'Open Ended')
+)
+const openRows = computed(() =>
+	resultRows.value.filter((row) => row.question_type == 'Open Ended')
+)
+
+// The finish-review dialog's counts: what the teacher changed, what keeps its
+// preliminary verdict, and what still waits for a verdict.
+const overrideCount = computed(
+	() => resultRows.value.filter((row) => row.teacher_override).length
+)
+const openUngradedCount = computed(
+	() => openRows.value.filter((row) => !row.graded).length
+)
+
+// The second pass (card #47): editing an auto row's score IS the override.
+// The verdict chip follows the teacher's mark - full marks reads correct -
+// and the marker rides the payload's shape, not a client-side flag the
+// endpoint would have to trust: touching an objective row is what the server
+// stamps.
+const markAutoRowDirty = (resultRow) => {
+	resultRow.is_correct =
+		Number(resultRow.marks) >= Number(resultRow.marks_out_of ?? 0) ? 1 : 0
+	resultRow.teacher_override = 1
+	markRowDirty(resultRow)
+}
+
+const showFinishReview = ref(false)
+const finalizeResource = createResource({
+	url: 'lms.lms.doctype.lms_quiz_submission.lms_quiz_submission.finalize_submission_review',
+	makeParams() {
+		return { submission: props.submission }
+	},
+})
+const finishReview = () => {
+	if (openUngradedCount.value > 0) {
+		toast.error(
+			__(
+				'Grade every open-answer task first (question {0} of this list still has no verdict).'
+			).format(openUngradedCount.value)
+		)
+		return
+	}
+	finalizeResource.submit(
+		{},
+		{
+			onSuccess() {
+				showFinishReview.value = false
+				toast.success(__('Review finished. The result is final for the learner.'))
+				submissionDetails.reload()
+			},
+			onError(err) {
+				toast.error(err?.messages?.[0] || String(err))
+			},
+		}
+	)
+}
+
 // Task #35 (D01): grades commit through the narrow server action, not the
 // generic document save. Only rows the grader actually touched travel; the
 // endpoint re-checks the reviewer's authority server-side.
@@ -563,10 +831,14 @@ const rowSeq = new Map()
 const markRowDirty = (resultRow) => {
 	const seq = (rowSeq.get(resultRow.name) || 0) + 1
 	rowSeq.set(resultRow.name, seq)
+	// Card #47: an objective row's edit also carries its re-derived verdict;
+	// open rows keep the graded-flag contract of task #35.
+	const isObjective = resultRow.question_type != 'Open Ended'
 	dirtyRows.value.set(resultRow.name, {
 		name: resultRow.name,
 		marks: resultRow.marks ?? 0,
-		graded: resultRow.graded ? 1 : 0,
+		graded: isObjective ? 1 : resultRow.graded ? 1 : 0,
+		is_correct: isObjective ? (resultRow.is_correct ? 1 : 0) : undefined,
 		seq,
 	})
 	autoSave()
@@ -578,7 +850,11 @@ const saveSubmission = (opts = {}) => {
 	gradeResource.submit(
 		{
 			submission: props.submission,
-			grades: batch.map(({ name, marks, graded }) => ({ name, marks, graded })),
+			grades: batch.map(({ name, marks, graded, is_correct }) =>
+				is_correct === undefined
+					? { name, marks, graded }
+					: { name, marks, graded, is_correct }
+			),
 		},
 		{
 			onSuccess() {

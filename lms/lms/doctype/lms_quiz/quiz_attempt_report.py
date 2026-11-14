@@ -149,6 +149,33 @@ def _inline_private_images(html: str) -> str:
 	)
 
 
+def _effective_review_status(doc) -> str | None:
+	"""Card #47: the attempt's place in the two-pass review, or None when
+	nothing about the attempt ever awaits a human (no open-answer question).
+
+	Submissions created after #47 carry the stored ``review_status``; older
+	rows derive it honestly from their rows -- an open answer without a
+	recorded verdict still awaits one, all-graded reads finished -- so reports
+	and emails never show a chip a legacy attempt did not earn."""
+	from frappe.utils import cint
+
+	rows = list(doc.result or [])
+	if not any(row.get("question_type") == "Open Ended" for row in rows):
+		return None
+	if doc.review_status in ("pending_review", "final"):
+		return doc.review_status
+	open_rows = [row for row in rows if row.get("question_type") == "Open Ended"]
+	all_graded = all(cint(row.get("graded")) for row in open_rows)
+	return "final" if all_graded else "pending_review"
+
+
+def review_status_label(status: str) -> str:
+	"""The one wording every surface (report HTML, PDF, email) shares (#47)."""
+	if status == "final":
+		return _("Checked by teacher")
+	return _("Preliminary result — awaiting teacher review")
+
+
 def render_attempt_report_html(doc, correct_answers: dict[str, list[str]] | None = None) -> str:
 	"""The attempt report as one standalone HTML document.
 
@@ -217,6 +244,14 @@ def render_attempt_report_html(doc, correct_answers: dict[str, list[str]] | None
 	]
 	if cint(doc.violation_count):
 		meta += ["&middot;", _("Violations"), str(doc.violation_count)]
+
+	# Card #47: the two-part attempt's review state rides the header of every
+	# report surface (#27 modal reads the same field, #33 PDF, #34 email), so a
+	# learner can never mistake the preliminary auto score for the final one
+	# nor miss that the teacher has finished checking.
+	status = _effective_review_status(doc)
+	if status:
+		meta += ["&middot;", _("Status"), review_status_label(status)]
 
 	if skipped:
 		parts.append(
@@ -419,12 +454,22 @@ def send_attempt_report_email(submission_name: str) -> None:
 	subject = _("New attempt report: {0} — {1}").format(doc.quiz_title, doc.member_name)
 	# The SPA page the teacher grades on, absolute so it survives any mail client.
 	link = get_url() + get_lms_route(f"quiz-submission/{doc.name}")
+	# Card #47: a two-part attempt's automatic score is preliminary by design;
+	# the email says so in words, so the teacher reading only the mail knows the
+	# open part still needs their second pass.
+	status_sentence = ""
+	review_status = _effective_review_status(doc)
+	if review_status == "pending_review":
+		status_sentence = (
+			f"<p><em>{_('The result is preliminary: the open-answer part awaits your review.')}</em></p>"
+		)
 	content = (
 		f"<p>{_('A quiz attempt has been submitted.')}</p>"
 		f"<p>{_('Quiz')}: {frappe.bold(doc.quiz_title)}<br>"
 		f"{_('Member')}: {frappe.bold(doc.member_name)}<br>"
 		f"{_('Score')}: {doc.score} / {doc.score_out_of} ({doc.percentage}%)</p>"
-		f"<p><a href='{link}'>{_('Open the attempt report')}</a></p>"
+		+ status_sentence
+		+ f"<p><a href='{link}'>{_('Open the attempt report')}</a></p>"
 	)
 	try:
 		frappe.sendmail(

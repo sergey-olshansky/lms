@@ -31,4 +31,10 @@ export interface LMSQuizSubmission {
 	passing_percentage: number
 	/**	Quiz Title : Data	*/
 	quiz_title?: string
+	/**	Review Status : Select — Card #47	*/
+	review_status?: string
+	/**	Reviewed By : Link - User — Card #47	*/
+	reviewed_by?: string
+	/**	Reviewed On : Datetime — Card #47	*/
+	reviewed_on?: string
 }

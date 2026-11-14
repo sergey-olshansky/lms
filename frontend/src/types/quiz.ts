@@ -68,6 +68,29 @@ export interface QuizSubmissionResult {
 	percentage: number
 	score: number
 	score_out_of: number
+	/** Card #47: the attempt's place in the two-pass review, plus the
+	 * auto-checked part's own preliminary figure (the open part's marks are
+	 * in score_out_of but earn nothing until the teacher's second pass). */
+	review_status?: QuizReviewStatus
+	auto_score?: number
+	auto_score_out_of?: number
+	attachment_count?: number
+}
+
+/** Card #47: an attempt with open-answer questions is pending_review until
+ * the teacher finishes the second pass, final afterwards (and final from the
+ * start for a quiz without open answers). */
+export type QuizReviewStatus = 'pending_review' | 'final'
+
+/** One solution file of a submission's bundle (card #47), as the attachment
+ * API returns it: metadata plus the File's own PRIVATE url. */
+export interface QuizAttachmentRow {
+	name: string
+	file: string
+	file_name: string
+	file_size: number
+	uploaded_at?: string
+	file_url: string
 }
 
 /** A child row of a submission's result table, the shape `frappe.client.get`
@@ -87,6 +110,9 @@ export interface QuizResultRow {
 	marks?: number
 	marks_out_of?: number
 	graded?: 0 | 1
+	/** Card #47: the teacher's second pass overrode the automatic verdict of
+	 * this row; untouched auto rows keep their preliminary marks. */
+	teacher_override?: 0 | 1
 }
 
 /** The verdict of one graded row of an attempt (#27), as the per-attempt

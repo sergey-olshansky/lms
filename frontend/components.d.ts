@@ -149,6 +149,7 @@ declare module 'vue' {
     QuizAttemptReport: typeof import('./src/components/Assessment/QuizAttemptReport.vue')['default']
     QuizAttemptReportModal: typeof import('./src/components/Assessment/QuizAttemptReportModal.vue')['default']
     QuizBlock: typeof import('./src/components/QuizBlock.vue')['default']
+    QuizFileAttachments: typeof import('./src/components/Assessment/QuizFileAttachments.vue')['default']
     QuizInVideo: typeof import('./src/components/Modals/QuizInVideo.vue')['default']
     QuizStats: typeof import('./src/components/Assessment/QuizStats.vue')['default']
     RavenSettings: typeof import('./src/components/Settings/Raven/RavenSettings.vue')['default']

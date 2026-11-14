@@ -21,7 +21,12 @@
   "result",
   "violation_count",
   "submission_reason",
-  "question_pool"
+  "question_pool",
+  "section_break_review",
+  "review_status",
+  "column_break_review",
+  "reviewed_by",
+  "reviewed_on"
  ],
  "fields": [
   {
@@ -133,6 +138,37 @@
    "label": "Question Pool",
    "read_only": 1,
    "description": "The question names this attempt was OFFERED (task #35 F03): excludes carried credited answers, so the finished attempt's header describes the attempt as it was sat."
+  },
+  {
+   "fieldname": "section_break_review",
+   "fieldtype": "Section Break",
+   "label": "Teacher Review"
+  },
+  {
+   "fieldname": "review_status",
+   "fieldtype": "Select",
+   "options": "pending_review\nfinal",
+   "label": "Review Status",
+   "read_only": 1,
+   "in_standard_filter": 1,
+   "description": "Card #47: pending_review while open-answer tasks await the teacher's second pass; final once the teacher finished the review (an attempt without open answers is final at submission)."
+  },
+  {
+   "fieldname": "column_break_review",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "reviewed_by",
+   "fieldtype": "Link",
+   "label": "Reviewed By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reviewed_on",
+   "fieldtype": "Datetime",
+   "label": "Reviewed On",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,

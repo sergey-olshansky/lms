@@ -40,6 +40,29 @@
 				{{ (row as { score_out_of: number }).score_out_of }}
 			</span>
 			<span v-else-if="column.key === 'percentage'">{{ value }}%</span>
+			<!-- Card #47: the two-part attempt's review state. Empty for
+			     attempts that never awaited a teacher (plain auto-checked
+			     quizzes keep their row exactly as before). -->
+			<span
+				v-else-if="column.key === 'review_status'"
+				class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium"
+				:class="
+					value === 'final'
+						? 'bg-surface-green-6 text-ink-green-1'
+						: 'bg-surface-amber-1 text-ink-amber-6'
+				"
+			>
+				<span
+					class="me-1 size-3"
+					:class="value === 'final' ? 'lucide-check-check' : 'lucide-clock'"
+					aria-hidden="true"
+				/>
+				{{
+					value === 'final'
+						? __('Checked by teacher')
+						: __('Awaiting teacher review')
+				}}
+			</span>
 			<div
 				v-else-if="column.key === 'creation'"
 				class="text-sm text-ink-gray-5"
@@ -226,6 +249,13 @@ const columns = computed<ListColumn[]>(() => [
 		width: 0.5,
 		align: 'center',
 		icon: 'lucide-percent',
+	},
+	{
+		label: __('Review'),
+		key: 'review_status',
+		width: 1,
+		align: 'center',
+		icon: 'lucide-clipboard-check',
 	},
 	{
 		label: __('Submitted On'),

@@ -23,11 +23,35 @@
 		<template #default>
 			<p
 				data-testid="attempt-report-meta"
-				class="mb-4 text-sm text-ink-gray-6"
+				class="mb-2 text-sm text-ink-gray-6"
 			>
 				{{ attempt.creation }} · {{ __('Score') }} {{ attempt.score }} /
 				{{ attempt.score_out_of }} · {{ __('Percentage') }}
 				{{ attempt.percentage }}%
+			</p>
+			<!-- Card #47: the attempt's review state, in words. The learner
+			     reopening an old attempt reads the same status the result
+			     screen carried - preliminary until the teacher finished, the
+			     teacher's check visible afterwards. -->
+			<p v-if="reviewStatus" class="mb-4">
+				<span
+					class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium"
+					:class="
+						reviewStatus === 'final'
+							? 'bg-surface-green-6 text-ink-green-1'
+							: 'bg-surface-amber-1 text-ink-amber-6'
+					"
+					data-testid="attempt-report-review-status"
+				>
+					<span
+						class="me-1 size-3"
+						:class="
+							reviewStatus === 'final' ? 'lucide-check-check' : 'lucide-clock'
+						"
+						aria-hidden="true"
+					/>
+					{{ reviewStatusLabel(reviewStatus) }}
+				</span>
 			</p>
 
 			<QuizAttemptReport
@@ -47,6 +71,10 @@
 import { createResource, Dialog } from 'frappe-ui'
 import { computed, ref, watch } from 'vue'
 import QuizAttemptReport from '@/components/Assessment/QuizAttemptReport.vue'
+import {
+	reviewStatusLabel,
+	submissionReviewStatus,
+} from '@/utils/quizSummary'
 import type {
 	QuizAttempt,
 	QuizQuestionDetails,
@@ -94,6 +122,10 @@ const results = computed<QuizResultRow[] | null>(() => {
 	const value = submissionDoc.data?.result
 	return Array.isArray(value) ? value : null
 })
+
+// Card #47: the same review-state resolution the grading page and the server
+// renderer use - stored status first, honest derivation for older attempts.
+const reviewStatus = computed(() => submissionReviewStatus(submissionDoc.data))
 
 // Answer keys, from the one existing key source. Requested only for viewers
 // the client believes are authorised; the server remains the arbiter

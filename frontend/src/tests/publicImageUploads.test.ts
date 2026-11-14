@@ -291,6 +291,9 @@ const MANIFEST: Record<string, Privacy[]> = {
 	'components/Courses/CourseThumbnailField.vue': ['public', 'public'],
 	// Deliberately not readable by other users.
 	'components/Assignment.vue': ['private', 'private', 'private'],
+	// Card #47: a quiz submission's solution files — private by design, exactly
+	// like the homework solutions they are patterned on.
+	'components/Assessment/QuizFileAttachments.vue': ['private'],
 	'components/Modals/JobApplicationModal.vue': ['private'],
 	'pages/Forms/ChapterForm.vue': ['private'],
 	'components/Notes/Notes.vue': ['private'],

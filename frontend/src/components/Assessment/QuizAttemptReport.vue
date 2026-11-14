@@ -157,6 +157,11 @@ const props = defineProps<{
 	loading?: boolean
 	/** The submission document failed to load. */
 	error?: unknown
+	/** Card #47, the grading page: an open-answer question the learner left
+	 * empty still needs the teacher's verdict (a recorded zero included), so
+	 * the review list keeps those rows instead of filtering them out. Learner
+	 * reports keep the classic answered-only read. */
+	includeSkippedOpen?: boolean
 }>()
 
 const emit = defineEmits<{ retry: [] }>()
@@ -179,7 +184,8 @@ const toReportRow = (number: number, row: QuizResultRow): QuizReportRow => ({
 // Only answered questions belong to the report; the number keeps the row's
 // position within the whole attempt so it matches what the learner sat. The
 // source row rides along so a review page's grading edits write the document,
-// not the display copy.
+// not the display copy. The grading page's one exception (card #47): an
+// unanswered OPEN question stays — it is exactly the row awaiting a verdict.
 const rowsWithSource = computed<{ row: QuizReportRow; source: QuizResultRow }[]>(
 	() => {
 		if (!Array.isArray(props.results)) return []
@@ -188,7 +194,11 @@ const rowsWithSource = computed<{ row: QuizReportRow; source: QuizResultRow }[]>
 				row: toReportRow(index + 1, row),
 				source: row,
 			}))
-			.filter((item) => item.row.status !== 'skipped')
+			.filter(
+				(item) =>
+					item.row.status !== 'skipped' ||
+				(props.includeSkippedOpen && item.source.question_type == 'Open Ended')
+			)
 	}
 )
 
@@ -198,8 +208,11 @@ const rows = computed<QuizReportRow[]>(() =>
 
 const skippedCount = computed(() => {
 	if (!Array.isArray(props.results)) return 0
-	return props.results.filter((row) => attemptRowStatus(row) === 'skipped')
-		.length
+	return props.results.filter(
+		(row) =>
+			attemptRowStatus(row) === 'skipped' &&
+			!(props.includeSkippedOpen && row.question_type == 'Open Ended')
+	).length
 })
 
 // Same palette as the post-submit summary rows: colour echoes the chip's

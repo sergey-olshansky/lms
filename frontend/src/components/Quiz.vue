@@ -98,6 +98,42 @@
 						:attemptsLeft="attemptsLeft"
 					/>
 
+					<!-- Card #47: the two parts of a two-part test, spelled out before
+					     the learner starts — what is checked automatically, what waits
+					     for the teacher, and that solution files attach to the WHOLE
+					     submission. Shown only when the quiz actually has open
+					     questions, so a plain quiz starts exactly as before. -->
+					<div
+						v-if="quizHasOpenQuestions && !attemptsExhausted"
+						class="space-y-1 rounded-6 border border-outline-gray-2 bg-surface-gray-1 p-3"
+						data-testid="quiz-parts-composition"
+					>
+						<div class="text-sm-semibold text-ink-gray-8">
+							{{ __('This test has two parts') }}
+						</div>
+						<p class="text-p-base text-ink-gray-7">
+							{{
+								__(
+									'Part 1 · Auto-checked questions: {0}. Each answer is worth either full marks or zero.'
+								).format(partCounts.auto)
+							}}
+						</p>
+						<p class="text-p-base text-ink-gray-7">
+							{{
+								__(
+									'Part 2 · Open-answer tasks checked by your teacher: {0}.'
+								).format(partCounts.open)
+							}}
+						</p>
+						<p class="text-p-sm text-ink-gray-5">
+							{{
+								__(
+									'You can leave a written answer, attach your solution files to the whole submission, or both. A preliminary score for Part 1 appears right after you finish; the final result is set after your teacher’s review.'
+								)
+							}}
+						</p>
+					</div>
+
 					<div
 						v-if="
 							quiz.data.enable_scheduling &&
@@ -514,6 +550,22 @@
 						</div>
 					</div>
 				</template>
+
+				<!-- Card #47: the solution-files bundle, staged while the attempt is
+				     being sat. One bundle per submission — never per question — and
+				     finishing the quiz only fixes what is already staged, so the
+				     upload happens here, not in one giant submit. -->
+				<QuizFileAttachments
+					v-if="
+						quizHasOpenQuestions &&
+						!preview &&
+						activeQuestion > 0 &&
+						!quizSubmission.data
+					"
+					:quiz="quiz.data.name"
+					editable
+					@state="draftFilesState = $event"
+				/>
 			</div>
 
 			<div v-else>
@@ -560,6 +612,32 @@
 						aria-live="polite"
 						class="space-y-2 rounded-6 border border-outline-gray-2 bg-surface-gray-1 p-3"
 					>
+						<!-- Card #47: the review state of a two-part attempt, in words -
+						     the learner can never mistake the preliminary auto score
+						     for the final one, nor miss that the teacher has checked.
+						     Text + colour + icon, never colour alone. -->
+						<div v-if="resultReviewStatus" class="flex items-center gap-2">
+							<span
+								class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium"
+								:class="
+									resultReviewStatus === 'final'
+										? 'bg-surface-green-6 text-ink-green-1'
+										: 'bg-surface-amber-1 text-ink-amber-6'
+								"
+								data-testid="quiz-review-status"
+							>
+								<span
+									class="me-1 size-3"
+									:class="
+										resultReviewStatus === 'final'
+											? 'lucide-check-check'
+											: 'lucide-clock'
+									"
+									aria-hidden="true"
+								/>
+								{{ reviewStatusLabel(resultReviewStatus) }}
+							</span>
+						</div>
 						<div class="flex items-start gap-2">
 							<span
 								class="lucide-check-circle mt-0.5 size-4 shrink-0 text-ink-gray-6"
@@ -576,10 +654,28 @@
 								}}
 							</p>
 						</div>
-						<p v-if="hasPendingReview" class="ps-6 text-p-base text-ink-gray-6">
-							{{ __('Open-ended answers are pending instructor review.') }}
+						<p
+							v-if="resultReviewStatus === 'pending_review'"
+							class="ps-6 text-p-base text-ink-gray-6"
+						>
+							{{
+								__(
+									'Preliminary result - Part 1 (auto-checked): {0} of {1}. The open-answer part is checked by your teacher; the final score appears after the review.'
+								).format(
+									quizSubmission.data.auto_score ?? quizSubmission.data.score,
+									quizSubmission.data.auto_score_out_of ??
+										quizSubmission.data.score_out_of
+								)
+							}}
 						</p>
 					</div>
+					<!-- Card #47: the submission's file bundle, read-only once the
+					     attempt is finished - exactly what the teacher reviews. -->
+					<QuizFileAttachments
+						v-if="quizHasOpenQuestions && quizSubmission.data?.submission"
+						:submission="quizSubmission.data.submission"
+						class="mt-1"
+					/>
 					<!-- No automatic per-question report on the result screen
 					     (#1102/#1103 item 2): reports open only from the «Report» action
 					     of a history-table row, never on their own after a submission.
@@ -816,6 +912,41 @@
 				<p v-else class="text-base text-ink-gray-6 leading-5">
 					{{ __('All questions have been attempted.') }}
 				</p>
+				<!-- Card #47: what finishing a two-part test means - the parts
+				     with their answered counts, the staged files, and the
+				     preliminary/final distinction in words. -->
+				<div
+					v-if="quizHasOpenQuestions"
+					class="space-y-1.5 rounded-6 border border-outline-gray-2 bg-surface-gray-1 p-3"
+					data-testid="quiz-submit-parts"
+				>
+					<p class="text-p-base text-ink-gray-7">
+						{{
+							__('Part 1 · Auto-checked: answered {0} of {1}').format(
+								partAttemptCounts.autoAnswered,
+								partAttemptCounts.autoTotal
+							)
+						}}
+					</p>
+					<p class="text-p-base text-ink-gray-7">
+						{{
+							__(
+								'Part 2 · Open answers: filled {0} of {1}, files attached: {2}'
+							).format(
+								partAttemptCounts.openAnswered,
+								partAttemptCounts.openTotal,
+								draftFilesCount
+							)
+						}}
+					</p>
+					<p class="text-p-sm text-ink-gray-5">
+						{{
+							__(
+								'After you finish: a preliminary score for Part 1 is set automatically; your files are attached to the whole submission; the final result appears after your teacher’s review. Files cannot be changed after finishing.'
+							)
+						}}
+					</p>
+				</div>
 				<div class="space-y-1.5">
 					<div
 						class="flex h-2.5 rounded-full overflow-hidden bg-surface-gray-3"
@@ -907,7 +1038,8 @@ import OptionRow from '@/components/Assessment/OptionRow.vue'
 import FeedbackBanner from '@/components/Assessment/FeedbackBanner.vue'
 import QuizStats from '@/components/Assessment/QuizStats.vue'
 import QuizAttemptReportModal from '@/components/Assessment/QuizAttemptReportModal.vue'
-import { attemptsLeftLabel, formatQuizSubtitle } from '@/utils/quizSummary'
+import QuizFileAttachments from '@/components/Assessment/QuizFileAttachments.vue'
+import { attemptsLeftLabel, formatQuizSubtitle, reviewStatusLabel } from '@/utils/quizSummary'
 import type {
 	AnswerVerdict,
 	QuizAttempt,
@@ -920,6 +1052,7 @@ import type {
 	SessionUser,
 	StoredViolationRow,
 	ViolationEvent,
+	QuizReviewStatus,
 } from '@/types'
 
 type Answer = string | null | undefined
@@ -1624,10 +1757,64 @@ const attemptDots = computed(() => buildDots(liveDotVerdict))
 // pending-review notice below; the mechanics (score, retry, history) are
 // unchanged.
 
-// Written answers wait for an instructor; the submission's quiz-level flag is
-// the result screen's honest answer (the per-question reading lives in the
-// report modal, which the learner opens from the history table).
-const hasPendingReview = computed(() => !!quizSubmission.data?.is_open_ended)
+// --- Card #47: the two parts of a two-part test -------------------------------
+// The quiz's own composition decides every two-part surface: the composition
+// block on the start card, the solution-files pane during the attempt, the
+// submit dialog's summary and the result screen's review chip. A quiz with
+// no open-answer question shows none of them - it behaves exactly as before.
+const quizHasOpenQuestions = computed(() =>
+	(quiz.data?.questions || []).some(
+		(row: QuizQuestionRow) =>
+			questionsByName.value[row.question]?.type == 'Open Ended'
+	)
+)
+
+const partCounts = computed(() => {
+	let auto = 0
+	let open = 0
+	for (const row of quiz.data?.questions || []) {
+		if (questionsByName.value[row.question]?.type == 'Open Ended') open += 1
+		else auto += 1
+	}
+	return { auto, open }
+})
+
+// The submit dialog's per-part answered counts, over THIS attempt's offered
+// pool (a retake asks only the never-credited questions).
+const partAttemptCounts = computed(() => {
+	let autoTotal = 0
+	let autoAnswered = 0
+	let openTotal = 0
+	let openAnswered = 0
+	questions.value.forEach((row, index) => {
+		const isOpen =
+			questionsByName.value[row.question]?.type == 'Open Ended'
+		const answered = attemptedQuestions.value.includes(index + 1)
+		if (isOpen) {
+			openTotal += 1
+			if (answered) openAnswered += 1
+		} else {
+			autoTotal += 1
+			if (answered) autoAnswered += 1
+		}
+	})
+	return { autoTotal, autoAnswered, openTotal, openAnswered }
+})
+
+// The staged bundle's live shape, fed by the file pane's state events; the
+// submit dialog quotes its row count.
+const draftFilesState = ref<{ rows?: unknown[] } | null>(null)
+const draftFilesCount = computed(() => draftFilesState.value?.rows?.length ?? 0)
+
+// The review state of the attempt whose result is on screen. The submit
+// response carries the server's verdict; the fallback keeps older clients
+// honest. Null for a quiz that never awaited a teacher.
+const resultReviewStatus = computed<QuizReviewStatus | null>(() => {
+	if (!quizSubmission.data || !quizHasOpenQuestions.value) return null
+	const status = quizSubmission.data.review_status
+	if (status === 'pending_review' || status === 'final') return status
+	return quizSubmission.data.is_open_ended ? 'pending_review' : 'final'
+})
 
 const quizSubmission = createResource<QuizSubmissionResult>({
 	url: 'lms.lms.doctype.lms_quiz.lms_quiz.submit_quiz',
@@ -2192,6 +2379,7 @@ const resetQuiz = () => {
 	cameraReady.value = false
 	violationLog.value = []
 	submissionReason.value = ''
+	draftFilesState.value = null
 	populateQuestions()
 	setupTimer()
 }
